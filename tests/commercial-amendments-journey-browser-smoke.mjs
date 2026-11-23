@@ -64,6 +64,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
         if(type!=='Contract'){
           await page.getByLabel('Amended ends on',{exact:true}).fill(version.endsOn);
           await page.getByLabel('Amended budget (decimal)',{exact:true}).fill(budget||workspace.currentTerms.budget);
+          if(type==='Engagement') await page.getByLabel('Budget warning (% used)',{exact:true}).fill('80');
           if(type==='Engagement') await page.getByLabel('Budgeted hours',{exact:true}).fill('42.25');
           await page.getByLabel('Expense budget',{exact:true}).fill(type==='Engagement'?'180.4321':'75.1234');
           if(type==='Engagement') await page.getByLabel('Labor-cost budget',{exact:true}).fill('5200.0125');
@@ -79,7 +80,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
         const path=`${amendmentPrefix}/${type}/${id}${preview?'/preview':''}`;
         const responsePromise=page.waitForResponse(response=>new URL(response.url()).pathname===path&&response.request().method()==='POST');
         await action();const response=await responsePromise;assert.equal(response.status(),status,`real browser ${path}: ${await response.text()}`);
-        const body=response.request().postDataJSON();assert.deepEqual(Object.keys(body).sort(),[...previewFields,...(type==='Engagement'?['laborCostBudget','budgetHours','expenseBudget']:type==='Project'?['expenseBudget']:[]),...(preview?[]:['previewToken'])].sort());
+        const body=response.request().postDataJSON();assert.deepEqual(Object.keys(body).sort(),[...previewFields,...(type==='Engagement'?['laborCostBudget','budgetHours','expenseBudget','budgetWarningPercent']:type==='Project'?['expenseBudget']:[]),...(preview?[]:['previewToken'])].sort());
         assert.equal(body.reason,reason);assert.equal(body.approvalReference,approvalReference);assert.equal(typeof body.budget,'string');
         if(type==='Engagement') assert.equal(body.expenseBudget,'180.4321');
         if(type==='Engagement') assert.equal(body.laborCostBudget,'5200.0125');
@@ -116,6 +117,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       for(const [type,entity] of [['Engagement',roots.engagement],['Project',roots.project]])assert.equal((await amendmentWorkspace(apiRequest,type,entity.id)).currentTerms.contractVersionId,roots.pin,'parent adoption never cascades');
       await prepare('Engagement',roots.engagement.id,v2,'10000.0001');await preview('Engagement',roots.engagement.id);await apply('Engagement',roots.engagement.id);
       const budgetState=await amendmentWorkspace(apiRequest,'Engagement',roots.engagement.id);
+      assert.equal(budgetState.currentTerms.budgetWarningPercent,'80');
       assert.equal(budgetState.currentTerms.budgetHours,'42.25');
       assert.equal(budgetState.history[0].after.terms.budgetHours,'42.25');
       assert.equal(budgetState.currentTerms.expenseBudget,'180.4321');

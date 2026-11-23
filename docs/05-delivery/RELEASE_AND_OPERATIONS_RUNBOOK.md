@@ -828,3 +828,7 @@ Use the scoped engagement amendment to enter the expense budget and review its a
 ### Review unallocated project expense budget
 
 Inspect the engagement expense budget, then the count of projects with an allocation and the remaining amount. Use a project amendment to assign an amount. Before reducing an engagement budget, verify the remaining project allocations and any scheduled changes.
+
+### Review a fixed-fee budget warning
+
+Inspect the engagement’s effective amendment and work-through date. Investigate retained labor costs and verified hours separately. Reconcile incomplete work evidence before treating a below-threshold comparison as complete. To retire a setting, clear the warning field, then preview and approve a later amendment.

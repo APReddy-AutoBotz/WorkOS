@@ -17,7 +17,7 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   const rev=await seedApplicableAmendmentVersion(pool,identities.manager,contract,today);
   await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),rev));
   const ws=await amendmentWorkspace(request,'Engagement',engagement.id);
-  const input=amendmentInput(ws,rev,{endsOn:end,budget:'70',budgetHours:'5.25',effortPolicy:'2'});
+  const input=amendmentInput(ws,rev,{endsOn:end,budget:'70',budgetHours:'5.25',budgetWarningPercent:'90',effortPolicy:'2'});
   const preview='/amendments/Engagement/'+engagement.id+'/preview';
   for (const invalid of [{budgetHours:'0'},{budget:'70.001'},{elapsedTimePolicy:'2'}]) {
     assert.equal((await request(preview,{method:'POST',body:{...input,...invalid}})).status,422);
@@ -85,6 +85,7 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     const exposure=effort.getByRole('region',{name:'Fixed-fee allocation risk'});
     await exposure.getByLabel('Include work through').fill(today);
     await exposure.getByRole('button',{name:'Check allocation risk'}).click();
+    await exposure.getByText('Delivery hours: Below threshold · Labor cost: No approved budget').waitFor();
     const progress=exposure.getByRole('region',{name:'Fixed-fee delivery progress'});
     await progress.getByRole('button',{name:'Inspect approved delivery progress'}).click();
     await progress.getByText('Cumulative effort value: GBP 60').waitFor();
@@ -194,6 +195,8 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     values($1,$2,$3,'Approved',1,1,$4,$5)`,[sheet,commercialFixture.ownerId,addUtcDays(today,7),commercialFixture.organizationId,commercialFixture.legalEntityId]);
   await pool.query("insert into timesheet_entries(timesheet_id,project_id,work_type,work_date,hours,category_code,billable) values($1,$2,'Project Work',$3,1,'BILL',true)",[sheet,project.id,today]);
   assert.equal((await request(transitionPath,{method:'POST',body:approve})).status,409);
+  const incompleteWarning=await request('/engagements/'+engagement.id+'/fixed-fee-risk?through='+today+'&view=budget_warnings');
+  assert.equal(incompleteWarning.body.budgetWarning.effort,'incomplete');
   const incomplete=await get();
   assert.deepEqual([(await live()).revenue.status,(await live()).revenue.remainingRevenue],['incomplete',null]);
   assert.deepEqual([incomplete.report.unresolved,incomplete.report.amount],[1,null]);

@@ -789,3 +789,7 @@ The commercial amendment API and browser journey cover approved decimal expense 
 ### WOS-COM-007 project expense allocation
 
 The commercial amendments React/API/PostgreSQL journey verifies a project expense allocation, over-allocation rejection, scoped roll-up and a parent reduction rejected below existing commitments.
+
+### Fixed-fee effort and labor-cost risk warnings
+
+WOS-COM-007 and WOS-RPT-004. The commercial amendment browser and fixed-fee PostgreSQL journeys cover opt-in configuration, disabled and missing settings, authorization, exact threshold equality, incomplete evidence and future amendments.

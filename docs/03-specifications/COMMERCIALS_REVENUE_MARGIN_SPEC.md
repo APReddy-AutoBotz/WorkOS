@@ -367,3 +367,7 @@ WOS-COM-007. The engagement amendment may specify a nonnegative expense budget i
 ### Project expense allocation within a fixed-fee engagement
 
 WOS-COM-007. Project expense budgets draw on the expense budget in the parent’s adopted terms. Apply the existing exact-decimal sibling reservation rule across current and pending amendments. A parent reduction must still cover its remaining project expense allocations. Report current in-term project allocations by work date. Open and held projects retain their allocation through their approved term.
+
+### Fixed-fee effort and labor-cost warnings
+
+An authorized fixed-fee engagement amendment may set a common warning percentage (1–100 inclusive) for its approved effort and labor-cost budgets. Each metric is evaluated separately. Positive verified usage reaches the warning when usage × 100 is at least budget × percentage, using exact decimals. Any positive usage reaches a zero budget. An absent budget is identified separately. Incomplete evidence below threshold suppresses a favorable result. Omission carries forward the effective setting and explicit disablement applies from the replacement amendment date.
