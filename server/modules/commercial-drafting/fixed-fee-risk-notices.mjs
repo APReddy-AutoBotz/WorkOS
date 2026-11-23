@@ -18,14 +18,9 @@ const policyFields=`id,version,effective_from::text "effectiveFrom",locale,title
   jsonb_build_object('userId',finance_id,'role',finance_role) finance`;
 
 export async function fixedFeeRiskPolicy(client,req,input,audit) {
-  await assertCommercialAuthority(client,req,riskConfigureGrant);
-  const {organizationId,legalEntityId}=req.organizationScope;
-  const scope=[organizationId,legalEntityId,req.params.id];
+  const scope=await requireRiskConfigurationScope(client,req);
+  const [organizationId,legalEntityId]=scope;
   const actor=req.user.sub,role=req.user.activeRole;
-  const access=await client.query(`select 1 from commercial_engagements where organization_id=$1 and legal_entity_id=$2
-    and id=$3 and model='fixed_fee' and rate_candidate_worker_visible($4::jsonb,owner_id)`,
-    [...scope,JSON.stringify({organizationId,legalEntityId,actorId:actor,activeRole:role})]);
-  if (!access.rowCount) fail(404,'RISK_POLICY_UNAVAILABLE','The fixed-fee engagement is unavailable in the current scope.');
   const {rows:[last]}=await client.query(`select ${policyFields} from fixed_fee_risk_notice_policies
     where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by version desc limit 1`,scope);
   if (!input) return {engagementId:req.params.id,latest:last??null};
@@ -52,4 +47,27 @@ export async function fixedFeeRiskPolicy(client,req,input,audit) {
     entityId:id,details:'Versioned engagement notice policy.',oldValue:last?{policyId:last.id}:null,newValue:{policyId:id},source:'Web',
     reason:'Approved recipient configuration and reason retained on the scoped policy.'});
   return {engagementId:req.params.id,latest:saved};
+}
+
+async function requireRiskConfigurationScope(client,req) {
+  await assertCommercialAuthority(client,req,riskConfigureGrant);
+  const {organizationId,legalEntityId}=req.organizationScope;
+  const scope=[organizationId,legalEntityId,req.params.id];
+  const actor=req.user.sub,role=req.user.activeRole;
+  const access=await client.query(`select 1 from commercial_engagements where organization_id=$1 and legal_entity_id=$2
+    and id=$3 and model='fixed_fee' and rate_candidate_worker_visible($4::jsonb,owner_id)`,
+    [...scope,JSON.stringify({organizationId,legalEntityId,actorId:actor,activeRole:role})]);
+  if (!access.rowCount) fail(404,'RISK_POLICY_UNAVAILABLE','The fixed-fee engagement is unavailable in the current scope.');
+  return scope;
+}
+
+export async function fixedFeeRiskDeliveryStatus(client,req) {
+  const scope=await requireRiskConfigurationScope(client,req);
+  const {rows:[scan]}=await client.query(`select through_date::text as "scanDate",failure as "scanFailure"
+    from fixed_fee_risk_scans where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3`,scope);
+  const {rows:events}=await client.query(`select e.metric,e.through_date::text as "through",e.source_id as "sourceAmendmentId",
+    d.attempts,d.failure,d.delivered_at as "deliveredAt",case when d.delivered_at is null then d.next_attempt end as "nextAttempt"
+    from fixed_fee_risk_events e join fixed_fee_risk_dispatch d on d.event_id=e.id
+    where e.organization_id=$1 and e.legal_entity_id=$2 and e.engagement_id=$3 order by e.created_at desc,e.id limit 20`,scope);
+  return {engagementId:req.params.id,scan:scan??null,events};
 }

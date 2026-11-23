@@ -85,7 +85,7 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
           join invoice_draft_occupancies o on o.line_id=l.id where a.id=$1`,[delivery.a.id])).rows;
         const before=await evidence();
         assert.equal(before.length,1);
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['098_wos06_fixed_fee_credit_corrections','099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['098_wos06_fixed_fee_credit_corrections','099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies','108_wos06_fixed_fee_risk_delivery']);
         assert.deepEqual(await evidence(),before);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
         return {...delivery,batchId:batch.id,lineId:line.line.id,policyId:policy.id};

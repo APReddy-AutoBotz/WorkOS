@@ -5,6 +5,7 @@ type Policy = Awaited<ReturnType<typeof commercialDraftingService.riskNoticePoli
 
 export function FixedFeeNoticePolicy({context,engagement,today}:{context:CommercialDraftingContext;engagement:string;today:string}) {
   const [policy,setPolicy]=useState<Policy|undefined>(undefined);
+  const [delivery,setDelivery]=useState<Awaited<ReturnType<typeof commercialDraftingService.riskDeliveryStatus>>|null>(null);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   async function read() {
@@ -13,6 +14,14 @@ export function FixedFeeNoticePolicy({context,engagement,today}:{context:Commerc
       const result=await commercialDraftingService.riskNoticePolicy(engagement,context);
       if (isCommercialDraftingContextCurrent(context)) setPolicy(result.latest);
     } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not load the engagement notice policy.');}
+    finally {setBusy(false);}
+  }
+  async function inspectDelivery() {
+    setBusy(true);setMessage('');setDelivery(null);
+    try {
+      const result=await commercialDraftingService.riskDeliveryStatus(engagement,context);
+      if (isCommercialDraftingContextCurrent(context)) setDelivery(result);
+    } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not load warning delivery status.');}
     finally {setBusy(false);}
   }
   async function save(event:FormEvent<HTMLFormElement>) {
@@ -33,6 +42,16 @@ export function FixedFeeNoticePolicy({context,engagement,today}:{context:Commerc
   }
   return <section aria-label="Budget warning recipients">
     <button type="button" disabled={busy} onClick={()=>void read()}>Review budget warning recipients</button>
+    <button type="button" disabled={busy} onClick={()=>void inspectDelivery()}>Check warning deliveries</button>
+    {delivery && <div aria-label="Warning delivery status">
+      {delivery.scan?.scanFailure && <p>Budget evaluation needs a retry.</p>}
+      {delivery.events.length===0 && <p>No recorded budget alerts.</p>}
+      {delivery.events.map(row=><p key={row.metric+row.sourceAmendmentId}>
+        {row.metric==='effort'?'Delivery hours':'Labor cost'} · {row.through} · {row.deliveredAt?'Delivered '+row.deliveredAt:
+          row.failure==='RECIPIENTS_UNAVAILABLE'?'Check recipient access':row.failure==='POLICY_UNAVAILABLE'?'Configure a notice policy':
+          row.failure?'Delivery needs a retry':'Pending'}{row.nextAttempt && ' · Next attempt '+row.nextAttempt}
+      </p>)}
+    </div>}
     {policy!==undefined && <form key={policy?.id??'new'} onSubmit={save}><fieldset disabled={busy}>
       <legend>{policy?'Notice policy version '+policy.version+' · Effective '+policy.effectiveFrom:'Configure budget warning recipients'}</legend>
       <label>Effective from <input type="date" name="date" min={today.slice(0,10)} required defaultValue={policy && policy.effectiveFrom>today.slice(0,10)?policy.effectiveFrom:today.slice(0,10)}/></label>

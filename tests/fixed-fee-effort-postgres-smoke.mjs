@@ -1,3 +1,4 @@
+import {verifyRiskDelivery} from './support/fixed-fee-risk-delivery-journey.mjs';
 import {verifyRiskNoticePolicy} from './support/fixed-fee-risk-policy-journey.mjs';
 import {budgetWarningStatus} from '../server/modules/commercial-drafting/fixed-fee-risk.mjs';
 import {verifyFeeStatement} from './support/fixed-fee-statement-journey.mjs';
@@ -64,7 +65,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies','108_wos06_fixed_fee_risk_delivery']);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
@@ -284,6 +285,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.deepEqual((await warnings()).body.budgetWarning,{percent:'80',effectiveOn:today,amendmentId:event.id,effort:'reached',laborCost:'reached'});
     assert.equal((await request(riskPath+today+'&view=budget_warnings',{identity:identities.reader})).status,403);
     assert.equal((await request(riskPath+today+'&view=budget_warning_sources',{identity:identities.reader})).status,403);
+    await verifyRiskDelivery({pool,request,identities,engagement,today,baseUrl,tokenFor});
     const exhausted=await risk();
     assert.deepEqual(exhausted.effortBudget,{budgetHours:'5.25',verifiedHours:'4.5',remainingHours:'0.75',unresolvedEntries:0,status:'remaining'});
     assert.deepEqual([exhausted.laborCostBudget,exhausted.remainingLaborBudget,exhausted.laborBudgetStatus],['60.5','-10.364','exceeded']);

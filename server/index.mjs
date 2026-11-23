@@ -1,3 +1,4 @@
+import {startFixedFeeWarningWorker} from './modules/commercial-drafting/fixed-fee-risk-worker.mjs';
 import {createMilestoneBillingRouter} from './modules/milestone-billing/router.mjs';
 import {createInvoiceActionRouter} from './modules/invoice-action/router.mjs';
 import {createInvoiceNoticeConfigRouter} from './modules/invoice-export/notice-config-router.mjs';
@@ -6523,6 +6524,8 @@ if (isProduction || process.env.SERVE_STATIC === 'true') {
 const server = app.listen(port, () => {
   console.log(`Configured product Workforce Operations Core API listening on http://localhost:${port}`);
 });
+
+if (pool && process.env.NODE_ENV!=='test') startFixedFeeWarningWorker(pool,server);
 
 if (trafficMetrics) {
   const timer = setInterval(() => console.log(JSON.stringify(trafficMetrics.takeWindow())), 60_000);

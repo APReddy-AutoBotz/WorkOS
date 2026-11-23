@@ -27,3 +27,9 @@ Deliver commercial.risk_threshold_breached as CONTROL_MANDATORY with a versioned
 An administrator assigns the scoped `commercial.fixed_fee_risk.configure` permission to an authorized buyer role. In the fixed-fee allocation risk section, open **Review budget warning recipients**. Select a prospective date, identify both named users and their held roles, enter the template locale and text, and record the reason. Reopen the panel to verify the saved version. Revisions on the same effective date take precedence in version order.
 
 Migration 107 adds an empty policy history and a permission definition. It grants no default access and sends no notices. To roll back application code, retain the immutable policy rows. For an incorrect assignment, publish a corrected prospective version and verify the account's current role and legal-entity membership before evaluating a breach.
+
+## Background delivery and recovery
+
+Migration 108 stores the per-engagement evaluation cursor, immutable breach evidence, dispatch attempts, in-app receipts and read acknowledgements. The application checks for work every 30 seconds, processing up to ten scans and ten dispatches per pass. Current-day evidence is revisited every five minutes. Missed scan dates are processed in order. The initial upgrade starts existing warning configurations at the upgrade date or their future effective date. The worker discovers effective terms without writes on approval or report-read paths.
+
+Use **Check warning deliveries** for the twenty newest engagement alerts. Configure a missing policy or restore the required current recipient relationships. Failed dispatches retry with exponential backoff up to one hour. A retry commits all required receipts together. The buyer's in-app preference does not suppress them. Roll back the application to stop the worker while retaining its cursor, events and receipts for restart. External channel dispatch is a separate integration.

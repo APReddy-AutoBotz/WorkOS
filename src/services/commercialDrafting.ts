@@ -441,6 +441,15 @@ export const commercialDraftingService = {
       return data;
     },false);
   },
+  riskDeliveryStatus(eng:string,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
+    const scan=z.object({scanDate:z.string().date(),scanFailure:z.literal('EVALUATION_UNAVAILABLE').nullable()}).strict();
+    const event=z.object({metric:z.enum(['effort','laborCost']),through:z.string().date(),sourceAmendmentId:z.string(),
+      attempts:z.number().int().nonnegative(),failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable(),
+      deliveredAt:z.string().datetime().nullable(),nextAttempt:z.string().datetime().nullable()}).strict();
+    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk-deliveries',undefined,
+      value=>z.object({engagementId:z.literal(eng),scan:scan.nullable(),events:z.array(event).max(20)}).strict().parse(value),false);
+  },
   riskNoticePolicy(eng:string,context:CommercialDraftingContext,command?:{
     expectedVersion:number;effectiveFrom:string;locale:string;title:string;body:string;reason:string;
     manager:{userId:string;role:string};finance:{userId:string;role:string}

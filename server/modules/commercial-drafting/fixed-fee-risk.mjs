@@ -14,6 +14,19 @@ export function budgetWarningStatus(actual,budget,percent,complete) {
   return reached?'reached':complete?'below':'incomplete';
 }
 
+export async function warningSourceAmendments(client,scope,through) {
+  const {rows:[sources]}=await client.query(`select
+          (array_agg(id order by sequence desc) filter (where percent_changed or hours_changed))[1] as effort,
+          (array_agg(id order by sequence desc) filter (where percent_changed or cost_changed))[1] as "laborCost"
+          from (select id, sequence,
+            (before_value->'terms'->>'budgetWarningPercent') is distinct from (after_value->'terms'->>'budgetWarningPercent') as percent_changed,
+            (before_value->'terms'->>'budgetHours')::numeric is distinct from (after_value->'terms'->>'budgetHours')::numeric as hours_changed,
+            (before_value->'terms'->>'laborCostBudget')::numeric is distinct from (after_value->'terms'->>'laborCostBudget')::numeric as cost_changed
+            from commercial_amendments where organization_id=$1 and legal_entity_id=$2 and entity_type='Engagement'
+              and entity_id=$3 and effective_on<=$4::date) changes`,[...scope,through]);
+  return sources;
+}
+
 export async function fixedFeeRisk(client,req,{through,view},buildEmployeeScopeWhere,forecast=false) {
   for (const grant of ['employees.view','reports.view_utilization','commercial.fixed_fee_cost.view','commercial.cost_candidates.view']) {
     await assertCommercialAuthority(client,req,grant);
@@ -108,15 +121,7 @@ export async function fixedFeeRisk(client,req,{through,view},buildEmployeeScopeW
         laborCost:budgetWarningStatus(report.retainedCost,report.laborCostBudget,warning_percent,report.complete || (report.approvedEntries===0 && report.costedEntries===0))};
       if (view==='budget_warning_sources') {
         // A carried-forward term keeps its source when an unrelated amendment takes effect.
-        const {rows:[sources]}=await client.query(`select
-          (array_agg(id order by sequence desc) filter (where percent_changed or hours_changed))[1] as effort,
-          (array_agg(id order by sequence desc) filter (where percent_changed or cost_changed))[1] as "laborCost"
-          from (select id, sequence,
-            (before_value->'terms'->>'budgetWarningPercent') is distinct from (after_value->'terms'->>'budgetWarningPercent') as percent_changed,
-            (before_value->'terms'->>'budgetHours')::numeric is distinct from (after_value->'terms'->>'budgetHours')::numeric as hours_changed,
-            (before_value->'terms'->>'laborCostBudget')::numeric is distinct from (after_value->'terms'->>'laborCostBudget')::numeric as cost_changed
-            from commercial_amendments where organization_id=$1 and legal_entity_id=$2 and entity_type='Engagement'
-              and entity_id=$3 and effective_on<=$4::date) changes`,[organizationId,legalEntityId,req.params.id,through]);
+        const sources=await warningSourceAmendments(client,[organizationId,legalEntityId,req.params.id],through);
         report.budgetWarning.sourceAmendments={effort:budgetHours===null?null:sources.effort,
           laborCost:report.laborCostBudget===null?null:sources.laborCost};
       }

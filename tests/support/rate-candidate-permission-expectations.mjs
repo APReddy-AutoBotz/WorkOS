@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.fixed_fee_risk.configure',module:'Commercial',label:'Configure fixed-fee risk notices',description:'Set scoped mandatory recipients and the engagement notice template.',protected:false},
  {permission_key:'commercial.fixed_fee_cost.view',module:'Commercial',label:'View fixed-fee worker costs',description:'Inspect scoped approved fixed-fee work and adopted hourly costs.',protected:false},
  {permission_key:'commercial.service_cost.view',module:'Commercial',label:'View managed-service effort cost',description:'Inspect scoped worker costs for accepted service effort.',protected:false},
  {permission_key:'commercial.service_margin.view',module:'Commercial',label:'View managed-service margins',description:'Read financial period versions for managed-service engagements.',protected:false},
