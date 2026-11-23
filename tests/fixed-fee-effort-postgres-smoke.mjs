@@ -1,3 +1,4 @@
+import {verifyFeeStatement} from './support/fixed-fee-statement-journey.mjs';
 import {withLockedFeeDate,assertFeePeriodConflict} from './support/fixed-fee-period-authority.mjs';
 import {verifyFixedFeeProgress} from './support/fixed-fee-progress-journey.mjs';
 import {checkElapsedHistory} from './support/fixed-fee-revenue-history.mjs';
@@ -54,7 +55,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements']);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
@@ -63,7 +64,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
       'commercial.cost_candidates.view','commercial.cost_approvals.decide','employees.view','approvals.view'];
     await pool.query(`insert into role_permissions(role_name,permission_key,enabled) select 'Admin',k,true from unnest($1::text[]) k
       on conflict(role_name,permission_key) do update set enabled=true`,[grants]);
-    if (profile==='progress') return verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor,identities,contract,engagement,project,today,end,grants});
+    if (profile!=='elapsed') return verifyFixedFeeProgress({reduction:profile==='reduction',databaseUrl,pool,request,post,baseUrl,tokenFor,identities,contract,engagement,project,today,end,grants});
     const riskPath='/engagements/'+engagement.id+'/fixed-fee-risk?through=';
     const risk=async()=>{
       const response=await request(riskPath+today);
@@ -240,6 +241,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     const [firstDay,retryDay]=await Promise.all([post(elapsedPath,retainDay),post(elapsedPath,retainDay)]);
     assert.deepEqual(firstDay.saved,retryDay.saved);
     assert.equal(firstDay.saved.version,1);
+    await verifyFeeStatement({pool,request,post,today,engagement,identities,profile:'elapsed',snapshotId:firstDay.saved.id,amount:'2.29'});
     await checkElapsedHistory(pool,commercialFixture.organizationId,commercialFixture.legalEntityId,engagement.id,today);
     const reconciled=(await request(range)).body;
     assert.deepEqual([reconciled.matched,reconciled.missing,reconciled.stale,reconciled.inapplicable,reconciled.amount,reconciled.currency],[1,0,0,1,'2.29','GBP']);
@@ -369,4 +371,5 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
 });
 await runFixedFeeJourney('elapsed');
 await runFixedFeeJourney('progress');
+await runFixedFeeJourney('reduction');
 console.log('Fixed-fee elapsed and cumulative progress journeys passed.');
