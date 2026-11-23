@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-RPT-002 and WOS-RPT-006. The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage. The actual utilization browser journey verifies both rendered and exported results.
+
 WOS-OPS-001. The Dockerfile and Compose deployment use digest-pinned upstream inputs. The container input test verifies build/runtime sharing and PostgreSQL parity with CI. Initial digests were observed in [main validation](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45273167876).
 
 WOS-RPT-004 and WOS-INT-002. The commercial amendment PostgreSQL/browser journey adopts a signed managed-service margin threshold and verifies its approved history. Mandatory notice delivery remains open.

@@ -1,5 +1,7 @@
 # Reporting and Analytics Specification
 
+The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage.
+
 **Governing requirements:** WOS-CORE-003, WOS-CORE-005, WOS-CORE-008; WOS-RPT-001 through WOS-RPT-007; WOS-INT-001 through WOS-INT-006; WOS-GOV-001 through WOS-GOV-005.
 
 ## Outcome

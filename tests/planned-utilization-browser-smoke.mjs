@@ -226,6 +226,9 @@ try {
   const recovered = await pending(lastId(initial));
   await settle(recovered);
   await expectSuccess('baseline');
+  for (const [title,delta] of [['Overloaded','2%'],['Underutilized','3%']]) {
+    assert.equal(await kpi(title).locator('..').getByText(delta,{exact:true}).count(),0);
+  }
   for (const [title, value] of [['Avg. Planned Util.', '87%'], ['Overloaded', '2'], ['Underutilized', '1'], ['Bench Count', '1'], ['Overload Density', '40%'], ['Utilization FTE', '5']]) {
     assert.equal(await kpi(title).getByText(value, {exact: true}).count(), 1, 'existing utilization metrics remain unchanged');
   }
