@@ -4,6 +4,7 @@ import {elapsedPeriodQuery,reconcileElapsedPeriod} from './fixed-fee-elapsed-per
 import {fixedFeeElapsed,elapsedGrant,elapsedQuery,elapsedCommand} from './fixed-fee-elapsed.mjs';
 import {approveFixedFeeTransition,transitionCommand,transitionGrant} from './fixed-fee-transition.mjs';
 import {fixedFeeForecast,forecastCommand,forecastQuery,forecastGrant} from './fixed-fee-forecast.mjs';
+import {fixedFeeRiskPolicy,riskConfigureGrant,riskPolicyCommand} from './fixed-fee-risk-notices.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 import {fixedFeeCosts,fixedCostCommand,fixedCostGrant} from './fixed-fee-cost.mjs';
 import {effortMonth,fixedFeeEffort} from './fixed-fee-effort.mjs';
@@ -69,7 +70,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if(valuationPeriodWrite && ['CTM04','40001'].includes(error?.code))res.status(409).json({error:{
+      }else if (error?.code==='FRN01') res.status(403).json({error:{code:'RISK_POLICY_DENIED',message:'Current scoped configuration authority is required.'}});
+      else if (['FRN02','FRN03'].includes(error?.code)) res.status(409).json({error:{code:'RISK_POLICY_UNAVAILABLE',message:'Review the current recipient relationships, policy version and effective date.'}});
+      else if(valuationPeriodWrite && ['CTM04','40001'].includes(error?.code))res.status(409).json({error:{
         code:'FIXED_FEE_PERIOD_UNAVAILABLE',message:'Verify reporting-period coverage and financial locks before recording this value.'}});
       else if(permission===fixedFeeStatementGrant && ['MFS01','40001','23505'].includes(error?.code))res.status(409).json({error:{code:'STATEMENT_CHANGED',message:'Review the locked period and signed versions again.'}});
       else if(error?.code==='MFT01')res.status(409).json({error:{code:'TRANSITION_UNAVAILABLE',message:'Inspect the current transition evidence.'}});
@@ -149,6 +152,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   const servicePolicyPath='/engagements/:id/service-valuation-policy';
   router.get('/engagements/:id/service-unit-evidence/:evidenceId/reconciliation',handle(workspaceQuerySchema,false,(c,r)=>reconcileServiceEffort(c,r,buildEmployeeScopeWhere)));
   router.get('/engagements/:id/fixed-fee-effort',handle(effortMonth,false,(c,r,input)=>fixedFeeEffort(c,r,input,buildEmployeeScopeWhere)));
+  const riskPolicyPath='/engagements/:id/fixed-fee-risk-notice-policy';
+  router.get(riskPolicyPath,handle(workspaceQuerySchema,false,(c,r)=>fixedFeeRiskPolicy(c,r)));
+  router.post(riskPolicyPath,handle(riskPolicyCommand,true,(c,r,i)=>fixedFeeRiskPolicy(c,r,i,audit),riskConfigureGrant));
   router.get('/engagements/:id/fixed-fee-risk',handle(riskQuery,false,(c,r,i)=>fixedFeeRisk(c,r,i,buildEmployeeScopeWhere)));
   router.get('/engagements/:id/fixed-fee-elapsed-period',handle(elapsedPeriodQuery,false,(c,r,i)=>reconcileElapsedPeriod(c,r,i,buildEmployeeScopeWhere)));
   const progressPath='/engagements/:id/fixed-fee-progress';

@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canConfigureRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -114,6 +114,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canRecordFixedFeeProgress:permissions.includes('commercial.fixed_fee_progress.record'),
     canRecordFixedFeeElapsed:permissions.includes('commercial.fixed_fee_elapsed.record'),
     canViewFixedFeeMargin:permissions.includes('commercial.fixed_fee_margin.view'),
+    canConfigureRiskNotices:permissions.includes('commercial.fixed_fee_risk.configure'),
     canSignFixedFeeStatement:permissions.includes('commercial.fixed_fee_statement.sign'),
     canApproveFixedFeeTransition:permissions.includes('commercial.fixed_fee_transition.approve'),
     canRecordFixedFeeForecast:permissions.includes('commercial.fixed_fee_forecast.record'),
@@ -439,6 +440,17 @@ export const commercialDraftingService = {
       if ((options.version && data.saved?.version!==options.version) || (cmd && (!data.saved || cmd.expectedToken!==data.token))) throw invalid();
       return data;
     },false);
+  },
+  riskNoticePolicy(eng:string,context:CommercialDraftingContext,command?:{
+    expectedVersion:number;effectiveFrom:string;locale:string;title:string;body:string;reason:string;
+    manager:{userId:string;role:string};finance:{userId:string;role:string}
+  }) {
+    if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
+    const recipient=z.object({userId:z.string().uuid(),role:z.string().min(1)}).strict();
+    const policy=z.object({id:z.string().uuid(),version:z.number().int().positive(),effectiveFrom:z.string().date(),
+      manager:recipient,finance:recipient,locale:z.string(),title:z.string(),body:z.string()}).strict();
+    return request(context,command?'POST':'GET',serviceEngPath(eng)+'/fixed-fee-risk-notice-policy',command,
+      value=>z.object({engagementId:z.literal(eng),latest:policy.nullable()}).strict().parse(value),false);
   },
   fixedFeeStatement(eng:string,through:string,frequency:'Weekly'|'Monthly'|'Fiscal',context:CommercialDraftingContext,
     options:{version?:number;command?:{expectedToken:string;reason:string;reductionExplanation?:string}}={}) {
