@@ -155,6 +155,10 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal(interrupted.status,200);
     assert.deepEqual(interrupted.body.findings.filter(row=>row.versionId===pin),
       [{contractId:contract.id,number:contract.number,versionId:pin,version:1,kind:'review_terms',startsOn:today,endsOn:today}]);
+    await pool.query('update retainer_risk_scans set next_check=now() where version_id=$1',[pin]);
+    await processRetainerRisks(pool);
+    assert.equal((await pool.query('select from retainer_risk_resolutions where version_id=$1',[pin])).rowCount,0,
+      'Interruption is not evidence of recovery');
     const missingPolicies=[];
     for (let i=0;i<10;i++) {
       const added=await post('/contracts',amendmentContractInput('SYN-RISK-PAGE-'+i,{model:'retainer',startsOn:today,

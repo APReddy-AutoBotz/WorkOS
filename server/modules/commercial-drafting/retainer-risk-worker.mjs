@@ -13,14 +13,15 @@ async function evaluateNext(client) {
     const findings=await evaluateRetainerRisks(client,[v.organization_id,v.legal_entity_id],v,v.today,true);
     const {rows:active}=await client.query('select starts_on::text,kind from retainer_risk_events where version_id=$1 and id not in (select event_id from retainer_risk_resolutions where version_id=$1)',[v.id]);
     for (const row of active) {
-      if (!findings.some(f=>f.startsOn===row.starts_on && (f.kind==='review_terms' || f.kind===row.kind))) {
+      if (findings.some(f=>f.startsOn===row.starts_on && f.kind==='assessed') &&
+          !findings.some(f=>f.startsOn===row.starts_on && f.kind===row.kind)) {
         await client.query(`insert into retainer_risk_resolutions(event_id,version_id)
           select e.id,e.version_id from retainer_risk_events e where e.version_id=$1 and e.starts_on=$2 and e.kind=$3
           and not exists(select from retainer_risk_resolutions r where r.event_id=e.id)`,[v.id,row.starts_on,row.kind]);
       }
     }
     for (const f of findings) {
-      if (f.kind==='review_terms' || active.some(a=>a.starts_on===f.startsOn && a.kind===f.kind)) continue;
+      if (!['overconsumption','expiry'].includes(f.kind) || active.some(a=>a.starts_on===f.startsOn && a.kind===f.kind)) continue;
       const id=randomUUID();
       await client.query("select set_config('workos.retainer_risk_observation',$1,true)",[id]);
       await client.query(`with event as (insert into retainer_risk_events(id,organization_id,legal_entity_id,version_id,starts_on,ends_on,kind,hours,included_hours,carried_in,consumed,carried_out)

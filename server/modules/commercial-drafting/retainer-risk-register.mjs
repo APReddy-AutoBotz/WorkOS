@@ -82,6 +82,7 @@ export async function evaluateRetainerRisks(client,scope,v,today,includeEvidence
       if (v.retainer_capacity_policy.endsWith('_rollover')) carryVerified=false;
       continue;
     }
+    if (includeEvidence) findings.push({kind:'assessed',startsOn:p.startsOn});
     for (const [kind,hours] of [['overconsumption',p.capacity.overage],['expiry',p.capacity.expired]]) {
       if (compareHours(hours,'0')<=0) continue;
       const finding={...source,kind,startsOn:p.startsOn,endsOn:p.endsOn,hours};
