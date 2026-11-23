@@ -1,3 +1,4 @@
+import {verifyFixedFeeProgress} from './support/fixed-fee-progress-journey.mjs';
 import {checkElapsedHistory} from './support/fixed-fee-revenue-history.mjs';
 import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import {runMigrations} from '../server/migrate.mjs';
@@ -9,7 +10,7 @@ import {commercialFixture, withCommercialDatabase, withCommercialMigrationsThrou
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
 import {amendmentTransition,createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays, seedApplicableAmendmentVersion, amendmentWorkspace, amendmentInput, amendmentPreview, amendmentApply} from './support/commercial-amendments-test.mjs';
-await withCommercialDatabase(async ({pool,databaseUrl})=>{
+const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUrl})=>{
   await withCommercialMigrationsThrough(98,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const {today,identities}=await seedWorkApproval(pool);
   await grantAmendmentPermissions(pool);
@@ -52,7 +53,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values']);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
@@ -61,6 +62,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       'commercial.cost_candidates.view','commercial.cost_approvals.decide','employees.view','approvals.view'];
     await pool.query(`insert into role_permissions(role_name,permission_key,enabled) select 'Admin',k,true from unnest($1::text[]) k
       on conflict(role_name,permission_key) do update set enabled=true`,[grants]);
+    if (profile==='progress') return verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor,identities,contract,engagement,project,today,end,grants});
     const riskPath='/engagements/'+engagement.id+'/fixed-fee-risk?through=';
     const risk=async()=>{
       const response=await request(riskPath+today);
@@ -360,4 +362,6 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal((await request(path)).status,403);
   });
 });
-console.log('Fixed-fee approved effort, worker scope and permission checks passed.');
+await runFixedFeeJourney('elapsed');
+await runFixedFeeJourney('progress');
+console.log('Fixed-fee elapsed and cumulative progress journeys passed.');
