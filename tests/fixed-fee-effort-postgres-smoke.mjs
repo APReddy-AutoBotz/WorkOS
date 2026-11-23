@@ -1,3 +1,4 @@
+import {withLockedFeeDate,assertFeePeriodConflict} from './support/fixed-fee-period-authority.mjs';
 import {verifyFixedFeeProgress} from './support/fixed-fee-progress-journey.mjs';
 import {checkElapsedHistory} from './support/fixed-fee-revenue-history.mjs';
 import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
@@ -53,7 +54,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods']);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
@@ -232,6 +233,10 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_elapsed.record',true) on conflict(role_name,permission_key) do update set enabled=true");
     assert.equal((await request(elapsedPath,{method:'POST',body:{...retainDay,amount:'1'}})).status,400);
     assert.equal((await request(elapsedPath,{method:'POST',body:{...retainDay,policyVersion:'stale'}})).status,409);
+    await withLockedFeeDate({pool,request,post,date:today,whileCreating:()=>request(elapsedPath,{method:'POST',body:retainDay}),check:async()=>{
+      assertFeePeriodConflict(await request(elapsedPath,{method:'POST',body:retainDay}));
+      assert.equal((await request(elapsedPath+'?serviceDay='+today)).body.latestVersion,0);
+    }});
     const [firstDay,retryDay]=await Promise.all([post(elapsedPath,retainDay),post(elapsedPath,retainDay)]);
     assert.deepEqual(firstDay.saved,retryDay.saved);
     assert.equal(firstDay.saved.version,1);

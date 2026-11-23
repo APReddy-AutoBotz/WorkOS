@@ -37,6 +37,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   const handle=(schema,write,command,permission='commercial.contracts.manage',consistentWrite=false)=>async(req,res)=>{
     const parsed=schema.safeParse(write?req.body:req.query);
     if(!parsed.success){res.status(400).json({error:{code:'COMMERCIAL_INVALID_REQUEST',message:'Commercial input is invalid; check fields, decimal strings and dates.'}});return;}
+    const valuationPeriodWrite=write && [progressGrant,elapsedGrant,transitionGrant].includes(permission);
+    const periodLocks=[];
     let client;let begun=false;let sessionKey;let discard=false;
     try{
       client=await pool.connect();
@@ -44,6 +46,14 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if (consistentWrite) {
         sessionKey=commercialLifecycleLockKey(req.organizationScope);
         await client.query('select pg_advisory_lock(hashtextextended($1,0))',[sessionKey]);
+      }
+      // Acquire calendar-creation locks before taking the repeatable-read snapshot.
+      if (valuationPeriodWrite) {
+        for (const frequency of ['Fiscal','Monthly','Weekly']) {
+          const key='reporting-period:'+req.organizationScope.organizationId+':'+req.organizationScope.legalEntityId+':'+frequency;
+          await client.query('select pg_advisory_lock_shared(hashtext($1))',[key]);
+          periodLocks.push(key);
+        }
       }
       await client.query(write && !consistentWrite?'begin':'begin isolation level repeatable read');begun=true;
       if(write && !consistentWrite)await lockCommercialLifecycle(client,req.organizationScope);
@@ -58,7 +68,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if(error?.code==='MFT01')res.status(409).json({error:{code:'TRANSITION_UNAVAILABLE',message:'Inspect the current transition evidence.'}});
+      }else if(valuationPeriodWrite && ['CTM04','40001'].includes(error?.code))res.status(409).json({error:{
+        code:'FIXED_FEE_PERIOD_UNAVAILABLE',message:'Verify reporting-period coverage and financial locks before recording this value.'}});
+      else if(error?.code==='MFT01')res.status(409).json({error:{code:'TRANSITION_UNAVAILABLE',message:'Inspect the current transition evidence.'}});
       else if(error?.code==='MGM01')res.status(403).json({error:{code:'MARGIN_DENIED',message:'Current reporting authority is required.'}});
       else if(error?.code==='MGM02')res.status(409).json({error:{code:'MARGIN_CHANGED',message:'Inspect the current period again.'}});
       else if(error?.code==='MEC01')res.status(403).json({error:{code:'SERVICE_COST_DENIED',message:'Current worker cost authority is required.'}});
@@ -97,9 +109,13 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       else if(['23503','23514','22003','22007'].includes(error?.code))res.status(422).json({error:{code:'COMMERCIAL_CONSTRAINT',message:'The scoped references, dates or decimal values are not valid.'}});
       else{logError(error);res.status(503).json({error:{code:'COMMERCIAL_UNAVAILABLE',message:'Commercial drafts are unavailable. No successful save is confirmed.'}});}
      }finally{
+      for (const key of periodLocks.reverse()) try {
+        const unlocked=await client.query('select pg_advisory_unlock_shared(hashtext($1)) as released',[key]);
+        if (!unlocked.rows[0]?.released) discard=true;
+      } catch {discard=true;}
       if (client && sessionKey) try {
         const unlocked=await client.query('select pg_advisory_unlock(hashtextextended($1,0)) as released',[sessionKey]);
-        discard=!unlocked.rows[0]?.released;
+        if (!unlocked.rows[0]?.released) discard=true;
       } catch {discard=true;}
       client?.release(discard);
     }

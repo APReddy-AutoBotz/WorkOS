@@ -266,3 +266,7 @@ The fixed-fee forecast follows the approved effort profile on its work-through d
 ### Fixed-fee policy changes
 
 On the closing effort day, finance can preview a scheduled switch to elapsed time. The forecast shows the verified closing value, the remaining allocation, and the proposed first-day total. A finance user with transition approval permission can sign off the schedule with a reason. The forecast uses the approved cumulative amount while the closing evidence, policy and service remain valid.
+
+### Fixed-fee financial locks
+
+Before retaining a daily elapsed value or cumulative effort value, verify weekly coverage for its valuation date. Overlapping monthly and fiscal locks also apply. A transition approval checks its schedule from the switch date, including any future dates that finance has already locked. Retained versions remain readable.

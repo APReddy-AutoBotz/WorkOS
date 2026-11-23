@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
+import {fixedFeeWriteMessage,commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
 function budgetComparison(delta:string|null, unit:string) {
   if (delta===null) return 'Unavailable';
@@ -36,8 +36,8 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
     try {
       await commercialDraftingService.approveFixedFeeTransition(engagement,context,{policyId:transition.policyId,snapshotId:transition.snapshotId,reason:approvalReason});
       if (isCommercialDraftingContextCurrent(context)) {setApprovalReason('');await inspect();}
-    } catch {
-      if (isCommercialDraftingContextCurrent(context)) {setData(null);setMessage('Inspect the transition again before approving.');}
+    } catch (error) {
+      if (isCommercialDraftingContextCurrent(context)) {setData(null);setMessage(fixedFeeWriteMessage(error,'Inspect the transition again before approving.'));}
     } finally {setBusy(false);}
   }
   return <section aria-label="Fixed-fee completion forecast">

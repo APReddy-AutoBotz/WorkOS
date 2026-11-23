@@ -253,3 +253,7 @@ Buyer-configured risk thresholds and alert routing remain open.
 ### Fixed-fee transition review
 
 Finance can inspect and approve the residual schedule. The forecast reconciles the approved closing evidence and allocation into earned value and labor margin. Signed-off financial period close and non-labor cost coverage remain open.
+
+### Period integrity for fixed-fee valuation
+
+Database-enforced period controls now cover elapsed values, effort values and residual-schedule approvals. Finance can use the existing audited reopening workflow to permit a new version. Immutable signed-off fixed-fee period statements remain open.
