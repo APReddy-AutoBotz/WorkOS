@@ -1,8 +1,20 @@
 # WorkOS implementation status
 
-Status date: 2026-11-16. This page separates observed merged source from draft engineering evidence and release acceptance. The previous 2026-08-25 status is preserved unchanged as [historical evidence](../evidence/2026-11-14/IMPLEMENTATION_STATUS_2026-08-25.md); its pre-import statements and corrective-hold narrative are not a current-state report.
+## Delivery status on 23 November 2026
 
-## Verified main baseline
+The verified baseline for this update is main commit `72fec6948a71017dd9d10a81f3bff259e058e24d`. Finance can sign a fixed-fee reporting period, retrieve its opening and closing evidence, and record a separately explained reduction. An audited reopening permits a new signed version. Buyers can adopt an effective-dated engagement expense budget. [Signed statements and their CI run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45179354894) · [Expense budgets and their CI run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45181143886)
+
+| Area | Evidence available | Remaining for launch |
+| --- | --- | --- |
+| Commercial control | Fixed-fee statements, approved expense budgets and separate billing-eligibility decisions have executable engineering evidence. | Actual non-labor cost evidence, margin reconciliation and configurable alerts. |
+| Security and operations | PR validation covers scoped access, database migrations, authenticated performance, recovery, production startup and secret scanning. | Confirm security finding disposition, recovery targets, alert ownership and release evidence on the selected release candidate. |
+| Buyer acceptance | The handover checklist identifies the buyer decisions and rehearsals. | Complete identity and provider configuration, reconcile imported data and commercial balances, obtain role UAT and record final acceptance. |
+
+The [delivery roadmap](../05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md), [release criteria](../04-quality/RELEASE_ACCEPTANCE_CRITERIA.md) and [buyer handover checklist](../05-delivery/BUYER_HANDOVER_CHECKLIST.md) track the remaining gates.
+
+## Historical integration checkpoints
+
+The following records describe engineering evidence and open items at their respective dates. The [August 2026 status](../evidence/2026-11-14/IMPLEMENTATION_STATUS_2026-08-25.md) is retained for provenance.
 
 GitHub main was initially fetched at `b9a57f8a462d8585bb3f73129080d6fae5173343` for this refresh. Dependency repair PR145 subsequently merged at `839dacf12222261161a93956b646d03ccc56af66` after both jobs passed in [CI43549286444](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43549286444), including dependency audit, negative security tests, migrations, production identity and container checks. The tree contains `src/`, `server/`, tests, migrations, container/environment configuration and CI. Git history identifies source bootstrap at `3070c80a71640fa4275477d0d2f1538cc8d2a819` (PR16), organization/setup integration at `8450e9f8816d95dffb3a0784f2e63e3b7b57a172` (PR37), and the current CI/migration/production-profile foundation commit above.
 
