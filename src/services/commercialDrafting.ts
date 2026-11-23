@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -114,6 +114,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canRecordFixedFeeProgress:permissions.includes('commercial.fixed_fee_progress.record'),
     canRecordFixedFeeElapsed:permissions.includes('commercial.fixed_fee_elapsed.record'),
     canViewFixedFeeMargin:permissions.includes('commercial.fixed_fee_margin.view'),
+    canSignFixedFeeStatement:permissions.includes('commercial.fixed_fee_statement.sign'),
     canApproveFixedFeeTransition:permissions.includes('commercial.fixed_fee_transition.approve'),
     canRecordFixedFeeForecast:permissions.includes('commercial.fixed_fee_forecast.record'),
     canViewFixedFeeRisk:!['Employee','TeamLead','ProjectManager','CountryDirector'].includes(user.role) &&
@@ -437,6 +438,28 @@ export const commercialDraftingService = {
         saved:z.object({id:z.string().uuid(),version:z.number().int().positive(),report}).strict().nullable()}).strict().parse(value);
       if ((options.version && data.saved?.version!==options.version) || (cmd && (!data.saved || cmd.expectedToken!==data.token))) throw invalid();
       return data;
+    },false);
+  },
+  fixedFeeStatement(eng:string,through:string,frequency:'Weekly'|'Monthly'|'Fiscal',context:CommercialDraftingContext,
+    options:{version?:number;command?:{expectedToken:string;reason:string;reductionExplanation?:string}}={}) {
+    const current=assertCommercialDraftingContext(context),cmd=options.command;
+    if (!current.canViewFixedFeeRisk || (cmd && !current.canSignFixedFeeStatement)) throw invalid();
+    const balance=z.object({date:z.string().date(),profile:z.enum(['before_service','elapsed','effort','transition']),
+      amount:costDecimal,sources:z.array(z.string().uuid())}).strict();
+    const report=z.object({engagementId:z.literal(eng),currency:z.string().regex(/^[A-Z]{3}$/),
+      period:z.object({id:z.string().min(1),status:z.enum(['Financially Locked','Closed']),revision:z.number().int().positive(),
+        startsOn:z.string().date(),endsOn:z.literal(through),opening:z.string().date(),frequency:z.literal(frequency)}).strict(),
+      opening:balance,closing:balance,movement:z.string().regex(/^-?\d+(?:\.\d+)?$/)}).strict();
+    const fingerprint=z.string().regex(/^[0-9a-f]{64}$/);
+    const signed=z.object({id:z.string().uuid(),version:z.number().int().positive(),report,reason:z.string().min(3),reductionExplanation:z.string().min(3).nullable(),actorId:z.string().uuid(),
+      signedAt:z.string().datetime(),token:fingerprint}).strict();
+    const query=new URLSearchParams({through,frequency});
+    if (options.version) query.set('version',String(options.version));
+    return request(context,cmd?'POST':'GET',serviceEngPath(eng)+'/fixed-fee-statement'+(cmd?'':'?'+query),cmd?{through,frequency,...cmd}:undefined,value=>{
+      const result=z.object({status:z.enum(['period_missing','period_open','opening_unavailable','closing_unavailable','ready','explanation_required']),
+        report:report.nullable(),token:fingerprint.nullable(),saved:signed.nullable()}).strict().parse(value);
+      if ((cmd && result.saved?.token!==cmd.expectedToken) || (options.version && result.saved?.version!==options.version)) throw invalid();
+      return result;
     },false);
   },
   fixedFeeElapsedPeriod(eng:string,from:string,through:string,context:CommercialDraftingContext) {

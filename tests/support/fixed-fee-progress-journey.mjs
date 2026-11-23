@@ -1,5 +1,8 @@
+import {verifyNegativeStatement} from './fixed-fee-statement-reduction.mjs';
+import {verifyFeeStatement} from './fixed-fee-statement-journey.mjs';
 import {withLockedFeeDate,assertFeePeriodConflict} from './fixed-fee-period-authority.mjs';
 import assert from 'node:assert/strict';
+import {fixedFeeStatement} from '../../server/modules/commercial-drafting/fixed-fee-statement.mjs';
 import {policyRevenue} from '../../server/modules/commercial-drafting/fixed-fee-earned-revenue.mjs';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
@@ -7,7 +10,7 @@ import {startFixtureServer} from './compiled-fixture-server.mjs';
 import {commercialFixture} from './commercial-drafting-test.mjs';
 import {amendmentApply,amendmentInput,amendmentWorkspace,seedApplicableAmendmentVersion,amendmentTransition,addUtcDays} from './commercial-amendments-test.mjs';
 
-export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor,identities,contract,engagement,project,today,end,grants}) {
+export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor,identities,contract,engagement,project,today,end,grants,reduction,databaseUrl}) {
   const path='/engagements/'+engagement.id+'/fixed-fee-progress';
   const get=async(version)=>{const r=await request(path+'?through='+today+(version?'&version='+version:''));assert.equal(r.status,200);return r.body;};
   assert.deepEqual(await get(),{report:null,saved:null,token:null,latestVersion:0});
@@ -47,6 +50,12 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   const tomorrow=addUtcDays(today,1);
   const next=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},tomorrow);
   await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),next));
+  if (reduction) {
+    await post(path,cmd);
+    await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),next,
+      {endsOn:end,effortPolicy:'2',budgetHours:'10.5'}));
+    return verifyNegativeStatement({pool,request,identities,databaseUrl,engagement,today,tomorrow});
+  }
   await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),next,
     {endsOn:end,effortPolicy:'disabled',elapsedTimePolicy:'2'}));
   const transitionPath='/engagements/'+engagement.id+'/fixed-fee-transition';
@@ -68,7 +77,7 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
       sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));
       sessionStorage.setItem('workos_api_token',token);
     },{session:{id:identities.manager.id,userName:identities.manager.username,name:'Synthetic progress reviewer',role:'Admin',permissionRole:'Admin',
-      permissions:['commercial.contracts.view','employees.view','reports.view_utilization',...grants]},scope:{organizationId,legalEntityId},token:tokenFor(identities.manager)});
+      permissions:['commercial.contracts.view','employees.view','reports.view_utilization','commercial.fixed_fee_statement.sign',...grants]},scope:{organizationId,legalEntityId},token:tokenFor(identities.manager)});
     await page.goto(fixture.url+'/tests/fixtures/commercial-drafting.html?live=1');
     const effort=page.getByRole('listitem').filter({has:page.getByRole('heading',{name:new RegExp(engagement.code)})}).getByRole('region',{name:'Fixed-fee approved effort'});
     await effort.getByLabel('Effort month').fill(today.slice(0,7));
@@ -86,6 +95,7 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     await progress.getByRole('button',{name:'Inspect approved delivery progress'}).click();
     await progress.getByRole('button',{name:'Retain progress value'}).click();
     await progress.getByText('Retained progress version 1 · GBP 60 · 4.5 verified hours').waitFor();
+    await verifyFeeStatement({pool,request,post,today,engagement,identities,exposure,profile:'effort',snapshotId:(await get()).saved.id,amount:'60'});
     const forecast=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
     await forecast.getByRole('button',{name:'Inspect completion forecast'}).click();
     await forecast.getByText('Reconciled delivery-effort revenue through '+today+': GBP 60').waitFor();
@@ -164,6 +174,14 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     const {organizationId,legalEntityId}=commercialFixture;
     const req={params:{id:engagement.id},user:{sub:identities.manager.id,activeRole:'Admin'},organizationScope:{organizationId,legalEntityId},
       headers:{'x-organization-id':organizationId,'x-legal-entity-id':legalEntityId}};
+    await client.query(`insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
+      values('synthetic-transition-statement',$1,$2,'SYN-TRANSITION','Synthetic transition statement',$3,$3,'Financially Locked','Monthly')`,[organizationId,legalEntityId,tomorrow]);
+    const serviceScope=(_req,_args,_alias,coverage)=>{if (coverage) coverage.entityWide=true;return 'true';};
+    const statement=await fixedFeeStatement(client,req,{through:tomorrow,frequency:'Monthly'},serviceScope);
+    assert.deepEqual([statement.status,statement.report.opening.amount,statement.report.closing.amount,statement.report.movement],['ready','60','60.33','0.33']);
+    const pinned=await client.query('select fixed_fee_statement_amount($1,$2,$3,$4,$5,false)::text amount',
+      [organizationId,legalEntityId,engagement.id,tomorrow,statement.report.closing]);
+    assert.equal(pinned.rows[0].amount,'60.33');
     for (const [date,earned,remaining] of [[tomorrow,'60.33','9.67'],[end,'70','0']]) {
       const args=[organizationId,legalEntityId,engagement.id,date];
       const result=await policyRevenue(client,req,()=>'true',args,'GBP','70');

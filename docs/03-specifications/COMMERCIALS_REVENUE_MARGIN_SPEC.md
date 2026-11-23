@@ -355,3 +355,7 @@ Carry forward the verified cumulative effort value at the end of the day before 
 ### Financial period authority for fixed-fee management values
 
 Apply the entity reporting calendar to the daily service date or cumulative work-through date. A residual transition affects its switch date through the end of its service term. Require continuous permitted weekly coverage from the switch through the review day, or for the switch day when scheduled. Honor any existing financial or final lock on the remaining schedule. Future weeks may be configured later. Retained history and identical replays remain available after a lock.
+
+### Signed fixed-fee period movement
+
+The selected entity reporting period defines both boundaries. Compare the cumulative management value through the preceding calendar day with the cumulative value through period end. Opening zero is permitted before engagement service began. Require verified retained evidence on each other boundary. Retain the currency, opening and closing sources, period revision, movement, signer, timestamp and reason. A financially locked or closed period ending on or before the current UTC day can be signed with explicit finance authority. A second signature requires an audited reopening and a later locked revision. A decline in verified cumulative value may be signed only with an explicit finance explanation of the reduction. Preserve that explanation and the signed negative movement alongside the original statement history.

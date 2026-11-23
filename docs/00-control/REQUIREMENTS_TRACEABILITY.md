@@ -777,3 +777,7 @@ WOS-COM-011, WOS-COM-012 and WOS-RPT-003. The fixed-fee effort PostgreSQL and br
 ### Fixed-fee valuation period authority
 
 WOS-APR-007, WOS-COM-011 and WOS-NFR-DAT-006. Migration 105 and the fixed-fee PostgreSQL/browser journeys cover reporting-period checks on daily, cumulative and transition writes, retained history, and audited reopening.
+
+### Fixed-fee period statements
+
+WOS-APR-007, WOS-COM-011, WOS-RPT-003 and WOS-NFR-DAT-006. Migration 106, the fixed-fee PostgreSQL and browser journeys, and the opt-in permission registry cover locked-period sign-off, immutable evidence, duplicate requests and correction after reopening.

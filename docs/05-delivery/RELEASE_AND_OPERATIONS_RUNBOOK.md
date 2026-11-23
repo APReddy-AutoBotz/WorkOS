@@ -816,3 +816,7 @@ Inspect the completion forecast on the final effort day after retaining the veri
 ### Resolve a fixed-fee valuation period conflict
 
 Check the affected entity’s weekly, monthly and fiscal reporting periods. Supply missing weekly coverage through the review date or use the authorized financial reopening workflow with a reason. Reinspect the value before retrying. Keep migration 105 in place when rolling back application changes so period protections remain effective.
+
+### Retrieve or correct a signed management statement
+
+Grant commercial.fixed_fee_statement.sign to designated finance signers. Inspect the reporting period ending on the selected date and resolve any unavailable boundary evidence before signing. When the closing value has decreased, explain the reduction separately from the sign-off reason. Use Previous signed statement to retrieve earlier versions. Correct a signed result through the audited reporting-period reopening, reinspection and a new lock and signature. Withdraw the signing grant to suspend new statements and retain migration 106 and the statement ledger during application rollback.

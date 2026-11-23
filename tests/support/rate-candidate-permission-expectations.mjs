@@ -5,6 +5,7 @@ const expected=[
  {permission_key:'commercial.service_margin.view',module:'Commercial',label:'View managed-service margins',description:'Read financial period versions for managed-service engagements.',protected:false},
  {permission_key:'commercial.service_margin.record',module:'Commercial',label:'Retain managed-service margins',description:'Retain a new managed-service period version from current evidence.',protected:false},
  {permission_key:'commercial.fixed_fee_forecast.record',module:'Commercial',label:'Record fixed-fee forecasts',description:'Retain remaining effort and labor cost estimates against inspected actuals.',protected:false},
+ {permission_key:'commercial.fixed_fee_statement.sign',module:'Commercial',label:'Sign fixed-fee period statements',description:'Sign reconciled fixed-fee management balances for a locked reporting period.',protected:false},
  {permission_key:'commercial.fixed_fee_transition.approve',module:'Commercial',label:'Approve fixed-fee valuation transitions',description:'Approve the verified closing effort and remaining elapsed-time schedule.',protected:false},
  {permission_key:'commercial.fixed_fee_progress.record',module:'Commercial',label:'Retain fixed-fee effort values',description:'Retain cumulative management value from approved delivery effort.',protected:false},
  {permission_key:'commercial.fixed_fee_margin.view',module:'Commercial',label:'View fixed-fee margins',description:'Inspect scoped actual, remaining and forecast fixed-fee labor margins.',protected:false},
