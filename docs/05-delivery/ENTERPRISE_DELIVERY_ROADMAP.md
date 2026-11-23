@@ -243,3 +243,5 @@ Finance can now inspect fixed-fee labor-cost exposure against the engagement all
 Fixed-fee engagement amendments now record approved labor-cost budgets separately from contract allocations. Finance can review budget variance and allocation exposure through the same work date. Initial budget entry uses the governed engagement amendment workflow. Budgeted hours, remaining-cost forecasts, configurable thresholds and earned-management valuation remain open.
 
 Fixed-fee amendments now support approved effort budgets and work-date variance using verified billable and non-billable hours. Remaining commercial work includes cost-to-complete and hours forecasts, configurable thresholds and policy-governed earned-management valuation.
+
+Fixed-fee hours and labor-cost estimates at completion now retain reviewed versions against dated actuals, with independent completeness checks for hours and cost. Revenue and margin forecasts, configurable risk thresholds, and policy-governed fixed-fee earned-management valuation remain open.

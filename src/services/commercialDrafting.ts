@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeForecast?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -111,6 +111,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
+    canRecordFixedFeeForecast:permissions.includes('commercial.fixed_fee_forecast.record'),
     canViewFixedFeeRisk:!['Employee','TeamLead','ProjectManager','CountryDirector'].includes(user.role) &&
       ['employees.view','reports.view_utilization','commercial.cost_candidates.view','commercial.fixed_fee_cost.view'].every(k=>permissions.includes(k)),
     canViewFixedFeeCost:['employees.view','reports.view_utilization','commercial.cost_candidates.view','commercial.fixed_fee_cost.view'].every(k=>permissions.includes(k)),
@@ -408,6 +409,29 @@ export const commercialDraftingService = {
       if (r.contractId!==contractId || r.versionId!==version.id || r.startsOn!==term.startsOn || r.endsOn!==term.endsOn ||
           r.currency!==version.currency || canonical(amount)!==canonical(term.amount) || (command && (decision!==command.decision || reason!==command.reason.trim()))) throw invalid();
       return {id:text(r.id),decision,reason};
+    },false);
+  },
+  fixedFeeForecast(eng:string,through:string,context:CommercialDraftingContext,options:{version?:number;command?:{
+    remainingHours:string;remainingCost:string;reason:string;expectedToken:string;expectedVersion:number;requestId:string}}={}) {
+    const current=assertCommercialDraftingContext(context),cmd=options.command;
+    if (!current.canViewFixedFeeRisk || (cmd && !current.canRecordFixedFeeForecast)) throw invalid();
+    const path=serviceEngPath(eng)+'/fixed-fee-forecast',query=new URLSearchParams({through});
+    if (options.version) query.set('version',String(options.version));
+    return request(context,cmd?'POST':'GET',cmd?path:path+'?'+query,cmd?{...cmd,through}:undefined,value=>{
+      const baseline=z.object({engagementId:z.literal(eng),through:z.literal(through),currency:z.string().regex(/^[A-Z]{3}$/),
+        contractVersionId:z.string().min(1),amendmentId:z.string().min(1).nullable(),approvedEntries:z.number().int().nonnegative(),
+        costedEntries:z.number().int().nonnegative(),hoursComplete:z.boolean(),costComplete:z.boolean(),
+        actualHours:costDecimal,actualCost:costDecimal,budgetHours:costDecimal.nullable(),budgetCost:costDecimal.nullable()}).strict();
+      const snapshot=z.object({id:z.string().uuid(),version:z.number().int().positive(),reason:z.string().min(3),createdAt:z.string().datetime(),
+        report:baseline.extend({remainingHours:costDecimal,remainingCost:costDecimal,estimatedHours:costDecimal.nullable(),estimatedCost:costDecimal.nullable()}).strict()}).strict();
+      const data=z.object({baseline,latestVersion:z.number().int().nonnegative(),token:z.string().regex(/^[0-9a-f]{64}$/),saved:snapshot.nullable()}).strict().parse(value);
+      const saved=data.saved,r=saved?.report;
+      if (!!saved!==(data.latestVersion>0) || (saved && saved.version>data.latestVersion) ||
+        (options.version && saved?.version!==options.version) || (cmd && (saved?.version!==cmd.expectedVersion+1 ||
+          r?.remainingHours!==cmd.remainingHours || r?.remainingCost!==cmd.remainingCost || saved.reason!==cmd.reason.trim()))) throw invalid();
+      if (r && (r.estimatedHours!==(r.hoursComplete?sumExactAmounts([r.actualHours,r.remainingHours]):null) ||
+          r.estimatedCost!==(r.costComplete?sumExactAmounts([r.actualCost,r.remainingCost]):null))) throw invalid();
+      return data;
     },false);
   },
   fixedFeeRisk(eng:string,through:string,context:CommercialDraftingContext) {

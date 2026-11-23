@@ -1,3 +1,4 @@
+import {fixedFeeForecast,forecastCommand,forecastQuery,forecastGrant} from './fixed-fee-forecast.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 import {fixedFeeCosts,fixedCostCommand,fixedCostGrant} from './fixed-fee-cost.mjs';
 import {effortMonth,fixedFeeEffort} from './fixed-fee-effort.mjs';
@@ -126,6 +127,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.get('/engagements/:id/service-unit-evidence/:evidenceId/reconciliation',handle(workspaceQuerySchema,false,(c,r)=>reconcileServiceEffort(c,r,buildEmployeeScopeWhere)));
   router.get('/engagements/:id/fixed-fee-effort',handle(effortMonth,false,(c,r,input)=>fixedFeeEffort(c,r,input,buildEmployeeScopeWhere)));
   router.get('/engagements/:id/fixed-fee-risk',handle(riskQuery,false,(c,r,i)=>fixedFeeRisk(c,r,i,buildEmployeeScopeWhere)));
+  const forecastPath='/engagements/:id/fixed-fee-forecast';
+  router.get(forecastPath,handle(forecastQuery,false,(c,r,i)=>fixedFeeForecast(c,r,i,buildEmployeeScopeWhere)));
+  router.post(forecastPath,handle(forecastCommand,true,(c,r,i)=>fixedFeeForecast(c,r,i,buildEmployeeScopeWhere,audit),forecastGrant,true));
   const fixedCostPath='/engagements/:id/fixed-fee-costs';
   router.get(fixedCostPath,handle(effortMonth,false,(c,r,i)=>fixedFeeCosts(c,r,i,buildEmployeeScopeWhere)));
   router.post(fixedCostPath,handle(fixedCostCommand,true,(c,r,i)=>fixedFeeCosts(c,r,i,buildEmployeeScopeWhere,audit),fixedCostGrant));
