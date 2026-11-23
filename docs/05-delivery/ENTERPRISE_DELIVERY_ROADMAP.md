@@ -261,3 +261,7 @@ Database-enforced period controls now cover elapsed values, effort values and re
 ### Fixed-fee expense budgets
 
 Commercial managers can adopt an expense budget with the engagement amendment. Finance can inspect its effective amount separately from the labor budget. Actual non-labor cost evidence, reconciliation into margins and buyer-configured alerts remain open.
+
+### Fixed-fee project expense allocation
+
+Approved project expense allocations now reconcile to the dated engagement budget. Actual expense evidence and inclusion in margin remain open.

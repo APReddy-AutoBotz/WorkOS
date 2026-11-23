@@ -263,6 +263,10 @@ export const CommercialAmendmentWorkspace = ({selectionWorkspace}: {selectionWor
             <Field label="Amended starts on"><input className={inputClass} type="date" required readOnly value={draft.startsOn} /></Field>
             <Field label="Amended ends on"><input className={inputClass} type="date" required min={latestDate(draft.startsOn, draft.effectiveOn)} readOnly={contract} value={draft.endsOn} onChange={event => edit({endsOn: event.target.value})} /></Field>
             <Field label="Amended budget (decimal)"><input className={inputClass} required inputMode="decimal" pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" maxLength={19} readOnly={contract} value={draft.budget} onChange={event => edit({budget: event.target.value})} /></Field>
+            {detail.entityType!=='Contract' && detail.identity.model==='fixed_fee' &&
+              <Field label="Expense budget"><input className={inputClass} inputMode="decimal" maxLength={19}
+                required={detail.currentTerms.expenseBudget!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.expenseBudget??''}
+                onChange={event=>edit({expenseBudget:event.target.value})}/></Field>}
             {detail.entityType==='Engagement' && detail.identity.model==='fixed_fee' &&
               <><Field label="Operational earned-management policy"><select className={inputClass} value={draft.effortPolicy!==undefined && draft.effortPolicy!=='disabled'?'effort-'+draft.effortPolicy:draft.elapsedTimePolicy??'disabled'}
                 onChange={event=>{
@@ -277,9 +281,6 @@ export const CommercialAmendmentWorkspace = ({selectionWorkspace}: {selectionWor
               <Field label="Budgeted hours"><input className={inputClass} inputMode="decimal" maxLength={19}
                 required={detail.currentTerms.budgetHours!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.budgetHours??''}
                 onChange={event=>edit({budgetHours:event.target.value})}/></Field>
-              <Field label="Expense budget"><input className={inputClass} inputMode="decimal" maxLength={19}
-                required={detail.currentTerms.expenseBudget!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.expenseBudget??''}
-                onChange={event=>edit({expenseBudget:event.target.value})}/></Field>
               <Field label="Labor-cost budget"><input className={inputClass} inputMode="decimal" maxLength={19}
                 required={detail.currentTerms.laborCostBudget!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.laborCostBudget??''}
                 onChange={event=>edit({laborCostBudget:event.target.value})}/></Field></>}

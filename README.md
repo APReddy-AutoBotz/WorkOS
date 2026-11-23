@@ -278,3 +278,7 @@ Choose the end date of a weekly, monthly or fiscal reporting period in the fixed
 ### Approved fixed-fee expense budgets
 
 In Commercial amendments, enter the expense budget in the engagement currency. Preview and apply the amendment with its approval reference. Check allocation risk on the applicable date to see the approved amount and effective date. An explicit zero is supported.
+
+### Project expense allocations
+
+After the engagement has adopted an expense budget, select a fixed-fee project in Commercial amendments and allocate part of that budget. Check allocation risk shows how many in-term projects have budgets, the total allocated and the amount still available.

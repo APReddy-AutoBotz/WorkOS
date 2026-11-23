@@ -4,7 +4,7 @@ import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,
   seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentPermissions,amendmentScope,amendmentMarker,amendmentSnapshot,amendmentCounts,amendmentToday,addUtcDays,
-  amendmentContractInput,amendmentPost,amendmentTransition,grantAmendmentPermissions,createAmendmentHierarchy,
+  amendmentInput,amendmentContractInput,amendmentPost,amendmentTransition,grantAmendmentPermissions,createAmendmentHierarchy,
   seedApplicableAmendmentVersion,amendmentWorkspace} from './support/commercial-amendments-test.mjs';
 
 // Hosted-only real React -> HTTP API -> randomized disposable PostgreSQL gate.
@@ -23,6 +23,8 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const roots=await createAmendmentHierarchy(apiRequest,'SYN-AMENDMENT-BROWSER');
     const today=await amendmentToday(pool),future=addUtcDays(today,30);
     const v2=await seedApplicableAmendmentVersion(pool,identities.manager,roots.contract,today);
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) select 'Admin',k,true from unnest($1::text[]) k on conflict(role_name,permission_key) do update set enabled=true",
+      [['employees.view','reports.view_utilization','commercial.fixed_fee_cost.view','commercial.cost_candidates.view']]);
     const immutableBefore=await amendmentSnapshot(pool);const projectsBefore=await amendmentSnapshot(pool,['projects']);
     const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['commercial-amendments'], apiUrl});
     let browser;
@@ -63,7 +65,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
           await page.getByLabel('Amended ends on',{exact:true}).fill(version.endsOn);
           await page.getByLabel('Amended budget (decimal)',{exact:true}).fill(budget||workspace.currentTerms.budget);
           if(type==='Engagement') await page.getByLabel('Budgeted hours',{exact:true}).fill('42.25');
-          if(type==='Engagement') await page.getByLabel('Expense budget',{exact:true}).fill('180.4321');
+          await page.getByLabel('Expense budget',{exact:true}).fill(type==='Engagement'?'180.4321':'75.1234');
           if(type==='Engagement') await page.getByLabel('Labor-cost budget',{exact:true}).fill('5200.0125');
         }else{
           assert.equal(await page.getByLabel('Amended ends on',{exact:true}).inputValue(),version.endsOn);
@@ -77,7 +79,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
         const path=`${amendmentPrefix}/${type}/${id}${preview?'/preview':''}`;
         const responsePromise=page.waitForResponse(response=>new URL(response.url()).pathname===path&&response.request().method()==='POST');
         await action();const response=await responsePromise;assert.equal(response.status(),status,`real browser ${path}: ${await response.text()}`);
-        const body=response.request().postDataJSON();assert.deepEqual(Object.keys(body).sort(),[...previewFields,...(type==='Engagement'?['laborCostBudget','budgetHours','expenseBudget']:[]),...(preview?[]:['previewToken'])].sort());
+        const body=response.request().postDataJSON();assert.deepEqual(Object.keys(body).sort(),[...previewFields,...(type==='Engagement'?['laborCostBudget','budgetHours','expenseBudget']:type==='Project'?['expenseBudget']:[]),...(preview?[]:['previewToken'])].sort());
         assert.equal(body.reason,reason);assert.equal(body.approvalReference,approvalReference);assert.equal(typeof body.budget,'string');
         if(type==='Engagement') assert.equal(body.expenseBudget,'180.4321');
         if(type==='Engagement') assert.equal(body.laborCostBudget,'5200.0125');
@@ -120,14 +122,26 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       assert.equal(budgetState.history[0].after.terms.expenseBudget,'180.4321');
       assert.equal(budgetState.currentTerms.laborCostBudget,'5200.0125');
       assert.equal(budgetState.history[0].after.terms.laborCostBudget,'5200.0125');
-      await prepare('Project',roots.project.id,v2,'4000.0001');await preview('Project',roots.project.id);
+      await prepare('Project',roots.project.id,v2,'4000.0001');
+      await page.getByLabel('Expense budget',{exact:true}).fill('180.4322');
+      const excess=await post('Project',roots.project.id,()=>button('Preview amendment').click(),422,true);
+      assert.equal(excess.result.error.code,'COMMERCIAL_EXPENSE_BUDGET_EXCEEDED');
+      await page.getByLabel('Expense budget',{exact:true}).fill('75.1234');
+      await preview('Project',roots.project.id);
       await amendmentTransition(apiRequest,'Project',roots.project.id,1,roots.pin,'On Hold');
       const beforeStale=await amendmentCounts(pool);const stale=await post('Project',roots.project.id,()=>button('Confirm and apply amendment').click(),409);
       assert.equal(stale.result.error.code,'COMMERCIAL_AMENDMENT_CONFLICT');assert.deepEqual(await amendmentCounts(pool),beforeStale);
       await page.getByRole('status').getByText('Not applied because the preview or linked terms changed.',{exact:false}).waitFor();
       await page.getByLabel('Target contract version',{exact:true}).selectOption(v2.id);await page.getByLabel('Amended ends on',{exact:true}).fill(v2.endsOn);
       await page.getByLabel('Reason for amendment',{exact:true}).fill(reason);await page.getByLabel('Approval reference',{exact:true}).fill(approvalReference);
+      await page.getByLabel('Expense budget',{exact:true}).fill('75.1234');
       await preview('Project',roots.project.id);const held=await apply('Project',roots.project.id);assert.equal(held.body.expectedLifecycleSequence,2);
+      assert.equal((await amendmentWorkspace(apiRequest,'Project',roots.project.id)).currentTerms.expenseBudget,'75.1234');
+      const projectRisk='/engagements/'+roots.engagement.id+'/fixed-fee-risk?through='+today+'&view=project_expenses';
+      const expenses=await apiRequest(projectRisk);
+      assert.equal(expenses.status,200,JSON.stringify(expenses.body));
+      assert.deepEqual(expenses.body.projectExpenses,{projects:1,budgeted:1,allocated:'75.1234',unallocated:'105.3087'});
+      assert.equal((await apiRequest(projectRisk,{identity:identities.reader})).status,403);
       assert.equal((await amendmentWorkspace(apiRequest,'Project',roots.project.id)).lifecycle.state,'On Hold','amendment does not implicitly resume delivery');
       assert.equal(await page.evaluate(()=>window.syntheticAmendmentExecuted),undefined);assert.equal(await page.locator('script').filter({hasText:'syntheticAmendmentExecuted'}).count(),0);
       const projectedAfterHold=await amendmentSnapshot(pool,['projects']);
@@ -155,6 +169,11 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       }
       await page.reload();await page.getByLabel('Record type',{exact:true}).waitFor();await prepare('Contract',roots.contract.id,v3);await preview('Contract',roots.contract.id);await apply('Contract',roots.contract.id);
       await page.getByRole('status').getByText('A future amendment is pending.',{exact:false}).waitFor();assert.equal(await button('Preview amendment').isDisabled(),true);
+      const parentReduction=amendmentInput(await amendmentWorkspace(apiRequest,'Engagement',roots.engagement.id),v3,
+        {endsOn:v2.endsOn,expenseBudget:'75.1233'});
+      const deniedReduction=await apiRequest('/amendments/Engagement/'+roots.engagement.id+'/preview',{method:'POST',body:parentReduction});
+      assert.equal(deniedReduction.status,422,JSON.stringify(deniedReduction.body));
+      assert.equal(deniedReduction.body.error.code,'COMMERCIAL_EXPENSE_BUDGET_EXCEEDED');
       const pending=await amendmentWorkspace(apiRequest,'Contract',roots.contract.id);assert.equal(pending.pending,true);assert.equal(pending.currentTerms.contractVersionId,v2.id);assert.equal(pending.history[0].contractVersionId,v3.id);
 
       const beforeReaders=writes.length;

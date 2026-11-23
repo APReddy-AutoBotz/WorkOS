@@ -824,3 +824,7 @@ Grant commercial.fixed_fee_statement.sign to designated finance signers. Inspect
 ### Review fixed-fee expense budgets
 
 Use the scoped engagement amendment to enter the expense budget and review its approval reference and effective date. To revise a budget, adopt later terms and retain the preceding amendment. The allocation report uses the approved terms effective on the selected work date.
+
+### Review unallocated project expense budget
+
+Inspect the engagement expense budget, then the count of projects with an allocation and the remaining amount. Use a project amendment to assign an amount. Before reducing an engagement budget, verify the remaining project allocations and any scheduled changes.

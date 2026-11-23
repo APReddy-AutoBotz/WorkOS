@@ -121,8 +121,9 @@ export const normalizeCommercialAmendmentWorkspace = (value: unknown): Amendment
   if (lifecycle.effectiveOn > asOf || lifecycle.contractVersionId !== activationTerms.contractVersionId || history.length !== sequence
     || history.some((event, index) => event.sequence !== sequence - index || (index > 0 && event.effectiveOn >= history[index - 1].effectiveOn))) throw invalid();
   if (activationTerms.effortPolicy!==undefined || activationTerms.elapsedTimePolicy!==undefined || activationTerms.budgetHours!==undefined || activationTerms.laborCostBudget!==undefined || activationTerms.expenseBudget!==undefined ||
+    ((entityType==='Contract' || normalizedIdentity.model!=='fixed_fee') && [currentTerms,...history].some(terms=>terms.expenseBudget!==undefined)) ||
     ((entityType!=='Engagement' || normalizedIdentity.model!=='fixed_fee') &&
-      [currentTerms,...history].some(terms=>terms.effortPolicy!==undefined || terms.elapsedTimePolicy!==undefined || terms.budgetHours!==undefined || terms.laborCostBudget!==undefined || terms.expenseBudget!==undefined))) throw invalid();
+      [currentTerms,...history].some(terms=>terms.effortPolicy!==undefined || terms.elapsedTimePolicy!==undefined || terms.budgetHours!==undefined || terms.laborCostBudget!==undefined))) throw invalid();
   const future = history.filter(event => event.effectiveOn > asOf);
   const effective = history.find(event => event.effectiveOn <= asOf);
   if (future.length > 1 || pending !== Boolean(future.length) || !sameAmendmentTerms(currentTerms, effective || activationTerms)
