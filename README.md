@@ -6,7 +6,7 @@ Managed-service reporting supports a read-only comparison of a retained monthly 
 
 The application build and runtime share an immutable Node image. CI and buyer Compose use the same pinned PostgreSQL image. CI retains the tested production image, its checksums and runtime package inventories for seven days. [Container verification and handover](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#verifying-the-tested-container)
 
-The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage.
+The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage. The missing-worker list uses the scoped eligible roster and all timesheets in the selected period. Weekly submission coverage counts each eligible worker once, independently of the review filter.
 
 For verified delivery status, remaining launch work and buyer acceptance gates, see the [implementation status](docs/00-control/IMPLEMENTATION_STATUS.md).
 
