@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-RPT-004 and WOS-INT-002. The commercial amendment PostgreSQL/browser journey adopts a signed managed-service margin threshold and verifies its approved history. Mandatory notice delivery remains open.
+
 WOS-OPS-008 and WOS-NFR-RELSE-002. CI exports the tested image by immutable image ID, compares the OCI source label with the checkout, inventories installed runtime npm and OS packages, verifies SHA-256 checksums and retains the bundle for download.
 
 WOS-RPT-004 / WOS-COM-015. The managed-service margin portfolio compares the latest visible retained engagement-month version with an entered threshold. PostgreSQL and browser journeys cover retention, missing evidence, pagination boundaries and current financial authority.

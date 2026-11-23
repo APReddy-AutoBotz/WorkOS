@@ -17,6 +17,10 @@ test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainer
 
 The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
 
+## Maintaining a standing margin threshold
+
+In Commercial Amendments select the managed-service engagement and a newer contract version adopted by its parent. Enter the threshold, effective date, reason and approval reference. Review the before and after terms, confirm, and verify the saved version in protected history. Clear an existing threshold to disable it through a subsequent amendment. Roll back the setting with a later effective amendment so the prior approval remains auditable. No schema migration is required.
+
 ## Reviewing managed-service margins
 
 In Commercial Drafting, open the engagement list and select the portfolio month and threshold. Review all pages. A missing retained version requires the authorized reviewer to inspect and retain the individual engagement month. A missing percentage requires checking its revenue denominator and source coverage. After correcting evidence, retain a new version and rerun the report. Verify the report with the buyer's intended financial role and legal entity. A change in role or worker visibility can remove engagements from the result.
