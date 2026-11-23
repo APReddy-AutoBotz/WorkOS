@@ -767,3 +767,5 @@ WOS-COM-007 / WOS-COM-012 / WOS-COM-015 / WOS-RPT-003 — Migration 102 adds opt
 WOS-COM-011 — The fixed-fee effort profile uses all verified approved delivery hours against a positive approved hours budget, capped at 100% of the approved allocation.
 
 WOS-COM-007 / WOS-COM-011 / WOS-COM-014 — Migration 103, governed engagement amendments and the scoped progress API/browser journey cover explicit effort policy selection, verified billable and non-billable hours, cap and rounding, immutable versions, replay, stale evidence and incomplete approvals.
+
+WOS-COM-011 / WOS-COM-012 / WOS-RPT-003 — The financial forecast selects the applicable effort profile, validates the retained cumulative version and calculates remaining revenue in engagement currency. The PostgreSQL/API/browser journey checks missing, held, stale, superseded and incomplete evidence and native-currency subtraction.

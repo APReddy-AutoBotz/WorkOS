@@ -10,16 +10,16 @@ const asOf=z.object({through:z.string().date()});
 export const progressQuery=asOf.extend({version:z.coerce.number().int().positive().optional()}).strict();
 export const progressCommand=asOf.extend({expectedVersion:z.number().int().nonnegative(),expectedToken:z.string().regex(/^[0-9a-f]{64}$/)}).strict();
 
-export async function fixedFeeProgress(client,req,input,scope,audit) {
-  await assertElapsedReadScope(client,req,scope);
+const where='organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and through_date=$4';
+const fields='id,version,report,source_token';
+
+export async function inspectProgressEvidence(client,req,input,scope) {
   const {organizationId,legalEntityId}=req.organizationScope;
   const args=[organizationId,legalEntityId,req.params.id,input.through];
   const {rows:[{basis}]}=await client.query('select fixed_fee_progress_basis($1,$2,$3,$4::date) basis',args);
-  const where='organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and through_date=$4';
-  const fields='id,version,report,source_token';
   const {rows:[latest]}=await client.query(`select ${fields} from commercial_fixed_fee_progress_values where ${where} order by version desc limit 1`,args);
   const sources=[];
-  let report=null,token=null,saved=latest??null;
+  let report=null,token=null;
   if (basis) {
     let after=null,unresolved=0;
     do {
@@ -36,6 +36,13 @@ export async function fixedFeeProgress(client,req,input,scope,audit) {
     report={...basis,billableHours,nonBillableHours,verifiedHours,entries:sources.length,unresolved,amount};
     token=createHash('sha256').update(JSON.stringify([report,sources])).digest('hex');
   }
+  return {report,token,sources,latest,args};
+}
+
+export async function fixedFeeProgress(client,req,input,scope,audit) {
+  await assertElapsedReadScope(client,req,scope);
+  const {report,token,sources,latest,args}=await inspectProgressEvidence(client,req,input,scope);
+  let saved=latest??null;
   if (audit) {
     if (report?.amount==null || token!==input.expectedToken) fail(409,'PROGRESS_SOURCE_CHANGED','Inspect the approved policy and complete delivery evidence.');
     if (latest?.source_token!==token) {
