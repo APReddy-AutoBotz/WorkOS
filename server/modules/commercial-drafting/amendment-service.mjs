@@ -51,7 +51,7 @@ const dependencySnapshot=async(client,req,type,id,effectiveOn)=>{
  if(type!=='Project')projects=(await client.query(`select *,starts_on::text,ends_on::text,budget_allocation::text from commercial_project_bindings where ${where} and ${type==='Contract'?'contract_id':'engagement_id'}=$3 order by project_id limit 201`,[...scope(req),id])).rows;
  if(engagements.length>200||projects.length>200)fail(409,'COMMERCIAL_AMENDMENT_LIMIT','The complete dependency set exceeds this bounded amendment command. No partial amendment is allowed.');
  for(let i=0;i<engagements.length;i++)engagements[i]=await applyAmendedSnapshot(client,req,'Engagement',engagements[i].id,engagements[i],effectiveOn);
- for(let i=0;i<projects.length;i++)projects[i]=await applyAmendedSnapshot(client,req,'Project',projects[i].project_id,projects[i],effectiveOn);
+ for(let i=0;i<projects.length;i++)projects[i]=await applyAmendedSnapshot(client,req,'Project',projects[i].project_id,projects[i],effectiveOn,true);
  return {engagements,projects};
 };
 const validate=async(client,req,type,id,input)=>{
@@ -82,6 +82,9 @@ const validate=async(client,req,type,id,input)=>{
  const activeClient=(await client.query(`select id from clients where ${where} and id=$3 and status='Active' for share`,[...scope(req),contract.clientId])).rows[0];
  if(!activeClient)fail(422,'COMMERCIAL_REFERENCE_NOT_FOUND','An active scoped client is required.');
  const dependencies=await dependencySnapshot(client,req,type,id,input.effectiveOn);
+ const expenseBudget=input.expenseBudget??before.expenseBudget;
+ if(input.expenseBudget!==undefined && (type==='Contract' || root.model!=='fixed_fee'))
+  fail(422,'COMMERCIAL_TERMS_MISMATCH','Expense budgets require a fixed-fee engagement or project.');
  const children=type==='Contract'?dependencies.engagements:dependencies.projects;
  if(children.some(x=>x.ends_on>input.endsOn && x.ends_on>=input.effectiveOn))fail(409,'COMMERCIAL_AMENDMENT_DEPENDENCIES','Remaining governed child dates must fit the amended parent. No child is rewritten implicitly.');
  const allocation=children.filter(x=>x.ends_on>=input.effectiveOn).reduce((n,x)=>n+units(type==='Contract'?x.budget:x.budget_allocation),0n);
@@ -94,16 +97,29 @@ const validate=async(client,req,type,id,input)=>{
   const siblings=(await client.query(`select *,starts_on::text,ends_on::text,${project?'budget_allocation':'budget'}::text from ${project?'commercial_project_bindings':'commercial_engagements'} where ${where} and ${project?'engagement_id':'contract_id'}=$3 and ${project?'project_id':'id'}<>$4${project?'':" and origin='manual' and exists(select 1 from commercial_lifecycle_events l where l.entity_type='Engagement' and l.entity_id=commercial_engagements.id)"} order by ${project?'project_id':'id'} limit 201`,[...scope(req),project?root.engagement_id:root.contract_id,id])).rows;
   if(siblings.length>200)fail(409,'COMMERCIAL_AMENDMENT_LIMIT','The complete sibling set exceeds this bounded amendment command.');
   let total=units(input.budget);const siblingSnapshots=[];
+  let expenseTotal=units(expenseBudget??'0');
   for(const sibling of siblings){
-   const sid=project?sibling.project_id:sibling.id;const current=await applyAmendedSnapshot(client,req,siblingType,sid,sibling,input.effectiveOn);
+   const sid=project?sibling.project_id:sibling.id;const current=await applyAmendedSnapshot(client,req,siblingType,sid,sibling,input.effectiveOn,project);
    const pending=(await client.query(`select *,effective_on::text,starts_on::text,ends_on::text,budget::text from commercial_amendments where ${where} and entity_type=$3 and entity_id=$4 and effective_on>$5 order by sequence`,[...scope(req),siblingType,sid,input.effectiveOn])).rows;
    siblingSnapshots.push(current);
    let reserved=current.ends_on>=input.effectiveOn?units(project?current.budget_allocation:current.budget):0n;
-   for(const event of pending)if(units(event.budget)>reserved)reserved=units(event.budget);
+   let expenseReserved=current.ends_on>=input.effectiveOn?units(current.expense_budget??'0'):0n;
+   for(const event of pending){
+    if(units(event.budget)>reserved)reserved=units(event.budget);
+    const nextExpense=units(event.after_value?.terms?.expenseBudget??'0');
+    if(nextExpense>expenseReserved)expenseReserved=nextExpense;
+   }
+   expenseTotal+=expenseReserved;
    total+=reserved;dependencies.siblingAmendments??=[];dependencies.siblingAmendments.push(...pending);
   }
   if(total>units(parent.terms.budget))fail(422,'COMMERCIAL_AMENDMENT_BUDGET_EXCEEDED','Remaining current or pending sibling allocations exceed the explicitly adopted parent budget.');
+  if(project && expenseBudget!==undefined && (parent.terms.expenseBudget===undefined || expenseTotal>units(parent.terms.expenseBudget)))
+   fail(422,'COMMERCIAL_EXPENSE_BUDGET_EXCEEDED','Project expense allocations must fit the approved engagement expense budget.');
   dependencies.siblings=siblingSnapshots;
+ }
+ if(type==='Engagement' && expenseBudget!==undefined){
+  const projectExpenses=children.filter(x=>x.ends_on>=input.effectiveOn).reduce((n,x)=>n+units(x.expense_budget??'0'),0n);
+  if(projectExpenses>units(expenseBudget))fail(422,'COMMERCIAL_EXPENSE_BUDGET_EXCEEDED','The proposed expense budget must cover remaining project expense allocations.');
  }
  const descendantIds=[...dependencies.engagements.map(x=>x.id),...dependencies.projects.map(x=>x.project_id)];
  if(descendantIds.length && (await client.query(`select 1 from commercial_amendments where ${where} and entity_id=any($3::text[]) and effective_on>$4 limit 1`,[...scope(req),descendantIds,input.effectiveOn])).rowCount)
@@ -114,8 +130,8 @@ const validate=async(client,req,type,id,input)=>{
  const projectIds=type==='Project'?[id]:dependencies.projects.map(x=>x.project_id);
  const blocked=(await client.query(`select exists(select 1 from project_allocations where organization_id=$1 and legal_entity_id=$2 and project_id=any($3::text[]) and end_date>$4 and end_date>=$5 and status<>'Completed') or exists(select 1 from timesheet_entries e join timesheets t on t.id=e.timesheet_id where t.organization_id=$1 and t.legal_entity_id=$2 and e.project_id=any($3::text[]) and e.work_date>$4 and e.work_date>=$5) blocked`,[...scope(req),projectIds,input.endsOn,input.effectiveOn])).rows[0];
  if(blocked.blocked)fail(409,'COMMERCIAL_AMENDMENT_DEPENDENCIES','Existing future assignments or work extend beyond the proposed remaining term.');
- if ((input.expenseBudget!==undefined || input.laborCostBudget!==undefined || input.budgetHours!==undefined) && (type!=='Engagement' || root.model!=='fixed_fee'))
-  fail(422,'COMMERCIAL_TERMS_MISMATCH','Expense, labor and effort budgets require a fixed-fee engagement.');
+ if ((input.laborCostBudget!==undefined || input.budgetHours!==undefined) && (type!=='Engagement' || root.model!=='fixed_fee'))
+  fail(422,'COMMERCIAL_TERMS_MISMATCH','Labor and effort budgets require a fixed-fee engagement.');
  if ((input.elapsedTimePolicy!==undefined || input.effortPolicy!==undefined) && (type!=='Engagement' || root.model!=='fixed_fee'))
   fail(422,'COMMERCIAL_TERMS_MISMATCH','Operational valuation policies require a fixed-fee engagement.');
  if (before.elapsedTimePolicy!==undefined && before.elapsedTimePolicy!=='disabled' && input.elapsedTimePolicy===undefined)
@@ -124,7 +140,6 @@ const validate=async(client,req,type,id,input)=>{
   fail(422,'COMMERCIAL_POLICY_REQUIRED','Review the delivery-effort policy when approving replacement terms.');
  const effortPolicy=input.effortPolicy??before.effortPolicy;
  const elapsedTimePolicy=input.elapsedTimePolicy??before.elapsedTimePolicy;
- const expenseBudget=input.expenseBudget??before.expenseBudget;
  const laborCostBudget=input.laborCostBudget??before.laborCostBudget;
  const budgetHours=input.budgetHours??before.budgetHours;
  if (effortPolicy!==undefined && effortPolicy!=='disabled' &&

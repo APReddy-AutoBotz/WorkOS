@@ -363,3 +363,7 @@ The selected entity reporting period defines both boundaries. Compare the cumula
 ### Fixed-fee expense budgets
 
 WOS-COM-007. The engagement amendment may specify a nonnegative expense budget in engagement currency to four decimal places. Retain it in versioned terms, preview evidence and amendment history. Omitting the value carries forward the approved amount. Before its first adoption the budget is unset. Show the applicable value on the scoped, dated allocation report. Actual expenses require independent evidence before inclusion in costs or margin.
+
+### Project expense allocation within a fixed-fee engagement
+
+WOS-COM-007. Project expense budgets draw on the expense budget in the parent’s adopted terms. Apply the existing exact-decimal sibling reservation rule across current and pending amendments. A parent reduction must still cover its remaining project expense allocations. Report current in-term project allocations by work date. Open and held projects retain their allocation through their approved term.

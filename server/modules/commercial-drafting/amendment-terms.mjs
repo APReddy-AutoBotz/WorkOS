@@ -16,8 +16,8 @@ export const resolveAmendedTerms=async(client,req,type,id,baseline,asOf)=>{
     order by sequence desc limit 1`,[...scope(req),type,id,asOf||null])).rows[0];
   return row?amendmentTerms(row):baseline;
 };
-export const applyAmendedSnapshot=async(client,req,type,id,root,asOf)=>{
+export const applyAmendedSnapshot=async(client,req,type,id,root,asOf,includeExpenseBudget=false)=>{
   const terms=await resolveAmendedTerms(client,req,type,id,{contractVersionId:root.contract_version_id,startsOn:root.starts_on,endsOn:root.ends_on,budget:type==='Project'?root.budget_allocation:root.budget},asOf);
-  return {...root,contract_version_id:terms.contractVersionId,starts_on:terms.startsOn,ends_on:terms.endsOn,
+  return {...root,...(includeExpenseBudget && terms.expenseBudget!==undefined?{expense_budget:terms.expenseBudget}:{}),contract_version_id:terms.contractVersionId,starts_on:terms.startsOn,ends_on:terms.endsOn,
     ...(type==='Project'?{budget_allocation:terms.budget}:{budget:terms.budget})};
 };

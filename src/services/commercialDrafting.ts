@@ -539,13 +539,14 @@ export const commercialDraftingService = {
   },
   fixedFeeRisk(eng:string,through:string,context:CommercialDraftingContext) {
     if (!assertCommercialDraftingContext(context).canViewFixedFeeRisk) throw invalid();
-    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk?'+new URLSearchParams({through,view:'expense_budget'}),undefined,value=>{
+    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk?'+new URLSearchParams({through,view:'project_expenses'}),undefined,value=>{
       const signed=z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/);
       const states=z.enum(['no_work','incomplete','remaining','exhausted','exceeded']);
       const report=z.object({engagementId:z.literal(eng),through:z.literal(through),currency:z.string().regex(/^[A-Z]{3}$/),
         contractVersionId:z.string().min(1),amendmentId:z.string().min(1).nullable(),allocation:costDecimal,retainedCost:costDecimal,
         effortBudget:z.object({budgetHours:costDecimal,verifiedHours:costDecimal,remainingHours:signed,
           unresolvedEntries:z.number().int().nonnegative(),status:states}).strict().nullable(),
+        projectExpenses:z.object({projects:z.number().int().nonnegative(),budgeted:z.number().int().nonnegative(),allocated:costDecimal,unallocated:signed.nullable()}).strict(),
         expenseBudget:z.object({amount:costDecimal,effectiveOn:z.string().date(),amendmentId:z.string().min(1)}).strict().nullable(),
         remainingAllocation:signed,status:states,laborCostBudget:costDecimal.nullable(),remainingLaborBudget:signed.nullable(),laborBudgetStatus:states.nullable(),
         approvedEntries:z.number().int().nonnegative(),costedEntries:z.number().int().nonnegative(),complete:z.boolean()}).strict().parse(value);

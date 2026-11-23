@@ -2,6 +2,8 @@
 
 WorkOS is a buyer-owned professional-services operations platform that connects resource planning, approved work, effective capacity and commercial control. Its direction is an enterprise utilization product where every percentage has an explicit period, denominator, inclusion rule and authorized source.
 
+For verified delivery status, remaining launch work and buyer acceptance gates, see the [implementation status](docs/00-control/IMPLEMENTATION_STATUS.md).
+
 > **Naming note:** WorkOS is the temporary product working name. Runtime branding and buyer terminology must remain configuration-driven.
 
 Release CI restores a populated retainer invoice and its applied credit into a fresh database, verifies both signed amounts and receipts, and records recovery timings in the workflow summary. See the [recovery runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#backup-and-restore). An 082p backup can also be recovered when its source database is unavailable. The [recovery runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#backup-and-restore) includes the transactional restore command and verification steps.
@@ -278,3 +280,7 @@ Choose the end date of a weekly, monthly or fiscal reporting period in the fixed
 ### Approved fixed-fee expense budgets
 
 In Commercial amendments, enter the expense budget in the engagement currency. Preview and apply the amendment with its approval reference. Check allocation risk on the applicable date to see the approved amount and effective date. An explicit zero is supported.
+
+### Project expense allocations
+
+After the engagement has adopted an expense budget, select a fixed-fee project in Commercial amendments and allocate part of that budget. Check allocation risk shows how many in-term projects have budgets, the total allocated and the amount still available.

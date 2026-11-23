@@ -5,7 +5,7 @@ import {z} from 'zod';
 import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
-export const riskQuery=z.object({through:z.string().date(),view:z.literal('expense_budget').optional()}).strict();
+export const riskQuery=z.object({through:z.string().date(),view:z.enum(['expense_budget','project_expenses']).optional()}).strict();
 
 export async function fixedFeeRisk(client,req,{through,view},buildEmployeeScopeWhere,forecast=false) {
   for (const grant of ['employees.view','reports.view_utilization','commercial.fixed_fee_cost.view','commercial.cost_candidates.view']) {
@@ -57,7 +57,20 @@ export async function fixedFeeRisk(client,req,{through,view},buildEmployeeScopeW
   if (row.visible===false) fail(403,'FIXED_RISK_DENIED','Engagement-wide cost visibility is required.');
   if (row.currency_matches===false) fail(409,'FIXED_RISK_CURRENCY','Retained costs must reconcile in the allocation currency.');
   const {visible,currency_matches,cost_token,budgetHours,expenseAmount,effectiveOn,...report}=row;
-  if (view==='expense_budget') report.expenseBudget=expenseAmount===null?null:{amount:expenseAmount,effectiveOn,amendmentId:report.amendmentId};
+  if (view==='expense_budget' || view==='project_expenses') report.expenseBudget=expenseAmount===null?null:{amount:expenseAmount,effectiveOn,amendmentId:report.amendmentId};
+  if (view==='project_expenses') {
+    const {rows:[projects]}=await client.query(`with budgets as (
+      select (a.after_value->'terms'->>'expenseBudget')::numeric amount from commercial_project_bindings b
+      left join lateral(select after_value,starts_on,ends_on from commercial_amendments
+        where organization_id=b.organization_id and legal_entity_id=b.legal_entity_id and entity_type='Project'
+        and entity_id=b.project_id and effective_on<=$4::date order by sequence desc limit 1) a on true
+      where b.organization_id=$1 and b.legal_entity_id=$2 and b.engagement_id=$3 and b.model='fixed_fee'
+        and $4::date between coalesce(a.starts_on,b.starts_on) and coalesce(a.ends_on,b.ends_on)
+    ) select count(*)::int projects,count(amount)::int budgeted,trim_scale(coalesce(sum(amount),0))::text allocated,
+      trim_scale($5::numeric-coalesce(sum(amount),0))::text unallocated from budgets`,
+      [organizationId,legalEntityId,req.params.id,through,expenseAmount]);
+    report.projectExpenses=projects;
+  }
   report.effortBudget=null;
   if (budgetHours!==null || forecast) {
     const evidence=forecast?createHash('sha256'):null;

@@ -785,3 +785,7 @@ WOS-APR-007, WOS-COM-011, WOS-RPT-003 and WOS-NFR-DAT-006. Migration 106, the fi
 ### WOS-COM-007 fixed-fee expense budgets
 
 The commercial amendment API and browser journey cover approved decimal expense budgets. The fixed-fee PostgreSQL journey verifies dated reporting, inherited terms, explicit zero, preview tampering and denied scope.
+
+### WOS-COM-007 project expense allocation
+
+The commercial amendments React/API/PostgreSQL journey verifies a project expense allocation, over-allocation rejection, scoped roll-up and a parent reduction rejected below existing commitments.
