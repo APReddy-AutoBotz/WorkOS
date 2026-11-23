@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {commercialFixture, withCommercialDatabase, withCommercialMigrationsThrough, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
-import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays, seedApplicableAmendmentVersion, amendmentWorkspace, amendmentInput, amendmentApply} from './support/commercial-amendments-test.mjs';
+import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays, seedApplicableAmendmentVersion, amendmentWorkspace, amendmentInput, amendmentPreview, amendmentApply} from './support/commercial-amendments-test.mjs';
 await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await withCommercialMigrationsThrough(98,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const {today,identities}=await seedWorkApproval(pool);
@@ -66,6 +66,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       assert.equal(response.status,200,JSON.stringify(response.body));return response.body;
     };
     assert.equal((await risk()).status,'incomplete');
+    assert.equal((await risk()).laborCostBudget,null);
     assert.equal((await request(riskPath+addUtcDays(today,1))).status,404);
     await pool.query(`insert into role_permissions(role_name,permission_key,enabled) select 'Employee',k,true from unnest($1::text[]) k
       on conflict(role_name,permission_key) do update set enabled=true`,[['commercial.fixed_fee_cost.view','commercial.cost_candidates.view']]);
@@ -152,12 +153,25 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual([exceeded.status,exceeded.complete,exceeded.remainingAllocation,exceeded.retainedCost,exceeded.approvedEntries,exceeded.costedEntries],
       ['exceeded',true,'-20.864','70.864',3,3]);
     const revision=await seedApplicableAmendmentVersion(pool,identities.manager,contract,today);
+    const invalidBudget=amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),revision,{laborCostBudget:'55'});
+    assert.equal((await request('/amendments/Contract/'+contract.id+'/preview',{method:'POST',body:invalidBudget})).status,422);
     await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),revision));
     assert.equal((await risk()).allocation,'50');
-    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{budget:'70.864'}));
+    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{budget:'70.864',laborCostBudget:'60.5'}));
     const exhausted=await risk();
+    assert.deepEqual([exhausted.laborCostBudget,exhausted.remainingLaborBudget,exhausted.laborBudgetStatus],['60.5','-10.364','exceeded']);
     assert.deepEqual([exhausted.status,exhausted.allocation,exhausted.remainingAllocation,exhausted.contractVersionId,exhausted.amendmentId],
       ['exhausted','70.864','0',revision.id,event.id]);
+    const futureVersion=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},addUtcDays(today,1));
+    await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),futureVersion));
+    const next=amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),futureVersion);
+    const inherited=await amendmentPreview(request,'Engagement',engagement.id,next);
+    assert.deepEqual([inherited.before.laborCostBudget,inherited.after.laborCostBudget],['60.5','60.5']);
+    const tampered=await request('/amendments/Engagement/'+engagement.id,{method:'POST',body:{...next,laborCostBudget:'0',previewToken:inherited.previewToken}});
+    assert.equal(tampered.status,409);
+    const futureBudget=await amendmentApply(request,'Engagement',engagement.id,{...next,laborCostBudget:'0'});
+    assert.equal(futureBudget.laborCostBudget,'0');
+    assert.equal((await risk()).laborCostBudget,'60.5');
     await assert.rejects(pool.query("update timesheet_entries set remark='Synthetic changed evidence' where project_id=$1 and hours=2.5",[project.id]),e=>e.code==='WWP01');
     const historicalSheet=randomUUID();
     await pool.query(`insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours,organization_id,legal_entity_id)
@@ -167,7 +181,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,unresolvedEntries:1,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.equal((await inspect()).body.complete,false);
     const incomplete=await risk();
-    assert.deepEqual([incomplete.status,incomplete.complete],['incomplete',false]);
+    assert.deepEqual([incomplete.status,incomplete.complete,incomplete.laborBudgetStatus],['incomplete',false,'exceeded']);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");
     assert.equal((await request(path)).status,403);
   });
