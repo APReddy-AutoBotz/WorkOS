@@ -140,11 +140,16 @@ const verifyCommercialDrafting = async reversalScenario => {
     const denied = await createContext(identities.denied, []);let deniedApiCalls = 0;denied.page.on('request', request => {if (new URL(request.url()).pathname.startsWith('/api/')) deniedApiCalls++;});await denied.page.goto(`${baseUrl}/tests/fixtures/commercial-drafting.html?live=1`);await denied.page.getByRole('alert').getByText('Scope or access changed.', {exact: false}).waitFor();assert.equal(deniedApiCalls, 0);assert.equal(writes.length, writeCount);
     const releasePath='/purchase-orders/'+po.result.id+'/release';
     const releaseCommand={contractVersionId:versionId,approvalReference:'SYN-PO-AUTH-001',reason:'Verified signed purchase order'};
+    const riskPath='/purchase-order-risks?expiresBy='+po.result.endsOn;
+    assert.equal((await apiRequest(riskPath,{identity:identities.reader})).status,403);
     const postRelease=(identity,body=releaseCommand)=>apiRequest(releasePath,{method:'POST',identity,body});
     assert.equal((await postRelease(identities.reader)).status,403);
     for (const [role,key] of [['Admin','commercial.lifecycle.manage'],['Admin','commercial.purchase_orders.release'],
       ['Employee','commercial.contracts.manage'],['Employee','commercial.purchase_orders.release']])
       await pool.query('insert into role_permissions(role_name,permission_key,enabled) values($1,$2,true) on conflict(role_name,permission_key) do update set enabled=true',[role,key]);
+    assert.deepEqual((await apiRequest(riskPath,{identity:identities.reader})).body.orders,[]);
+    assert.equal((await apiRequest(riskPath+'&organizationId=other',{identity:identities.reader})).status,400);
+    assert.equal((await apiRequest(riskPath,{identity:identities.reader,headers:{'x-legal-entity-id':'other-synthetic-entity'}})).status,403);
     assert.equal((await postRelease(identities.manager)).status,403);
     assert.equal((await postRelease(identities.reader)).status,409);
     const active=await apiRequest('/lifecycle/Contract/'+contractId+'/transitions',{method:'POST',
@@ -170,6 +175,15 @@ const verifyCommercialDrafting = async reversalScenario => {
     assert.equal(released.status(),201,await released.text());
     await reviewer.page.getByText(/Released .*SYN-PO-AUTH-001/).waitFor();
     await reviewer.page.getByText(/Committed 0 .*Gross consumed 0 .*Available 7500.4500/).waitFor();
+    const register=reviewer.page.getByRole('group',{name:'Released purchase-order risks'});
+    await register.getByLabel('Include orders expiring through').fill(po.result.endsOn);
+    await register.getByRole('button',{name:'Check purchase-order risks'}).click();
+    await register.getByText(po.result.number,{exact:true}).waitFor();
+    await register.getByText('Expires in selected window',{exact:true}).waitFor();
+    const riskPage=await apiRequest(riskPath,{identity:identities.reader});
+    assert.deepEqual(riskPage.body.orders.map(row=>[row.id,row.warning,row.exhausted,row.expired,row.expiresInWindow]),
+      [[po.result.id,false,false,false,true]]);
+    assert.deepEqual((await apiRequest(riskPath+'&after='+po.result.id,{identity:identities.reader})).body.orders,[]);
     const receipt=await apiRequest(releasePath);
     assert.equal(receipt.body.release.actorId,identities.reader.id);
     assert.deepEqual((await postRelease(identities.reader)).body,receipt.body);

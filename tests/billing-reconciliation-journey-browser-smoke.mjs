@@ -1159,6 +1159,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await exportUi.getByLabel('Allocation reason').fill('Allocate approved line');
           await exportUi.getByRole('button',{name:'Commit invoice line'}).click();
           await exportUi.getByText(/Order committed 80.*Gross consumed 0.*Available 20.*Warning threshold reached/).waitFor();
+          const riskRegister=ok(await request('/purchase-order-risks?expiresBy='+fx.today,{identity:ids.requester}));
+          assert.deepEqual(riskRegister.orders.map(row=>[row.number,row.warning,row.exhausted,row.expiresInWindow,Number(row.remaining)]),
+            [['SYN-PO-100',true,false,false,20]]);
           const initial=ok(await assignPo('SYN-PO-100'));
           assert.equal(initial.replayed,true);
           assert.equal((await assignPo('SYN-PO-79')).status,409);

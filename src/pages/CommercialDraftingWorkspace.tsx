@@ -3,6 +3,7 @@ import {ServicePeriodReview} from './ServicePeriodReview';
 import {ServiceUnitCapture} from './ServiceUnitCapture';
 import {RetainerConsumption} from '../components/RetainerConsumption';
 import {FixedFeeInstallmentRegister} from '../components/FixedFeeInstallmentRegister';
+import {PurchaseOrderRiskRegister} from '../components/PurchaseOrderRiskRegister';
 import {PurchaseOrderReleasePanel} from '../components/PurchaseOrderReleasePanel';
 import {hasRatePermission} from '../services/rateCandidates';
 import {MilestoneBillingWorkspace} from '../components/MilestoneBillingWorkspace';
@@ -505,6 +506,7 @@ export const CommercialDraftingWorkspace = () => {
         </section>
         <div className="min-w-0 space-y-6">
           <section className={panelClass} aria-label="Purchase order drafts"><h2 className="mb-4 text-lg font-bold">Purchase orders ({workspace.purchaseOrders.length})</h2>
+            {state.context?.canManage && state.context.canReleasePurchaseOrder && <div key={state.generation}><PurchaseOrderRiskRegister context={state.context} today={workspace.asOf.slice(0,10)}/></div>}
             {!workspace.purchaseOrders.length && <p>No purchase orders returned for this scope.</p>}
             <ul className="space-y-3">{workspace.purchaseOrders.map(order => <li key={state.generation+'-'+order.id} className="break-words rounded-xl border border-slate-200 p-3"><h3 className="font-bold">{order.number}</h3>
               <p className="mt-1 text-sm">{order.currency} {order.value}. {order.startsOn} to {order.endsOn}. Warning threshold {order.warningThresholdPercent}%.</p><p className="mt-1 text-xs">Pinned terms ID: {order.contractVersionId}. Inspect release for the current order status.</p>

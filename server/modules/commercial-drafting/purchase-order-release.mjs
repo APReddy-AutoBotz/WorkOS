@@ -59,3 +59,25 @@ export async function purchaseOrderBalance(client, req) {
   if (!balance) fail(404,'PO_UNAVAILABLE','This released purchase order is unavailable.');
   return balance;
 }
+
+export const purchaseOrderRiskQuery=z.object({
+  expiresBy:z.string().date(),after:z.string().min(1).max(200).optional()
+}).strict();
+
+export async function purchaseOrderRisks(client,req,{expiresBy,after}) {
+  await assertCommercialAuthority(client,req,'commercial.contracts.manage');
+  await assertCommercialAuthority(client,req,'commercial.purchase_orders.release');
+  const {organizationId,legalEntityId}=req.organizationScope;
+  const asOf=(await client.query("select (now() at time zone 'UTC')::date::text today")).rows[0].today;
+  if (expiresBy<asOf) fail(400,'PO_RISK_DATE','Choose today or a future expiry date.');
+  const {rows}=await client.query(`select p.id,p.number,p.ends_on::text "endsOn",p.currency,p.contract_version_id "contractVersionId",
+    b.committed::text committed,b.consumed::text consumed,b.remaining::text remaining,b.warning,
+    b.remaining<=0 exhausted,p.ends_on<$4::date expired,p.ends_on between $4::date and $3::date as "expiresInWindow"
+    from commercial_purchase_orders p join commercial_purchase_order_releases r
+      on r.organization_id=p.organization_id and r.legal_entity_id=p.legal_entity_id and r.purchase_order_id=p.id
+    cross join lateral commercial_po_balance(p.id) b
+    where p.organization_id=$1 and p.legal_entity_id=$2 and ($5::text is null or p.id collate "C">$5 collate "C")
+      and (p.ends_on<=$3::date or b.warning or b.remaining<=0)
+    order by p.id collate "C" limit 51`,[organizationId,legalEntityId,expiresBy,asOf,after??null]);
+  return {asOf,expiresBy,orders:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};
+}
