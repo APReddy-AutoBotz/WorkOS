@@ -6,6 +6,8 @@ Managed-service reporting supports a read-only comparison of a retained monthly 
 
 ## Release evidence
 
+WOS-OPS-001 pins the Node and PostgreSQL image indexes verified in CI. Refreshing either input requires a reviewed digest update and a successful release build.
+
 WOS-OPS-008 links the tested container to its source revision, portable archive, checksums and runtime software inventory. Buyer custody, release tag, signing decisions and Gate D acceptance remain open.
 
 ## Delivery priorities

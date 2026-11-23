@@ -23,7 +23,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
         env:
           POSTGRES_DB: postgres
           POSTGRES_USER: postgres
@@ -486,6 +486,9 @@ jobs:
           docker compose config --quiet
           API_SESSION_TTL_HOURS=0.25 docker compose config --format json |
             node -e "const config = JSON.parse(require('node:fs').readFileSync(0, 'utf8')); require('node:assert/strict').equal(config.services.app.environment.API_SESSION_TTL_HOURS, '0.25')"
+
+      - name: Verify pinned deployment inputs
+        run: node tests/container-inputs-smoke.mjs
 
       - name: Build production container
         run: |
