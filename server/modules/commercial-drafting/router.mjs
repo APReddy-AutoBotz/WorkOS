@@ -5,6 +5,7 @@ import {elapsedPeriodQuery,reconcileElapsedPeriod} from './fixed-fee-elapsed-per
 import {fixedFeeElapsed,elapsedGrant,elapsedQuery,elapsedCommand} from './fixed-fee-elapsed.mjs';
 import {approveFixedFeeTransition,transitionCommand,transitionGrant} from './fixed-fee-transition.mjs';
 import {fixedFeeForecast,forecastCommand,forecastQuery,forecastGrant} from './fixed-fee-forecast.mjs';
+import {purchaseOrderDeliveryStatus,purchaseOrderRiskPolicy,poRiskConfigureGrant} from './purchase-order-risk-policy.mjs';
 import {fixedFeeRiskDeliveryStatus,fixedFeeRiskPolicy,riskConfigureGrant,riskPolicyCommand} from './fixed-fee-risk-notices.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 import {fixedFeeCosts,fixedCostCommand,fixedCostGrant} from './fixed-fee-cost.mjs';
@@ -73,8 +74,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
       }else if (error?.code==='PRA01') res.status(403).json({error:{code:'PO_ASSIGNMENT_DENIED',message:'Current purchase order authority is required.'}});
       else if (error?.code==='PRA02') res.status(409).json({error:{code:'PO_ASSIGNMENT_INVALID',message:'Review the assignment version and the engagements on this contract.'}});
-      else if (error?.code==='FRN01') res.status(403).json({error:{code:'RISK_POLICY_DENIED',message:'Current scoped configuration authority is required.'}});
-      else if (['FRN02','FRN03'].includes(error?.code)) res.status(409).json({error:{code:'RISK_POLICY_UNAVAILABLE',message:'Review the current recipient relationships, policy version and effective date.'}});
+      else if (['FRN01','PRN01'].includes(error?.code)) res.status(403).json({error:{code:'RISK_POLICY_DENIED',message:'Current scoped configuration authority is required.'}});
+      else if (['FRN02','FRN03','PRN02','PRN03'].includes(error?.code)) res.status(409).json({error:{code:'RISK_POLICY_UNAVAILABLE',message:'Review the current recipient relationships, policy version and effective date.'}});
       else if(valuationPeriodWrite && ['CTM04','40001'].includes(error?.code))res.status(409).json({error:{
         code:'FIXED_FEE_PERIOD_UNAVAILABLE',message:'Verify reporting-period coverage and financial locks before recording this value.'}});
       else if(permission===fixedFeeStatementGrant && ['MFS01','40001','23505'].includes(error?.code))res.status(409).json({error:{code:'STATEMENT_CHANGED',message:'Review the locked period and signed versions again.'}});
@@ -208,6 +209,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/contracts',handle(createContractSchema,true,(client,req,data)=>createContract(client,req,data,audit)));
   router.post('/contracts/:id/versions',handle(appendContractSchema,true,(client,req,data)=>appendContractVersion(client,req,req.params.id,data,audit)));
   router.post('/engagements',handle(createEngagementSchema,true,(client,req,data)=>createEngagement(client,req,data,audit)));
+  router.get('/purchase-orders/:id/risk-deliveries',handle(workspaceQuerySchema,false,purchaseOrderDeliveryStatus));
+  router.get('/purchase-orders/:id/risk-policy',handle(workspaceQuerySchema,false,(c,r)=>purchaseOrderRiskPolicy(c,r)));
+  router.post('/purchase-orders/:id/risk-policy',handle(riskPolicyCommand,true,(c,r,i)=>purchaseOrderRiskPolicy(c,r,i,audit),poRiskConfigureGrant));
   router.get('/purchase-orders/:id/risk-assignments',handle(lifecycleQuerySchema,false,(c,r)=>orderAssignments(c,r)));
   router.post('/purchase-orders/:id/risk-assignments',handle(poRiskAssignments,true,(c,r,i)=>orderAssignments(c,r,i,audit),'commercial.purchase_orders.release'));
   router.get('/purchase-orders/:id/risk-history',handle(purchaseOrderHistoryQuery,false,purchaseOrderRiskHistory));

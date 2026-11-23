@@ -832,3 +832,11 @@ Inspect the engagement expense budget, then the count of projects with an alloca
 ### Review a fixed-fee budget warning
 
 Inspect the engagement’s effective amendment and work-through date. Investigate retained labor costs and verified hours separately. Reconcile incomplete work evidence before treating a below-threshold comparison as complete. To retire a setting, clear the warning field, then preview and approve a later amendment.
+
+### Purchase-order risk notifications
+
+Apply migrations 110–112 in order. Give an authorized commercial reviewer the purchase-order release and contract management permissions for engagement assignments. Give the policy administrator `commercial.po_risk.configure` and access to the commercial workspace. In the released order, review the assigned engagements, then configure the effective notice policy with two named recipients, their held roles and the buyer's template.
+
+The API worker polls every 30 seconds, collects up to 100 verified risk events and processes up to ten due deliveries per pass. An expiry becomes due on the UTC day after the inclusive end date. After a failed delivery, inspect **Check order alert deliveries**, correct the assignments, policy or inbox grants, and verify the next attempt. Delivery retries use bounded exponential backoff. The finance register includes released orders missing engagement assignments even if they have no commitments.
+
+For application rollback, stop the new worker by reverting the application release and retain the additive schema, recorded sources, delivery attempts, receipts and read acknowledgements. Reinstating the worker resumes pending deliveries. Commitments created before migration 110 can be inspected in the current balance register. Their past threshold crossings cannot be individually verified.

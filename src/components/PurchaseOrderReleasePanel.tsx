@@ -1,3 +1,4 @@
+import {PurchaseOrderNoticePolicy} from '../pages/PurchaseOrderNoticePolicy';
 import {PurchaseOrderAlertAssignments} from './PurchaseOrderAlertAssignments';
 import {useRef, useState} from 'react';
 import {commercialDraftingService, isCommercialDraftingContextCurrent,
@@ -56,6 +57,7 @@ export function PurchaseOrderReleasePanel({order,context,engagements}:{order:Pur
     {release && <p>Released {release.releasedAt} · {release.activeRole} · {release.approvalReference}</p>}
     {balance && <p>{order.currency} · Committed {balance.committed} · Gross consumed {balance.consumed} · Available {balance.remaining}
       {balance.warning && <> · Warning threshold reached ({order.warningThresholdPercent}%)</>}</p>}
+    {release && context.canConfigurePoRiskNotices && <PurchaseOrderNoticePolicy order={order.id} context={context} today={new Date().toISOString().slice(0,10)}/>}
     {balance && <><PurchaseOrderAlertAssignments context={context} order={order} engagements={engagements}/>
       <button type="button" onClick={()=>void readHistory(null)}>Inspect risk evidence</button>
       {history && <div>{history.expiredOn && <p>Expired on {history.expiredOn} UTC</p>}

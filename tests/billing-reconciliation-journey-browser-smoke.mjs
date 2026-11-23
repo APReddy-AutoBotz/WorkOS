@@ -1,3 +1,4 @@
+import {verifyPurchaseOrderNotices} from './support/purchase-order-risk-delivery.mjs';
 import { canonicalHours } from '../shared/work-hours.mjs';
 import { INVOICE_EXPORT_EVENT_KEYS } from '../shared/invoice-export-notification.mjs';
 import { readFile } from 'node:fs/promises';
@@ -1818,6 +1819,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           assert.equal(await exportUi.getByRole('region', { name: 'Verified invoice CSV' }).count(), 0);
           assert.deepEqual(requester.errors, []);
           assert.deepEqual(requester.external, []);
+          await verifyPurchaseOrderNotices({pool,request,ids,roots,orderId:riskRegister.orders[0].id,scope:f,today:fx.today,work,open});
           console.log('real React/API/PostgreSQL approved invoice CSV download passed.');
         } finally {
           for (const ctx of contexts) await ctx.close();

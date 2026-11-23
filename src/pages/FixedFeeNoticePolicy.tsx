@@ -1,3 +1,4 @@
+import {RiskNoticePolicyFields} from '../components/RiskNoticePolicyFields';
 import {useState,type FormEvent} from 'react';
 import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
@@ -57,15 +58,7 @@ export function FixedFeeNoticePolicy({context,engagement,today}:{context:Commerc
     </div>}
     {policy!==undefined && <form key={policy?.id??'new'} onSubmit={save}><fieldset disabled={busy}>
       <legend>{policy?'Notice policy version '+policy.version+' · Effective '+policy.effectiveFrom:'Configure budget warning recipients'}</legend>
-      <label>Effective from <input type="date" name="date" min={today.slice(0,10)} required defaultValue={policy && policy.effectiveFrom>today.slice(0,10)?policy.effectiveFrom:today.slice(0,10)}/></label>
-      <label>Commercial manager user ID <input name="manager" required defaultValue={policy?.manager.userId}/></label>
-      <label>Commercial manager role <input name="managerRole" required defaultValue={policy?.manager.role}/></label>
-      <label>Finance or billing owner user ID <input name="finance" required defaultValue={policy?.finance.userId}/></label>
-      <label>Finance or billing owner role <input name="financeRole" required defaultValue={policy?.finance.role}/></label>
-      <label>Template locale <input name="locale" required defaultValue={policy?.locale} placeholder="en-GB"/></label>
-      <label>Notification title <input name="title" maxLength={200} required defaultValue={policy?.title}/></label>
-      <label>Notification body <textarea name="body" maxLength={2000} required defaultValue={policy?.body}/></label>
-      <label>Reason for change <input name="reason" minLength={3} maxLength={1000} required/></label>
+      <RiskNoticePolicyFields policy={policy} today={today}/>
       <button>Save notice policy</button>
     </fieldset></form>}
     {message && <p role="status">{message}</p>}
