@@ -267,3 +267,7 @@ The owner approved capped delivery hours divided by the approved engagement effo
 Effort-based fixed-fee engagements support explicit policy adoption, cumulative value inspection and version retention. Signed-off period close remains open.
 
 Fixed-fee forecast comparisons now consume reconciled effort-based valuation for the selected date. Cross-profile transition reconciliation, costs beyond labor and immutable period close remain open.
+
+### Fixed-fee transition review
+
+Finance can inspect the carry-forward proposal. Retaining an approved transition and reconciling it into earned revenue and margin remain release work.

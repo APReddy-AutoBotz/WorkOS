@@ -808,3 +808,7 @@ Migration 102 registers commercial.fixed_fee_margin.view without assigning it to
 To suspend effort valuation recording, withdraw commercial.fixed_fee_progress.record. End the policy with an approved engagement amendment selecting Disabled or another authorized profile. Preserve migration 103, retained sources, snapshots and audit references. Keep the policy-aware amendment handler when rolling back the reporting UI.
 
 For an unavailable effort-based forecast, inspect the progress evidence for the same work-through date. Resolve outstanding work approvals or retain a replacement after reviewing a source change. Historical cumulative values remain available. Reverting the policy-aware forecast API and UI together requires no data conversion.
+
+### Inspect a fixed-fee valuation switch
+
+Inspect the completion forecast on the final effort day after retaining the verified closing progress snapshot. Check the carry-forward and the residual against the approved engagement allocation. A proposed total requires finance approval before use in earned revenue.

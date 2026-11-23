@@ -262,3 +262,7 @@ Grant **View fixed-fee margins** to finance users who need actual, remaining and
 For effort-based fixed-fee engagements, select **Approved delivery hours** and the currency precision in the engagement amendment. Set a positive hours budget. In **Inspect approved delivery progress**, finance users can see billable and non-billable verified hours and the cumulative earned-management amount. Recording a version requires the separate progress recording permission.
 
 The fixed-fee forecast follows the approved effort profile on its work-through date. Retain a matching cumulative progress version for that exact date to compare earned and remaining revenue. The forecast shows the retained version and whether its evidence still matches.
+
+### Fixed-fee policy changes
+
+On the closing effort day, finance can preview a scheduled switch to elapsed time. The forecast shows the verified closing value, the remaining allocation, and the proposed first-day total.
