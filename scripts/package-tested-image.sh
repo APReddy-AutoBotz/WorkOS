@@ -21,7 +21,9 @@ import {readFileSync} from 'node:fs';
 const bom=JSON.parse(readFileSync(process.argv[2],'utf8'));
 const app=JSON.parse(readFileSync('package.json','utf8'));
 assert.equal(bom.bomFormat,'CycloneDX');
-assert.equal(bom.metadata.component.name,app.name);
+const rootRef=app.name+'@'+app.version;
+assert.equal(bom.metadata.component['bom-ref'],rootRef);
+assert.ok(bom.dependencies.some(edge=>edge.ref===rootRef && edge.dependsOn.length>0));
 assert.equal(bom.metadata.component.version,app.version);
 assert.ok(bom.components.length>0 && bom.dependencies.length>0);
 NODE
