@@ -50,7 +50,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     };
     const tomorrow=addUtcDays(today,1),end=addUtcDays(today,30);
     const periods=[today,tomorrow].map(day=>({startsOn:day,endsOn:day,includedHours:'1.0001',baseFee:'100.125'}));
-    const {project,contract,pin}=await createAmendmentHierarchy(request,'SYN-RETAINER-HOURS',{
+    const {project,contract,engagement,pin}=await createAmendmentHierarchy(request,'SYN-RETAINER-HOURS',{
       contract:{model:'retainer',startsOn:today,endsOn:end,effectiveFrom:today,retainerPeriods:periods,retainerCapacityPolicy:'all_rollover',retainerOveragePolicy:'contract_hourly_at_period_end',retainerRounding:{mode:'HALF_EVEN',precision:2}},
       engagement:{startsOn:today,endsOn:end},project:{startsOn:today,endsOn:end}});
     const read=async(identity=identities.manager,version=pin)=>{
@@ -129,6 +129,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(identities.manager,revised.versions[0].id),empty);
     assert((await request(path.replace(pin,revised.versions[0].id))).body.periods.every(p=>!p.capacity));
     assert.deepEqual(await read(),approved);
+    await amendmentTransition(request,'Project',project.id,1,pin,'On Hold');
+    await amendmentTransition(request,'Engagement',engagement.id,1,pin,'On Hold');
     await amendmentTransition(request,'Contract',contract.id,1,pin,'On Hold');
     const interrupted=await request(register);
     assert.equal(interrupted.status,200);
