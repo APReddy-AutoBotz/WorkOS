@@ -10,6 +10,7 @@ const today=async client=>(await client.query("select (clock_timestamp() at time
 const units=value=>{const [whole,fraction='']=value.split('.');return BigInt(whole)*10000n+BigInt(fraction.padEnd(4,'0'));};
 const eventDto=row=>({id:row.id,sequence:row.sequence,effectiveOn:row.effective_on,contractVersionId:row.contract_version_id,
  startsOn:row.starts_on,endsOn:row.ends_on,budget:row.budget,
+ ...(row.after_value?.terms?.elapsedTimePolicy!==undefined?{elapsedTimePolicy:row.after_value.terms.elapsedTimePolicy}:{}),
  ...(row.after_value?.terms?.budgetHours!==undefined?{budgetHours:row.after_value.terms.budgetHours}:{}),
  ...(row.after_value?.terms?.laborCostBudget!==undefined?{laborCostBudget:row.after_value.terms.laborCostBudget}:{}),reason:row.reason,approvalReference:row.approval_reference,
  actorId:row.actor_id,activeRole:row.active_role,correlationId:row.correlation_id,operationId:row.operation_id,
@@ -113,9 +114,14 @@ const validate=async(client,req,type,id,input)=>{
  if(blocked.blocked)fail(409,'COMMERCIAL_AMENDMENT_DEPENDENCIES','Existing future assignments or work extend beyond the proposed remaining term.');
  if ((input.laborCostBudget!==undefined || input.budgetHours!==undefined) && (type!=='Engagement' || root.model!=='fixed_fee'))
   fail(422,'COMMERCIAL_TERMS_MISMATCH','Labor and effort budgets require a fixed-fee engagement.');
+ if (input.elapsedTimePolicy!==undefined && (type!=='Engagement' || root.model!=='fixed_fee'))
+  fail(422,'COMMERCIAL_TERMS_MISMATCH','Elapsed-time valuation requires a fixed-fee engagement.');
+ if (before.elapsedTimePolicy!==undefined && before.elapsedTimePolicy!=='disabled' && input.elapsedTimePolicy===undefined)
+  fail(422,'COMMERCIAL_POLICY_REQUIRED','Review the elapsed-time policy when approving replacement terms.');
+ const elapsedTimePolicy=input.elapsedTimePolicy??before.elapsedTimePolicy;
  const laborCostBudget=input.laborCostBudget??before.laborCostBudget;
  const budgetHours=input.budgetHours??before.budgetHours;
- const after={...(budgetHours===undefined?{}:{budgetHours}),...(laborCostBudget===undefined?{}:{laborCostBudget}),contractVersionId:input.contractVersionId,startsOn:input.startsOn,endsOn:input.endsOn,budget:input.budget};
+ const after={...(elapsedTimePolicy===undefined?{}:{elapsedTimePolicy}),...(budgetHours===undefined?{}:{budgetHours}),...(laborCostBudget===undefined?{}:{laborCostBudget}),contractVersionId:input.contractVersionId,startsOn:input.startsOn,endsOn:input.endsOn,budget:input.budget};
  const preview={asOf:date,entityType:type,entityId:id,before,after,effectiveOn:input.effectiveOn,dependencies:{projects:dependencies.projects.length},
   warnings:['No child terms, immutable activation pin, accepted work, valuation, PO consumption or billing is changed. Work-date and assignment-policy enforcement is a separate workstream.']};
  const token=createHash('sha256').update(JSON.stringify({scope:scope(req),actor:req.user.sub,role:req.user.activeRole,input,preview,lifecycle,parent,dependencies,contractVersion:contract.latestVersion,target})).digest('hex');

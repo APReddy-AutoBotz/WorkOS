@@ -85,7 +85,7 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
           join invoice_draft_occupancies o on o.line_id=l.id where a.id=$1`,[delivery.a.id])).rows;
         const before=await evidence();
         assert.equal(before.length,1);
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['098_wos06_fixed_fee_credit_corrections','099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['098_wos06_fixed_fee_credit_corrections','099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values']);
         assert.deepEqual(await evidence(),before);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
         return {...delivery,batchId:batch.id,lineId:line.line.id,policyId:policy.id};

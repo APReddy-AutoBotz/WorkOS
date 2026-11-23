@@ -250,3 +250,5 @@ Finance users can also enter expected total revenue at completion in the engagem
 The fixed-fee forecast also shows expected revenue less projected labor cost for the selected version. Both inputs must be available. A zero revenue forecast still shows the projected labor loss, with no percentage.
 
 Each fixed-fee forecast shows how far its estimated hours and labor cost are over or under the budgets retained at review. An exact match shows “On budget”. A missing budget or incomplete estimate makes only that comparison unavailable.
+
+For fixed-fee operational earned-management valuation, an authorized amendment owner selects **Elapsed service days** and the rounding precision when approving engagement terms. In the engagement’s finance view, choose a service date and select **Inspect elapsed service day**. Finance users with the recording permission can retain the daily amount and its approval evidence. The default is disabled.

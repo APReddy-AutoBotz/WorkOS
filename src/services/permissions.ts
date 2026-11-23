@@ -50,6 +50,7 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.service_margin.view', module: 'Commercial', label: 'View managed-service margins', description: 'Read financial period versions for managed-service engagements.', optIn: true },
   { key: 'commercial.service_margin.record', module: 'Commercial', label: 'Retain managed-service margins', description: 'Retain a new managed-service period version from current evidence.', optIn: true },
   { key: 'commercial.fixed_fee_forecast.record', module: 'Commercial', label: 'Record fixed-fee forecasts', description: 'Retain remaining effort and labor cost estimates against inspected actuals.', optIn: true },
+  { key: 'commercial.fixed_fee_elapsed.record', module: 'Commercial', label: 'Retain fixed-fee elapsed values', description: 'Retain the operational value of an approved fixed-fee service day.', optIn: true },
   { key: 'commercial.fixed_fee_cost.record', module: 'Commercial', label: 'Retain fixed-fee worker costs', description: 'Record an immutable cost for verified fixed-fee work.', optIn: true },
   { key: 'commercial.service_cost.record', module: 'Commercial', label: 'Record managed-service effort cost', description: 'Retain the adopted hourly worker cost for accepted service effort.', optIn: true },
   { key: 'commercial.service_periods.issue', module: 'Commercial', label: 'Register approved service periods', description: 'Issue a contractual charge for an independently approved managed-service period.', optIn: true },

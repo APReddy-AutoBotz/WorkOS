@@ -796,3 +796,5 @@ To suspend fixed-fee revenue outlook recording, withdraw the forecast recording 
 The optional labor_margin view of the fixed-fee forecast API derives its values from the requested immutable version under the existing financial permissions and worker-scope checks. To roll back, deploy the previous forecast UI and API together. Forecast records require no conversion.
 
 The budget_comparison forecast view adds signed hours and labor-cost variances to the scoped financial report. Reverting the UI and API together preserves all recorded versions. No data migration is required.
+
+To suspend daily valuation recording, withdraw commercial.fixed_fee_elapsed.record. To end the active elapsed-time profile, approve a fixed-fee engagement amendment selecting Disabled and an effective date. Preserve migration 101, commercial amendment history, daily values and matching audit records. Replacing the UI and API with older builds disables policy controls. Restore the policy-aware amendment handler before accepting edits to engagements with active elapsed-time policies.
