@@ -3,10 +3,12 @@ import {decimalDifference} from '../../../shared/work-hours.mjs';
 import {calculateLaborMargin} from '../../../shared/labor-margin.mjs';
 import {z} from 'zod';
 import {decimalAmount,fail} from './contracts.mjs';
+import {assertElapsedReadScope} from './fixed-fee-elapsed.mjs';
+import {earnedRevenue} from './fixed-fee-earned-revenue.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 
 export const forecastGrant='commercial.fixed_fee_forecast.record';
-const forecastView=riskQuery.extend({view:z.enum(['labor_margin','budget_comparison']).optional()});
+const forecastView=riskQuery.extend({view:z.enum(['labor_margin','budget_comparison','revenue_reconciliation']).optional()});
 export const forecastQuery=forecastView.extend({version:z.coerce.number().int().positive().max(2147483647).optional()}).strict();
 export const forecastCommand=forecastView.extend({expectedVersion:z.number().int().nonnegative().max(2147483646),
   expectedToken:z.string().regex(/^[0-9a-f]{64}$/),requestId:z.string().uuid(),remainingHours:decimalAmount,remainingCost:decimalAmount,
@@ -17,6 +19,7 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
   const {organizationId,legalEntityId}=req.organizationScope;
   const engagementId=req.params.id,through=input.through;
   const args=[organizationId,legalEntityId,engagementId,through];
+  if (input.view==='revenue_reconciliation') await assertElapsedReadScope(client,req,scope);
   const risk=await fixedFeeRisk(client,req,{through},scope,true);
   const {verifiedHours,unresolved,workToken,costToken}=risk.forecastEvidence;
   const baseline={engagementId,through,currency:risk.currency,contractVersionId:risk.contractVersionId,amendmentId:risk.amendmentId,
@@ -28,20 +31,21 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
   const {rows:[latest]}=await client.query(`select ${fields} from commercial_fixed_fee_forecasts where ${where} order by version desc limit 1`,args);
   const latestVersion=latest?.version??0;
   let saved=latest??null;
-  function response(saved, latestVersion) {
+  async function response(saved, latestVersion) {
     const result={baseline,token,latestVersion,saved};
     if (input.view) {
       const report=saved?.report;
       result.laborMargin=report?.expectedTotalRevenue!==undefined && report.estimatedCost!=null
         ? calculateLaborMargin(report.expectedTotalRevenue,report.estimatedCost) : null;
     }
-    if (input.view==='budget_comparison') {
+    if (input.view==='budget_comparison' || input.view==='revenue_reconciliation') {
       const report=saved?.report;
       result.budgetVariance={
         hours:report?.budgetHours!=null && report.estimatedHours!=null ? decimalDifference(report.estimatedHours,report.budgetHours) : null,
         laborCost:report?.budgetCost!=null && report.estimatedCost!=null ? decimalDifference(report.estimatedCost,report.budgetCost) : null,
       };
     }
+    if (input.view==='revenue_reconciliation') result.revenue=await earnedRevenue(client,args,baseline.currency,saved?.report.expectedTotalRevenue);
     return result;
   }
   if (audit) {

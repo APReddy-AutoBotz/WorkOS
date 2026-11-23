@@ -759,3 +759,5 @@ WOS-COM-011 — The commercial specification records the owner-selected revenue 
 WOS-COM-007 / WOS-COM-011 / WOS-COM-014 — Migration 101, governed fixed-fee amendments and the elapsed service-day API implement opt-in policy selection, native-currency daily calculation, source retention and scoped historical readback. The fixed-fee PostgreSQL/API/browser journey exercises disabled policy, date and permission boundaries, exact rounding, stale inputs, concurrent replay and immutability.
 
 WOS-COM-011 / WOS-RPT-003 / WOS-NFR-DAT-007 — The fixed-fee period API and finance view reconcile dated evidence and expose the matched total only with complete applicable coverage. The PostgreSQL/API/browser journey covers missing and inapplicable days, a hold and reactivation, replacement versions, range limits and revoked access.
+
+WOS-COM-011 / WOS-COM-012 / WOS-RPT-003 — The fixed-fee forecast compares a versioned expected total with current reconciled elapsed-time earned revenue through its work date. The PostgreSQL/API/browser journey covers missing evidence, a zero outlook, fractional remaining value, an absent outlook, lifecycle changes and replacement versions.

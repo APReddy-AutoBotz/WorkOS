@@ -30,6 +30,8 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
         <p>Actuals through {through}: {data.baseline.actualHours} verified hours · {data.baseline.currency} {data.baseline.actualCost} retained labor cost</p>
         {!data.baseline.hoursComplete && <p>Hours at completion require verified approval evidence for every entry.</p>}
         {!data.baseline.costComplete && <p>Cost at completion requires retained cost for every approved entry.</p>}
+        <p>Reconciled elapsed-time revenue through {through}: {data.revenue.earnedAmount===null?'Unavailable':data.baseline.currency+' '+data.revenue.earnedAmount}</p>
+        <p>{data.revenue.applicableDays} applicable days · {data.revenue.missingDays} missing · {data.revenue.staleDays} stale</p>
         {saved && <div><p>Forecast version {saved.version} · {saved.reason}</p>
           <p>Budget at review: {saved.report.budgetHours??'Unset'} hours · Labor cost {saved.report.budgetCost??'Unset'} {saved.report.currency}</p>
           <p>Actuals at review: {saved.report.actualHours} hours · Labor cost {saved.report.actualCost} {saved.report.currency}</p>
@@ -38,6 +40,7 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
           <p>Forecast hours versus budget: {budgetComparison(data.budgetVariance.hours,'hours')}</p>
           <p>Forecast labor cost versus budget: {budgetComparison(data.budgetVariance.laborCost,saved.report.currency)}</p>
           <p>Expected total revenue at completion: {saved.report.expectedTotalRevenue===undefined ? 'Unspecified' : saved.report.currency+' '+saved.report.expectedTotalRevenue}</p>
+          <p>Remaining forecast revenue after reconciled elapsed-time value: {data.revenue.remainingRevenue===null?'Unavailable':saved.report.currency+' '+data.revenue.remainingRevenue}</p>
           <p>Forecast margin after labor cost: {data.laborMargin ? saved.report.currency+' '+data.laborMargin.amount : 'Unavailable'}
             {data.laborMargin && (data.laborMargin.percent===null ? ' · Percentage unavailable for zero revenue' : ' · '+data.laborMargin.percent+'%')}</p>
           {saved.version>1 && <button type="button" onClick={()=>void inspect(saved.version-1)}>Previous forecast version</button>}

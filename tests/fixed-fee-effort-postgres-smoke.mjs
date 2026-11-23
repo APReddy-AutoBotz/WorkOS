@@ -1,3 +1,4 @@
+import {checkElapsedHistory} from './support/fixed-fee-revenue-history.mjs';
 import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import {runMigrations} from '../server/migrate.mjs';
 import {startFixtureServer} from './support/compiled-fixture-server.mjs';
@@ -154,8 +155,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       await periodDesk.getByRole('button',{name:'Reconcile period'}).click();
       await periodDesk.getByText('0 matched · 0 missing · 0 stale · 1 outside policy').waitFor();
       await periodDesk.getByText('Reconciled elapsed-time value: Unavailable').waitFor();
+      const disabledRevenue=await request(forecastPath+'?through='+today+'&view=revenue_reconciliation');
+      assert.equal(disabledRevenue.status,200,JSON.stringify(disabledRevenue.body));
+      assert.deepEqual(disabledRevenue.body.revenue,{applicableDays:0,missingDays:0,staleDays:0,earnedAmount:null,remainingRevenue:null});
       const desk=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
       await desk.getByRole('button',{name:'Inspect completion forecast'}).click();
+      await desk.getByText('Reconciled elapsed-time revenue through '+today+': Unavailable').waitFor();
       await desk.getByLabel('Remaining forecast hours').fill('6.25');
       await desk.getByLabel('Remaining labor cost (GBP)').fill('30.1725');
       await desk.getByLabel('Expected total revenue at completion (GBP, optional)').fill('130.1234');
@@ -204,6 +209,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const elapsedPath='/engagements/'+engagement.id+'/fixed-fee-elapsed';
     const rangePath=(from,through)=>elapsedPath+'-period?'+new URLSearchParams({from,through});
     const range=rangePath(addUtcDays(today,-1),today);
+    const revenue=async(version=1)=>(await request(forecastPath+'?through='+today+'&view=revenue_reconciliation&version='+version)).body.revenue;
+    assert.deepEqual(await revenue(),{applicableDays:1,missingDays:1,staleDays:0,earnedAmount:null,remainingRevenue:null});
     const beforeRetain=(await request(range)).body;
     assert.deepEqual([beforeRetain.amount,beforeRetain.missing,beforeRetain.inapplicable],[null,1,1]);
     assert.equal((await request(rangePath(addUtcDays(today,-366),today))).status,400);
@@ -221,6 +228,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const [firstDay,retryDay]=await Promise.all([post(elapsedPath,retainDay),post(elapsedPath,retainDay)]);
     assert.deepEqual(firstDay.saved,retryDay.saved);
     assert.equal(firstDay.saved.version,1);
+    await checkElapsedHistory(pool,commercialFixture.organizationId,commercialFixture.legalEntityId,engagement.id,today);
     const reconciled=(await request(range)).body;
     assert.deepEqual([reconciled.matched,reconciled.missing,reconciled.stale,reconciled.inapplicable,reconciled.amount,reconciled.currency],[1,0,0,1,'2.29','GBP']);
     assert.deepEqual(reconciled.days[1],{serviceDay:today,status:'matched',snapshotId:firstDay.saved.id,version:1,retainedAmount:'2.29',applicableAmount:'2.29'});
@@ -266,10 +274,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal((await record({...revised,remainingCost:'0'})).status,409);
     assert.equal((await record({...revised,requestId:randomUUID()})).status,409);
     assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Fixed Fee Completion Forecast'")).rows[0].n,2);
+    assert.deepEqual(await revenue(2),{applicableDays:1,missingDays:0,staleDays:0,earnedAmount:'2.29',remainingRevenue:'-2.29'});
     const positive=await record({...makeCommand(await forecast()),view:'labor_margin',expectedTotalRevenue:'130.1234'});
     assert.equal(positive.status,201);
     assert.deepEqual(positive.body.laborMargin,{amount:'29.0869',percent:'22.35'});
     assert.deepEqual(await marginAt(3),positive.body.laborMargin);
+    assert.equal((await revenue(3)).remainingRevenue,'127.8334');
     const lower=await record({...makeCommand(await forecast()),view:'budget_comparison',remainingHours:'0',remainingCost:'0'});
     assert.equal(lower.status,201);
     assert.deepEqual(lower.body.budgetVariance,{hours:'-0.75',laborCost:'10.364'});
@@ -313,6 +323,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual([incomplete.status,incomplete.complete,incomplete.laborBudgetStatus],['incomplete',false,'exceeded']);
     await amendmentTransition(request,'Project',project.id,1,contract.versions[0].id,'On Hold');
     await amendmentTransition(request,'Engagement',engagement.id,1,contract.versions[0].id,'On Hold');
+    assert.equal((await revenue(3)).remainingRevenue,null);
     const held=(await request(range)).body;
     assert.deepEqual([held.stale,held.amount,held.days[1].applicableAmount,held.days[1].retainedAmount],[1,null,null,'2.29']);
     await amendmentTransition(request,'Engagement',engagement.id,2,contract.versions[0].id);
@@ -320,6 +331,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const changed=(await request(range)).body;
     assert.deepEqual([changed.stale,changed.amount,changed.days[1].applicableAmount],[1,null,'2.29']);
     const replacement=await post(elapsedPath,{...retainDay,expectedVersion:1,lifecycleId:resumed.report.lifecycleId});
+    assert.equal((await revenue(3)).remainingRevenue,'127.8334');
+    assert.equal((await revenue(incompleteForecast.body.saved.version)).remainingRevenue,null);
     const restored=(await request(range)).body;
     assert.deepEqual([restored.matched,restored.amount,restored.days[1].version,restored.days[1].snapshotId],[1,'2.29',2,replacement.saved.id]);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");

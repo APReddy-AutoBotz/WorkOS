@@ -246,14 +246,16 @@ Fixed-fee amendments now support approved effort budgets and work-date variance 
 
 Fixed-fee hours and labor-cost estimates at completion now retain reviewed versions against dated actuals, with independent completeness checks for hours and cost. Configurable risk thresholds, and policy-governed fixed-fee earned-management valuation remain open.
 
-The fixed-fee forecast supports a reviewed total revenue outlook. Actual earned revenue and remaining revenue still require separate evidence and controls.
+The fixed-fee forecast supports a reviewed total revenue outlook. The elapsed-time comparison uses reconciled daily records.
 
-Fixed-fee forecasts show the expected margin after labor cost for each retained version. Actual and remaining revenue and margin, other cost categories, and an authorized earned-management policy remain open.
+Fixed-fee forecasts show the expected margin after labor cost for each retained version. Other cost categories and actual and remaining margin remain open.
 
 Fixed-fee forecast review shows exact overrun or headroom for hours and labor cost against the budgets retained with each version. Buyer-configured thresholds and alert routing remain open.
 
 The owner selected the approved engagement allocation over its approved service dates as the basis for fixed-fee elapsed-time valuation. The daily reporting workflow is described below.
 
-Fixed-fee elapsed-time policy adoption and daily valuation use approved amendment allocations and inclusive service dates. Finance users can inspect and retain a versioned daily value. Fixed-fee progress/effort policies and actual-versus-remaining revenue reporting remain open.
+Fixed-fee elapsed-time policy adoption and daily valuation use approved amendment allocations and inclusive service dates. Finance users can inspect and retain a versioned daily value. Fixed-fee progress/effort policies remain open.
 
-Finance users can reconcile fixed-fee elapsed values over a selected period and inspect each daily version. Progress-based valuation, actual-versus-remaining revenue reporting and immutable period close remain open.
+Finance users can reconcile fixed-fee elapsed values over a selected period and inspect each daily version. Progress-based valuation and immutable period close remain open.
+
+Fixed-fee forecasts now compare expected total revenue with reconciled elapsed-time value through the forecast date. Remaining work includes progress-based valuation, actual and remaining margin reporting, and immutable period close.
