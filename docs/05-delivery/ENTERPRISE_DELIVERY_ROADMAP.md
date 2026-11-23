@@ -280,4 +280,4 @@ Purchase-order alerts now cover unused released orders, shared orders, verified 
 
 ### Retainer risk reporting
 
-Finance can inspect capacity findings across governed retainer contract versions. The register uses approved work, effective capacity policies and UTC service dates. Mandatory retainer inbox delivery and portfolio margin alerts remain outstanding.
+Finance can inspect capacity findings across governed retainer contract versions. The register uses approved work, effective capacity policies and UTC service dates. Retainer overconsumption and expiry now support mandatory in-app delivery to explicitly assigned engagement owners, a named commercial manager and a finance/billing owner. Portfolio margin alerts remain outstanding.

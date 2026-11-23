@@ -30,42 +30,7 @@ export async function getRetainerConsumption(client, req, buildEmployeeScopeWher
     if (!version.rows[0].retainer_rounding) fail(409,'RETAINER_ROUNDING_REQUIRED','Select monetary rounding before preparing a statement.');
   }
   if (!periods.length) return {contractId, versionId, periods:[]};
-  const result = await client.query(`
-    with periods as (
-      select * from jsonb_to_recordset($5::jsonb) as p("startsOn" date,"endsOn" date)
-    ), approved as (
-      select entry.work_date,entry.hours,entry.billable${statementStart ? `,entry.id entry_id,submission.id submission_id,
-        decision.id decision_id,eng.id engagement_id,b.project_id,sheet.employee_id worker_id` : ''} from commercial_engagements eng
-      join commercial_project_bindings b on b.organization_id=eng.organization_id and b.legal_entity_id=eng.legal_entity_id
-        and b.engagement_id=eng.id and b.model=eng.model
-      join timesheet_entries entry on entry.project_id=b.project_id and entry.hours>0
-      join timesheets sheet on sheet.id=entry.timesheet_id and sheet.status='Approved'
-        and sheet.organization_id=eng.organization_id and sheet.legal_entity_id=eng.legal_entity_id
-      join employees worker on worker.id=sheet.employee_id
-      join lateral (select s.id,s.entries from work_submission_evidence s where s.timesheet_id=sheet.id
-        and s.organization_id=eng.organization_id and s.legal_entity_id=eng.legal_entity_id
-        order by s.sequence desc limit 1) submission on true
-      join lateral (select d.status,d.id from work_submission_decisions d where d.submission_id=submission.id
-        order by d.created_at desc,d.id desc limit 1) decision on decision.status='Approved'
-      where eng.organization_id=$1 and eng.legal_entity_id=$2 and eng.contract_id=$3 and eng.model='retainer'
-        ${source.throughToday ? "and entry.work_date<=(now() at time zone 'UTC')::date" : ''}
-        and ${workerScope}
-        and exists (select 1 from jsonb_array_elements(submission.entries) item
-          where item->>'entryId'=entry.id::text and item->>'kind'='governed' and item->>'bindingId'=b.id
-            and item->>'projectId'=entry.project_id and item->>'workDate'=entry.work_date::text
-            and (item->>'hours')::numeric=entry.hours and (item->>'billable')::boolean=entry.billable
-            and item->'references'->0->>'contractVersionId'=$4
-            and commercial_tm_terms_match(b,eng,item->'references',entry.work_date))
-    )
-    select p."startsOn"::text,p."endsOn"::text,
-      ${statementStart ? `count(a.entry_id)::int as "entryCount",
-        coalesce(jsonb_agg(jsonb_build_object('entryId',a.entry_id,'submissionId',a.submission_id,'decisionId',a.decision_id,
-          'projectId',a.project_id,'workerId',a.worker_id,'engagementId',a.engagement_id,'workDate',a.work_date,'billable',a.billable,'hours',trim_scale(a.hours)::text)
-          order by a.entry_id) filter(where a.entry_id is not null),'[]'::jsonb) as entries,` : ''}
-      trim_scale(coalesce(sum(a.hours) filter(where a.billable),0))::text as "billableHours",
-      trim_scale(coalesce(sum(a.hours) filter(where not a.billable),0))::text as "nonBillableHours"
-    from periods p left join approved a on a.work_date between p."startsOn" and p."endsOn"
-    group by p."startsOn",p."endsOn" order by p."startsOn"`, params);
+  const result=await approvedRetainerRows(client,params,workerScope,Boolean(statementStart),Boolean(source.throughToday));
   const {retainer_capacity_policy:policy,today,effective_from:effectiveFrom} = version.rows[0];
   const rows = coverage.entityWide && policy
     ? retainerBalances(periods,result.rows,policy,today,effectiveFrom) : result.rows;
@@ -83,4 +48,43 @@ export async function getRetainerConsumption(client, req, buildEmployeeScopeWher
     return {contractId,versionId,currency,periods:prices};
   }
   return {contractId, versionId, periods:rows};
+}
+
+export async function approvedRetainerRows(client,params,workerScope,statementStart,throughToday) {
+  return client.query(`
+    with periods as (
+      select * from jsonb_to_recordset($5::jsonb) as p("startsOn" date,"endsOn" date)
+    ), approved as (
+      select entry.work_date,entry.hours,entry.billable${statementStart ? `,entry.id entry_id,submission.id submission_id,
+        decision.id decision_id,eng.id engagement_id,b.project_id,sheet.employee_id worker_id` : ''} from commercial_engagements eng
+      join commercial_project_bindings b on b.organization_id=eng.organization_id and b.legal_entity_id=eng.legal_entity_id
+        and b.engagement_id=eng.id and b.model=eng.model
+      join timesheet_entries entry on entry.project_id=b.project_id and entry.hours>0
+      join timesheets sheet on sheet.id=entry.timesheet_id and sheet.status='Approved'
+        and sheet.organization_id=eng.organization_id and sheet.legal_entity_id=eng.legal_entity_id
+      join employees worker on worker.id=sheet.employee_id
+      join lateral (select s.id,s.entries from work_submission_evidence s where s.timesheet_id=sheet.id
+        and s.organization_id=eng.organization_id and s.legal_entity_id=eng.legal_entity_id
+        order by s.sequence desc limit 1) submission on true
+      join lateral (select d.status,d.id from work_submission_decisions d where d.submission_id=submission.id
+        order by d.created_at desc,d.id desc limit 1) decision on decision.status='Approved'
+      where eng.organization_id=$1 and eng.legal_entity_id=$2 and eng.contract_id=$3 and eng.model='retainer'
+        ${throughToday ? "and entry.work_date<=(now() at time zone 'UTC')::date" : ''}
+        and ${workerScope}
+        and exists (select 1 from jsonb_array_elements(submission.entries) item
+          where item->>'entryId'=entry.id::text and item->>'kind'='governed' and item->>'bindingId'=b.id
+            and item->>'projectId'=entry.project_id and item->>'workDate'=entry.work_date::text
+            and (item->>'hours')::numeric=entry.hours and (item->>'billable')::boolean=entry.billable
+            and item->'references'->0->>'contractVersionId'=$4
+            and commercial_tm_terms_match(b,eng,item->'references',entry.work_date))
+    )
+    select p."startsOn"::text,p."endsOn"::text,
+      ${statementStart ? `count(a.entry_id)::int as "entryCount",
+        coalesce(jsonb_agg(jsonb_build_object('entryId',a.entry_id,'submissionId',a.submission_id,'decisionId',a.decision_id,
+          'projectId',a.project_id,'workerId',a.worker_id,'engagementId',a.engagement_id,'workDate',a.work_date,'billable',a.billable,'hours',trim_scale(a.hours)::text)
+          order by a.entry_id) filter(where a.entry_id is not null),'[]'::jsonb) as entries,` : ''}
+      trim_scale(coalesce(sum(a.hours) filter(where a.billable),0))::text as "billableHours",
+      trim_scale(coalesce(sum(a.hours) filter(where not a.billable),0))::text as "nonBillableHours"
+    from periods p left join approved a on a.work_date between p."startsOn" and p."endsOn"
+    group by p."startsOn",p."endsOn" order by p."startsOn"`, params);
 }

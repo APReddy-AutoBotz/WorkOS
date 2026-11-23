@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigureRetainerRisk?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -116,6 +116,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canViewFixedFeeMargin:permissions.includes('commercial.fixed_fee_margin.view'),
     canInspectRetainerRisks:!['Employee','TeamLead','ProjectManager','CountryDirector'].includes(user.role) &&
       ['employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
+    canConfigureRetainerRisk:permissions.includes('commercial.retainer_risk.configure'),
     canConfigurePoRiskNotices:permissions.includes('commercial.po_risk.configure'),
     canConfigureRiskNotices:permissions.includes('commercial.fixed_fee_risk.configure'),
     canSignFixedFeeStatement:permissions.includes('commercial.fixed_fee_statement.sign'),
@@ -454,6 +455,27 @@ export const commercialDraftingService = {
       deliveredAt:z.string().datetime().nullable(),nextAttempt:z.string().datetime().nullable()}).strict();
     return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk-deliveries',undefined,
       value=>z.object({engagementId:z.literal(eng),scan:scan.nullable(),events:z.array(event).max(20)}).strict().parse(value),false);
+  },
+  retainerDeliveryStatus(versionId:string,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canConfigureRetainerRisk) throw invalid();
+    const failure=z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable();
+    const history=z.object({attempt:z.number().int().positive(),at:z.string().datetime({offset:true}),failure}).strict();
+    const event=z.object({id:z.string().uuid(),kind:z.enum(['expiry','overconsumption']),startsOn:z.string().date(),endsOn:z.string().date(),
+      attempts:z.number().int().nonnegative(),failure,deliveredAt:z.string().datetime({offset:true}).nullable(),
+      nextAttempt:z.string().datetime({offset:true}).nullable(),history:z.array(history).max(5)}).strict();
+    return request(context,'GET','/retainer-versions/'+encodeURIComponent(versionId)+'/risk-deliveries',undefined,
+      value=>z.object({versionId:z.literal(versionId),scanFailure:z.literal('EVALUATION_UNAVAILABLE').nullable(),events:z.array(event).max(20)}).strict().parse(value),false);
+  },
+  retainerNoticePolicy(versionId:string,context:CommercialDraftingContext,command?:{
+    expectedVersion:number;effectiveFrom:string;locale:string;title:string;body:string;reason:string;
+    manager:{userId:string;role:string};finance:{userId:string;role:string}
+  }) {
+    if (!assertCommercialDraftingContext(context).canConfigureRetainerRisk) throw invalid();
+    const recipient=z.object({userId:z.string().uuid(),role:z.string().min(1)}).strict();
+    const policy=z.object({id:z.string().uuid(),version:z.number().int().positive(),effectiveFrom:z.string().date(),
+      manager:recipient,finance:recipient,locale:z.string(),title:z.string(),body:z.string()}).strict();
+    return request(context,command?'POST':'GET','/retainer-versions/'+encodeURIComponent(versionId)+'/risk-policy',command,
+      value=>z.object({versionId:z.literal(versionId),latest:policy.nullable()}).strict().parse(value),false);
   },
   purchaseOrderDeliveryStatus(order:string,context:CommercialDraftingContext) {
     if (!assertCommercialDraftingContext(context).canConfigurePoRiskNotices) throw invalid();
@@ -847,6 +869,12 @@ export const commercialDraftingService = {
       if (periods.length!==expected.length || periods.some((p,i)=>p.startsOn!==expected[i].startsOn || p.endsOn!==expected[i].endsOn)) throw invalid();
       return periods;
     }),
+  retainerAssignments(versionId:string,context:CommercialDraftingContext,command?:{expectedVersion:number;engagementIds:string[];reason:string}) {
+    if (!assertCommercialDraftingContext(context).canConfigureRetainerRisk) throw invalid();
+    return request(context,command?'POST':'GET','/retainer-versions/'+encodeURIComponent(versionId)+'/risk-assignments',command,
+      value=>z.object({versionId:z.literal(versionId),version:z.number().int().nonnegative(),
+        assignments:z.array(z.object({engagementId:z.string().min(1),ownerAvailable:z.boolean()}).strict())}).strict().parse(value),false);
+  },
   purchaseOrderAssignments(order:PurchaseOrder,context:CommercialDraftingContext,command?:{expectedVersion:number;engagementIds:string[];reason:string}) {
     if (!assertCommercialDraftingContext(context,true).canReleasePurchaseOrder) throw invalid();
     return request(context,command?'POST':'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/risk-assignments',command,
@@ -862,16 +890,20 @@ export const commercialDraftingService = {
       value=>z.object({orderId:z.literal(order.id),currency:z.literal(order.currency),threshold:costDecimal,expiredOn:z.string().date().nullable(),
         priorCommitments:z.number().int().nonnegative(),movements:z.array(movement).max(50),nextAfter:z.string().uuid().nullable()}).strict().parse(value),true);
   },
-  retainerRisks(after:string|null,context:CommercialDraftingContext) {
+  retainerRisks(after:string|null,context:CommercialDraftingContext,routing=false) {
     if (!assertCommercialDraftingContext(context).canInspectRetainerRisks) throw invalid();
     const source={contractId:z.string().min(1),number:z.string().min(1),versionId:z.string().min(1),version:z.number().int().positive()};
     const findings=z.array(z.union([
-      z.object({...source,kind:z.literal('missing_policy')}).strict(),
+      z.object({...source,kind:z.enum(['missing_policy','missing_assignments'])}).strict(),
+      z.object({...source,kind:z.literal('owner_unavailable'),count:z.number().int().positive()}).strict(),
       z.object({...source,kind:z.literal('review_terms'),startsOn:z.string().date(),endsOn:z.string().date()}).strict(),
       z.object({...source,kind:z.enum(['overconsumption','expiry']),startsOn:z.string().date(),endsOn:z.string().date(),
         hours:z.string().regex(/^\d+(?:\.\d+)?$/)}).strict()
     ])).max(2400);
-    return request(context,'GET','/retainer-capacity-risks'+(after?'?after='+encodeURIComponent(after):''),undefined,
+    const query=new URLSearchParams();
+    if (after) query.set('after',after);
+    if (routing) query.set('view','routing');
+    return request(context,'GET','/retainer-capacity-risks?'+query,undefined,
       value=>z.object({asOf:z.string().date(),scannedVersions:z.number().int().min(0).max(10),findings,nextAfter:z.string().min(1).nullable()}).strict().parse(value),false);
   },
   purchaseOrderRisks(expiresBy:string,after:string|null,context:CommercialDraftingContext,routing=false) {

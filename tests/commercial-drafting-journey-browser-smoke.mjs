@@ -1,6 +1,7 @@
 import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import {verifyRecoveredCredit} from './support/retainer-credit-recovery.mjs';
 import {INVOICE_EXPORT_EVENT_KEYS} from '../shared/invoice-export-notification.mjs';
+import {verifyRetainerRiskDelivery} from './support/retainer-risk-delivery-journey.mjs';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {recordAuditEvent} from '../server/modules/audit/audit-record.mjs';
@@ -40,7 +41,7 @@ const verifyCommercialDrafting = async reversalScenario => {
   await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
     values('syn-installment-reviewer','SYN-INSTALLMENT','Synthetic installment reviewer','installment@example.test','Manager','Delivery','US','director-commercial','Active',$1,$2)`,[scope.organizationId,scope.legalEntityId]);
   const beforeLegacy = await legacyState(pool);
-  const fixtureServer = await startFixtureServer({root, fixtures: ['commercial-drafting'], apiUrl});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['commercial-drafting','commercial-approval-inbox'], apiUrl});
   let browser;
   try {
     const baseUrl = fixtureServer.url;
@@ -538,6 +539,10 @@ const verifyCommercialDrafting = async reversalScenario => {
     await retainerRisksUi.getByText(/40.125 unused hours expired/).waitFor();
     const scoped=await apiRequest(riskRegisterPath,{identity:identities.reader});
     assert.equal(scoped.status,403,JSON.stringify(scoped.body));
+    if (reversalScenario==='stale reviewer') await verifyRetainerRiskDelivery({pool,request:apiRequest,manager:identities.manager,finance,
+      contract:savedRetainer.result,versionId:retainerVersion,engagement:eng.body,otherEngagementId:engagement.result.id,createContext,baseUrl,
+      siblingInput:{...engagement.body,model:'retainer',code:'SYN-SHARED-RETAINER',name:'Synthetic second shared retainer',
+        contractId:savedRetainer.result.id,contractVersionId:retainerVersion,startsOn:'2020-01-01',endsOn:'2099-12-31',ownerId:'syn-retainer-reviewer'}});
     const inspect=await apiRequest(registerPath,{identity:finance});
     assert.equal(inspect.status,200,JSON.stringify(inspect.body));assert.deepEqual(inspect.body.engagements,[{id:eng.body.id,name:eng.body.name}]);
     assert.equal((await issueRetainer({...retainerCommand,engagementId:engagement.result.id})).status,409);

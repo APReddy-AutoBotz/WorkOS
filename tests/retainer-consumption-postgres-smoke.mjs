@@ -1,10 +1,12 @@
+import {processRetainerRisks} from '../server/modules/commercial-drafting/retainer-risk-worker.mjs';
+import {runMigrations} from '../server/migrate.mjs';
 import {evidencePage} from '../server/modules/commercial-drafting/retainer-statement.mjs';
 import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import assert from 'node:assert/strict';
 import {priceRetainerOverage} from '../server/modules/commercial-drafting/retainer-overage.mjs';
 import {retainerBalances} from '../server/modules/commercial-drafting/retainer-balances.mjs';
 import {randomUUID} from 'node:crypto';
-import {commercialFixture, withCommercialDatabase, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
+import {commercialFixture, withCommercialDatabase, withCommercialMigrationsThrough, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
 import {amendmentContractInput, amendmentTransition, createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
@@ -30,7 +32,7 @@ assert.equal(revisedBalances[1].capacity.carriedIn,'0');
 assert.equal(retainerBalances(capacityInputs.slice(0,1),hours.slice(0,1),'all_rollover','2026-02-01')[0].capacity.expired,'1.0251');
 
 await withCommercialDatabase(async ({pool,databaseUrl})=>{
-  await migrateCommercialDatabase(pool);
+  await withCommercialMigrationsThrough(112,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const {today,identities}=await seedWorkApproval(pool);
   const example={startsOn:today,endsOn:today,baseFee:'100.125'};
   const roundedFee=async rounding=>(await priceRetainerOverage(pool,commercialFixture,'synthetic-unused','USD','no_charge',
@@ -83,6 +85,15 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const full=(await request(path)).body.periods;
     assert.deepEqual(full[0].capacity,{consumed:'3.75',carriedIn:'0',remaining:'0',overage:'2.7499',expired:'0',carriedOut:'0'});
     assert.equal(full[1].capacity,undefined);
+    await migrateCommercialDatabase(pool);
+    await Promise.all([processRetainerRisks(pool),processRetainerRisks(pool)]);
+    const observed=await pool.query(`select e.kind,e.hours::text,d.failure,d.attempts from retainer_risk_events e
+      join retainer_risk_dispatch d on e.id=d.event_id where version_id=$1`,[pin]);
+    assert.deepEqual(observed.rows,[{kind:'overconsumption',hours:'2.7499',failure:'POLICY_UNAVAILABLE',attempts:1}]);
+    await pool.query('update retainer_risk_scans set next_check=now() where version_id=$1',[pin]);
+    await processRetainerRisks(pool);
+    assert.equal((await pool.query('select from retainer_risk_events where version_id=$1',[pin])).rowCount,1);
+    await assert.rejects(pool.query("update retainer_risk_events set hours=1 where version_id=$1",[pin]),e=>e.code==='55000');
     const register='/retainer-capacity-risks';
     const risk=await request(register);
     assert.equal(risk.status,200,JSON.stringify(risk.body));
