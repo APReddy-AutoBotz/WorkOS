@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -111,6 +111,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
+    canRecordFixedFeeProgress:permissions.includes('commercial.fixed_fee_progress.record'),
     canRecordFixedFeeElapsed:permissions.includes('commercial.fixed_fee_elapsed.record'),
     canViewFixedFeeMargin:permissions.includes('commercial.fixed_fee_margin.view'),
     canRecordFixedFeeForecast:permissions.includes('commercial.fixed_fee_forecast.record'),
@@ -411,6 +412,24 @@ export const commercialDraftingService = {
       if (r.contractId!==contractId || r.versionId!==version.id || r.startsOn!==term.startsOn || r.endsOn!==term.endsOn ||
           r.currency!==version.currency || canonical(amount)!==canonical(term.amount) || (command && (decision!==command.decision || reason!==command.reason.trim()))) throw invalid();
       return {id:text(r.id),decision,reason};
+    },false);
+  },
+  fixedFeeProgress(eng:string,through:string,context:CommercialDraftingContext,options:{version?:number;command?:{expectedVersion:number;expectedToken:string}}={}) {
+    const current=assertCommercialDraftingContext(context),cmd=options.command;
+    if (!current.canViewFixedFeeRisk || (cmd && !current.canRecordFixedFeeProgress)) throw invalid();
+    const path=serviceEngPath(eng)+'/fixed-fee-progress',query=new URLSearchParams({through});
+    if (options.version) query.set('version',String(options.version));
+    const report=z.object({engagementId:z.literal(eng),through:z.literal(through),profile:z.literal('approved_delivery_effort_v1'),
+      policyVersion:z.string().min(1),contractVersionId:z.string().min(1),approvalReference:z.string().min(1),policyOwner:z.string().uuid(),
+      effectiveFrom:z.string().date(),startsOn:z.string().date(),endsOn:z.string().date(),currency:z.string().regex(/^[A-Z]{3}$/),
+      allocation:costDecimal,budgetHours:costDecimal,precision:z.number().int().min(0).max(4),lifecycleId:z.string().min(1),parentLifecycleId:z.string().min(1),
+      billableHours:costDecimal,nonBillableHours:costDecimal,verifiedHours:costDecimal,entries:z.number().int().nonnegative(),
+      unresolved:z.number().int().nonnegative(),amount:costDecimal.nullable()}).strict();
+    return request(context,cmd?'POST':'GET',cmd?path:path+'?'+query,cmd?{through,...cmd}:undefined,value=>{
+      const data=z.object({report:report.nullable(),token:z.string().regex(/^[a-f0-9]{64}$/).nullable(),latestVersion:z.number().int().nonnegative(),
+        saved:z.object({id:z.string().uuid(),version:z.number().int().positive(),report}).strict().nullable()}).strict().parse(value);
+      if ((options.version && data.saved?.version!==options.version) || (cmd && (!data.saved || cmd.expectedToken!==data.token))) throw invalid();
+      return data;
     },false);
   },
   fixedFeeElapsedPeriod(eng:string,from:string,through:string,context:CommercialDraftingContext) {

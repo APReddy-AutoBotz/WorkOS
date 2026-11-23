@@ -261,3 +261,7 @@ Finance users can reconcile fixed-fee elapsed values over a selected period and 
 Fixed-fee forecasts now compare expected total revenue with reconciled elapsed-time value through the forecast date. Remaining work includes progress-based valuation and immutable period close.
 
 Authorized finance users can compare actual, remaining and projected fixed-fee margin after labor cost. A separate opt-in grant controls calculated margin visibility. Other costs, effort-based valuation and signed-off period close remain open.
+
+The owner approved capped delivery hours divided by the approved engagement effort budget for the progress profile. The implementation below retains the approved effort evidence.
+
+Effort-based fixed-fee engagements support explicit policy adoption, cumulative value inspection and version retention. Integrating retained progress evidence into the forecast revenue comparison and signed-off period close remain open.

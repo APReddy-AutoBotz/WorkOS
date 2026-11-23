@@ -804,3 +804,5 @@ A missing elapsed-time day requires review of the applicable service date. For a
 When the forecast revenue comparison is unavailable, check the applicable, missing and stale day counts. Inspect affected dates in the period reconciliation view. For a missing forecast amount, inspect the selected forecast version. Roll back the comparison UI and API together. The operation reads the existing valuation and forecast ledgers.
 
 Migration 102 registers commercial.fixed_fee_margin.view without assigning it to any role. Review finance access before granting it. Withdrawing the grant suspends calculated margin reporting across all fixed-fee forecast views. Preserve migration 102 and the margin permission check when reverting the comparison UI or API.
+
+To suspend effort valuation recording, withdraw commercial.fixed_fee_progress.record. End the policy with an approved engagement amendment selecting Disabled or another authorized profile. Preserve migration 103, retained sources, snapshots and audit references. Keep the policy-aware amendment handler when rolling back the reporting UI.

@@ -763,3 +763,7 @@ WOS-COM-011 / WOS-RPT-003 / WOS-NFR-DAT-007 — The fixed-fee period API and fin
 WOS-COM-011 / WOS-COM-012 / WOS-RPT-003 — The fixed-fee forecast compares a versioned expected total with current reconciled elapsed-time earned revenue through its work date. The PostgreSQL/API/browser journey covers missing evidence, a zero outlook, fractional remaining value, an absent outlook, lifecycle changes and replacement versions.
 
 WOS-COM-007 / WOS-COM-012 / WOS-COM-015 / WOS-RPT-003 — Migration 102 adds opt-in fixed-fee margin access. The forecast PostgreSQL/API/browser journey covers actual and remaining labor margin, stale forecast evidence, negative remaining revenue and withdrawal of margin authority while revenue reporting remains available.
+
+WOS-COM-011 — The fixed-fee effort profile uses all verified approved delivery hours against a positive approved hours budget, capped at 100% of the approved allocation.
+
+WOS-COM-007 / WOS-COM-011 / WOS-COM-014 — Migration 103, governed engagement amendments and the scoped progress API/browser journey cover explicit effort policy selection, verified billable and non-billable hours, cap and rounding, immutable versions, replay, stale evidence and incomplete approvals.
