@@ -1,3 +1,4 @@
+import {elapsedPeriodQuery,reconcileElapsedPeriod} from './fixed-fee-elapsed-period.mjs';
 import {fixedFeeElapsed,elapsedGrant,elapsedQuery,elapsedCommand} from './fixed-fee-elapsed.mjs';
 import {fixedFeeForecast,forecastCommand,forecastQuery,forecastGrant} from './fixed-fee-forecast.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
@@ -128,6 +129,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.get('/engagements/:id/service-unit-evidence/:evidenceId/reconciliation',handle(workspaceQuerySchema,false,(c,r)=>reconcileServiceEffort(c,r,buildEmployeeScopeWhere)));
   router.get('/engagements/:id/fixed-fee-effort',handle(effortMonth,false,(c,r,input)=>fixedFeeEffort(c,r,input,buildEmployeeScopeWhere)));
   router.get('/engagements/:id/fixed-fee-risk',handle(riskQuery,false,(c,r,i)=>fixedFeeRisk(c,r,i,buildEmployeeScopeWhere)));
+  router.get('/engagements/:id/fixed-fee-elapsed-period',handle(elapsedPeriodQuery,false,(c,r,i)=>reconcileElapsedPeriod(c,r,i,buildEmployeeScopeWhere)));
   const elapsedPath='/engagements/:id/fixed-fee-elapsed';
   router.get(elapsedPath,handle(elapsedQuery,false,(c,r,i)=>fixedFeeElapsed(c,r,i,buildEmployeeScopeWhere)));
   router.post(elapsedPath,handle(elapsedCommand,true,(c,r,i)=>fixedFeeElapsed(c,r,i,buildEmployeeScopeWhere,audit),elapsedGrant,true));

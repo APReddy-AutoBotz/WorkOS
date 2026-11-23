@@ -1,3 +1,4 @@
+import {FixedFeeElapsedPeriod} from './FixedFeeElapsedPeriod';
 import {useState} from 'react';
 import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
@@ -26,5 +27,6 @@ export function FixedFeeElapsed({context,engagement,serviceDay}:{context:Commerc
       {data.saved && <><p>Retained version {data.saved.version} · {data.saved.report.currency} {data.saved.report.amount} · Policy {data.saved.report.policyVersion}</p>
         {data.saved.version>1 && <button type="button" onClick={()=>void inspect(data.saved!.version-1)}>Previous daily value</button>}</>}
     </>}
-  </fieldset>{message && <p role="status">{message}</p>}</section>;
+  </fieldset>{message && <p role="status">{message}</p>}
+    <div key={data?.saved?.id??engagement}><FixedFeeElapsedPeriod context={context} engagement={engagement} through={serviceDay}/></div></section>;
 }

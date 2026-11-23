@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {commercialFixture, withCommercialDatabase, withCommercialMigrationsThrough, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
-import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays, seedApplicableAmendmentVersion, amendmentWorkspace, amendmentInput, amendmentPreview, amendmentApply} from './support/commercial-amendments-test.mjs';
+import {amendmentTransition,createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays, seedApplicableAmendmentVersion, amendmentWorkspace, amendmentInput, amendmentPreview, amendmentApply} from './support/commercial-amendments-test.mjs';
 await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await withCommercialMigrationsThrough(98,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const {today,identities}=await seedWorkApproval(pool);
@@ -149,6 +149,11 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       const elapsedDesk=exposure.getByRole('region',{name:'Fixed-fee operational earned-management value'});
       await elapsedDesk.getByRole('button',{name:'Inspect elapsed service day'}).click();
       await elapsedDesk.getByText('No effective approved elapsed-time policy for this service day.').waitFor();
+      const periodDesk=elapsedDesk.getByRole('region',{name:'Elapsed-time period reconciliation'});
+      await periodDesk.getByLabel('Period starts on').fill(today);
+      await periodDesk.getByRole('button',{name:'Reconcile period'}).click();
+      await periodDesk.getByText('0 matched · 0 missing · 0 stale · 1 outside policy').waitFor();
+      await periodDesk.getByText('Reconciled elapsed-time value: Unavailable').waitFor();
       const desk=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
       await desk.getByRole('button',{name:'Inspect completion forecast'}).click();
       await desk.getByLabel('Remaining forecast hours').fill('6.25');
@@ -197,6 +202,13 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(fractions,{thirds:['0.33','0.34','0.33'],tie:'0.01',residual:'0',single_day:'123.457',
       leap_year:'99999999999999.9999',before_start:null,after_end:null});
     const elapsedPath='/engagements/'+engagement.id+'/fixed-fee-elapsed';
+    const rangePath=(from,through)=>elapsedPath+'-period?'+new URLSearchParams({from,through});
+    const range=rangePath(addUtcDays(today,-1),today);
+    const beforeRetain=(await request(range)).body;
+    assert.deepEqual([beforeRetain.amount,beforeRetain.missing,beforeRetain.inapplicable],[null,1,1]);
+    assert.equal((await request(rangePath(addUtcDays(today,-366),today))).status,400);
+    assert.equal((await request(rangePath(today,addUtcDays(today,1)))).status,404);
+    assert.equal((await request(range,{identity:identities.reader})).status,403);
     const daily=await request(elapsedPath+'?serviceDay='+today);
     assert.equal(daily.status,200,JSON.stringify(daily.body));
     assert.deepEqual([daily.body.report.dayNumber,daily.body.report.serviceDays,daily.body.report.allocation,daily.body.report.amount,
@@ -209,6 +221,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const [firstDay,retryDay]=await Promise.all([post(elapsedPath,retainDay),post(elapsedPath,retainDay)]);
     assert.deepEqual(firstDay.saved,retryDay.saved);
     assert.equal(firstDay.saved.version,1);
+    const reconciled=(await request(range)).body;
+    assert.deepEqual([reconciled.matched,reconciled.missing,reconciled.stale,reconciled.inapplicable,reconciled.amount,reconciled.currency],[1,0,0,1,'2.29','GBP']);
+    assert.deepEqual(reconciled.days[1],{serviceDay:today,status:'matched',snapshotId:firstDay.saved.id,version:1,retainedAmount:'2.29',applicableAmount:'2.29'});
     assert.equal((await request(elapsedPath+'?serviceDay='+today+'&version=1')).body.saved.id,firstDay.saved.id);
     assert.equal((await request(elapsedPath+'?serviceDay='+today,{identity:identities.reader})).status,403);
     assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,-1))).body.report,null);
@@ -296,7 +311,19 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const incomplete=await risk();
     assert.deepEqual(incomplete.effortBudget,{budgetHours:'5.25',verifiedHours:'4.5',remainingHours:'0.75',unresolvedEntries:1,status:'incomplete'});
     assert.deepEqual([incomplete.status,incomplete.complete,incomplete.laborBudgetStatus],['incomplete',false,'exceeded']);
+    await amendmentTransition(request,'Project',project.id,1,contract.versions[0].id,'On Hold');
+    await amendmentTransition(request,'Engagement',engagement.id,1,contract.versions[0].id,'On Hold');
+    const held=(await request(range)).body;
+    assert.deepEqual([held.stale,held.amount,held.days[1].applicableAmount,held.days[1].retainedAmount],[1,null,null,'2.29']);
+    await amendmentTransition(request,'Engagement',engagement.id,2,contract.versions[0].id);
+    const resumed=(await request(elapsedPath+'?serviceDay='+today)).body;
+    const changed=(await request(range)).body;
+    assert.deepEqual([changed.stale,changed.amount,changed.days[1].applicableAmount],[1,null,'2.29']);
+    const replacement=await post(elapsedPath,{...retainDay,expectedVersion:1,lifecycleId:resumed.report.lifecycleId});
+    const restored=(await request(range)).body;
+    assert.deepEqual([restored.matched,restored.amount,restored.days[1].version,restored.days[1].snapshotId],[1,'2.29',2,replacement.saved.id]);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");
+    assert.equal((await request(range)).status,403);
     assert.equal((await request(path)).status,403);
   });
 });

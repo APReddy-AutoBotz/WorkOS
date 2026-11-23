@@ -254,4 +254,6 @@ Fixed-fee forecast review shows exact overrun or headroom for hours and labor co
 
 The owner selected the approved engagement allocation over its approved service dates as the basis for fixed-fee elapsed-time valuation. The daily reporting workflow is described below.
 
-Fixed-fee elapsed-time policy adoption and daily valuation use approved amendment allocations and inclusive service dates. Finance users can inspect and retain a versioned daily value. Fixed-fee progress/effort policies, multi-day reconciliation and actual-versus-remaining revenue reporting remain open.
+Fixed-fee elapsed-time policy adoption and daily valuation use approved amendment allocations and inclusive service dates. Finance users can inspect and retain a versioned daily value. Fixed-fee progress/effort policies and actual-versus-remaining revenue reporting remain open.
+
+Finance users can reconcile fixed-fee elapsed values over a selected period and inspect each daily version. Progress-based valuation, actual-versus-remaining revenue reporting and immutable period close remain open.
