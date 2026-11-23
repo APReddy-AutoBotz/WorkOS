@@ -31,6 +31,17 @@ export async function verifyRiskDelivery({pool,request,engagement,identities,tod
     manager:{userId:second.id,role:'Admin'},finance:{userId:requester.id,role:'Admin'},
     locale:'en',title:'Budget warning',body:'Review this engagement.',reason:'Assign separate scoped owners'}});
   assert.equal(policy.status,201,JSON.stringify(policy.body));
+  await pool.query(`create function reject_test_risk_event() returns trigger language plpgsql as $$begin
+      raise exception 'Synthetic deferred risk event failure'; end $$;
+    create constraint trigger reject_test_risk_event after insert on fixed_fee_risk_events
+      deferrable initially deferred for each row execute function reject_test_risk_event()`);
+  await processFixedFeeWarnings(pool);
+  assert.equal(await count('fixed_fee_risk_events'),0);
+  assert.equal(await count('fixed_fee_risk_dispatch'),0);
+  assert.deepEqual((await pool.query('select failure,next_check>now() as delayed from fixed_fee_risk_scans')).rows,
+    [{failure:'EVALUATION_UNAVAILABLE',delayed:true}]);
+  await pool.query('drop trigger reject_test_risk_event on fixed_fee_risk_events');
+  await pool.query('update fixed_fee_risk_scans set next_check=now()');
   await scope(second,false);
   await processFixedFeeWarnings(pool);
   assert.equal(await count('fixed_fee_risk_events'),2);
@@ -49,6 +60,13 @@ export async function verifyRiskDelivery({pool,request,engagement,identities,tod
   assert.equal(await count('fixed_fee_risk_inbox'),0);
   assert.deepEqual((await pool.query('select distinct failure from fixed_fee_risk_dispatch')).rows,[{failure:'DELIVERY_UNAVAILABLE'}]);
   await pool.query('drop trigger reject_test_risk_receipt on fixed_fee_risk_inbox');
+  await pool.query(`create constraint trigger reject_test_risk_receipt after insert on fixed_fee_risk_inbox
+    deferrable initially deferred for each row execute function reject_test_risk_receipt()`);
+  await retry();await processFixedFeeWarnings(pool);
+  assert.equal(await count('fixed_fee_risk_inbox'),0);
+  assert.deepEqual((await pool.query('select distinct attempts,failure,next_attempt>now() delayed from fixed_fee_risk_dispatch')).rows,
+    [{attempts:3,failure:'DELIVERY_UNAVAILABLE',delayed:true}]);
+  await pool.query('drop trigger reject_test_risk_receipt on fixed_fee_risk_inbox');
   await retry();await Promise.all([processFixedFeeWarnings(pool),processFixedFeeWarnings(pool)]);
   await pool.query('update fixed_fee_risk_scans set next_check=now()');
   await processFixedFeeWarnings(pool);
@@ -57,9 +75,9 @@ export async function verifyRiskDelivery({pool,request,engagement,identities,tod
   const attempts=await pool.query(`select attempt,failure,count(*)::int n from fixed_fee_risk_delivery_attempts
     group by attempt,failure order by attempt`);
   const recovered=await request(statusPath);
-  assert.deepEqual(recovered.body.events[0].history.map(h=>[h.attempt,h.failure]),[[3,null],[2,'DELIVERY_UNAVAILABLE'],[1,'RECIPIENTS_UNAVAILABLE']]);
+  assert.deepEqual(recovered.body.events[0].history.map(h=>[h.attempt,h.failure]),[[4,null],[3,'DELIVERY_UNAVAILABLE'],[2,'DELIVERY_UNAVAILABLE'],[1,'RECIPIENTS_UNAVAILABLE']]);
   assert.deepEqual(attempts.rows,[{attempt:1,failure:'RECIPIENTS_UNAVAILABLE',n:2},
-    {attempt:2,failure:'DELIVERY_UNAVAILABLE',n:2},{attempt:3,failure:null,n:2}]);
+    {attempt:2,failure:'DELIVERY_UNAVAILABLE',n:2},{attempt:3,failure:'DELIVERY_UNAVAILABLE',n:2},{attempt:4,failure:null,n:2}]);
   await assert.rejects(pool.query('delete from fixed_fee_risk_delivery_attempts where attempt=1'));
   for (const [user,reason] of [[reader,'engagement_owner'],[second,'commercial_manager'],[requester,'finance_billing_owner']]) {
     const {rows,owner}=await inbox(user);
