@@ -43,6 +43,11 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   assert.equal((await request(path,{method:'POST',body:cmd})).status,503);
   assert.equal((await get()).latestVersion,0);
   await pool.query('drop trigger reject_test_progress on audit_logs');
+  const tomorrow=addUtcDays(today,1);
+  const next=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},tomorrow);
+  await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),next));
+  await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),next,
+    {endsOn:end,effortPolicy:'disabled',elapsedTimePolicy:'2'}));
   const fixture=await startFixtureServer({root:fileURLToPath(new URL('../../',import.meta.url)),fixtures:['commercial-drafting'],apiUrl:baseUrl});
   let browser;
   try {
@@ -70,6 +75,7 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     const forecast=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
     await forecast.getByRole('button',{name:'Inspect completion forecast'}).click();
     await forecast.getByText('Reconciled delivery-effort revenue through '+today+': GBP 60').waitFor();
+    await forecast.getByText(/Proposed first-day cumulative value: GBP 60.33/).waitFor();
     await forecast.getByLabel('Remaining forecast hours').fill('0.75');
     await forecast.getByLabel('Remaining labor cost (GBP)').fill('5');
     await forecast.getByLabel('Expected total revenue at completion (GBP, optional)').fill('70');
@@ -95,7 +101,9 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   const replacement={...cmd,expectedVersion:1,expectedToken:changed.token};
   const [second,replay]=await Promise.all([post(path,replacement),post(path,replacement)]);
   assert.equal(second.saved.version,2);
-  assert.deepEqual((await live()).revenue,{profile:'effort',status:'matched',snapshotId:second.saved.id,version:2,earnedAmount:'60',remainingRevenue:'10'});
+  const {scheduled,...currentRevenue}=(await live()).revenue;
+  assert.deepEqual([scheduled.closingDate,scheduled.closingAmount,scheduled.residual,scheduled.amount,scheduled.snapshotId],[today,'60','10','60.33',second.saved.id]);
+  assert.deepEqual(currentRevenue,{profile:'effort',status:'matched',snapshotId:second.saved.id,version:2,earnedAmount:'60',remainingRevenue:'10'});
   assert.deepEqual(second.saved,replay.saved);
   assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Fixed Fee Progress Value'")).rows[0].n,2);
   assert.deepEqual((await get(1)).saved,results[0].saved);
@@ -107,11 +115,6 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   assert.deepEqual([(await live()).revenue.status,(await live()).revenue.remainingRevenue],['incomplete',null]);
   assert.deepEqual([incomplete.report.unresolved,incomplete.report.amount],[1,null]);
   assert.equal((await request(path,{method:'POST',body:{...cmd,expectedToken:incomplete.token,expectedVersion:2}})).status,409);
-  const tomorrow=addUtcDays(today,1);
-  const next=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},tomorrow);
-  await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),next));
-  await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),next,
-    {endsOn:end,effortPolicy:'disabled',elapsedTimePolicy:'2'}));
   assert.equal((await live()).revenue.profile,'effort');
   const future=await policyRevenue(pool,null,null,[commercialFixture.organizationId,commercialFixture.legalEntityId,engagement.id,tomorrow],'GBP','70');
   assert.deepEqual(future,{profile:'transition',earnedAmount:null,remainingRevenue:null});

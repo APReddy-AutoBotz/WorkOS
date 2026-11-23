@@ -39,8 +39,13 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
         {
           data.revenue.profile==='elapsed'?<p>{data.revenue.applicableDays} applicable days · {data.revenue.missingDays} missing · {data.revenue.staleDays} stale</p>:
           data.revenue.profile==='effort'?<p>Delivery-effort evidence: {data.revenue.status}{data.revenue.version!==null?' · Retained version '+data.revenue.version:''}</p>:
-          <p>Review the change from effort-based valuation before comparing earned revenue across policies.</p>
+          data.revenue.preview?<div>
+            <p>Verified effort value through {data.revenue.preview.closingDate}: {data.baseline.currency} {data.revenue.preview.closingAmount}</p>
+            <p>Allocation to spread from {data.revenue.preview.startsOn} through {data.revenue.preview.endsOn}: {data.baseline.currency} {data.revenue.preview.residual}</p>
+            <p>Proposed cumulative value through {through}: {data.baseline.currency} {data.revenue.preview.amount}. Finance approval pending.</p>
+          </div>:<p>Transition review unavailable{data.revenue.closingStatus?' · '+data.revenue.closingStatus:''}.</p>
         }
+        {data.revenue.profile==='effort' && data.revenue.scheduled && <p>Scheduled switch on {data.revenue.scheduled.startsOn}: carry forward {data.baseline.currency} {data.revenue.scheduled.closingAmount} and spread {data.baseline.currency} {data.revenue.scheduled.residual} through {data.revenue.scheduled.endsOn}. Proposed first-day cumulative value: {data.baseline.currency} {data.revenue.scheduled.amount}.</p>}
         {data.marginComparison && <p>Actual margin after labor cost: {marginText(data.marginComparison.actual,data.baseline.currency)}</p>}
         {saved && <div><p>Forecast version {saved.version} · {saved.reason}</p>
           <p>Budget at review: {saved.report.budgetHours??'Unset'} hours · Labor cost {saved.report.budgetCost??'Unset'} {saved.report.currency}</p>
@@ -51,7 +56,8 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
           <p>Forecast labor cost versus budget: {budgetComparison(data.budgetVariance.laborCost,saved.report.currency)}</p>
           <p>Expected total revenue at completion: {saved.report.expectedTotalRevenue===undefined ? 'Unspecified' : saved.report.currency+' '+saved.report.expectedTotalRevenue}</p>
           <p>Remaining forecast revenue after reconciled {data.revenue.profile==='effort'?'delivery-effort':data.revenue.profile==='elapsed'?'elapsed-time':'management'} value: {data.revenue.remainingRevenue===null?'Unavailable':saved.report.currency+' '+data.revenue.remainingRevenue}</p>
-          {data.marginComparison && <>
+          {data.revenue.profile==='effort' && data.revenue.scheduled && <p>Scheduled switch on {data.revenue.scheduled.startsOn}: carry forward {data.baseline.currency} {data.revenue.scheduled.closingAmount} and spread {data.baseline.currency} {data.revenue.scheduled.residual} through {data.revenue.scheduled.endsOn}. Proposed first-day cumulative value: {data.baseline.currency} {data.revenue.scheduled.amount}.</p>}
+        {data.marginComparison && <>
             <p>Remaining margin after labor cost: {marginText(data.marginComparison.remaining,saved.report.currency)}</p>
             {!data.marginComparison.forecastCurrent && <p>Record a forecast against current evidence to compare remaining margin.</p>}
             <p>Forecast margin after labor cost: {marginText(data.laborMargin,saved.report.currency)}</p>

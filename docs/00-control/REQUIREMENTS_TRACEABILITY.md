@@ -769,3 +769,7 @@ WOS-COM-011 — The fixed-fee effort profile uses all verified approved delivery
 WOS-COM-007 / WOS-COM-011 / WOS-COM-014 — Migration 103, governed engagement amendments and the scoped progress API/browser journey cover explicit effort policy selection, verified billable and non-billable hours, cap and rounding, immutable versions, replay, stale evidence and incomplete approvals.
 
 WOS-COM-011 / WOS-COM-012 / WOS-RPT-003 — The financial forecast selects the applicable effort profile, validates the retained cumulative version and calculates remaining revenue in engagement currency. The PostgreSQL/API/browser journey checks missing, held, stale, superseded and incomplete evidence and native-currency subtraction.
+
+### Fixed-fee transition proposal
+
+WOS-COM-011, WOS-COM-012 and WOS-RPT-003. The fixed-fee effort PostgreSQL and browser journey verifies the scheduled residual projection and its retained closing source.

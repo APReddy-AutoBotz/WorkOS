@@ -481,11 +481,15 @@ export const commercialDraftingService = {
         report:baseline.extend({remainingHours:costDecimal,remainingCost:costDecimal,expectedTotalRevenue:costDecimal.optional(),estimatedHours:costDecimal.nullable(),estimatedCost:costDecimal.nullable()}).strict()}).strict();
       const signedDecimal=z.string().regex(/^-?\d+(?:\.\d+)?$/);
       const margin=z.object({amount:signedDecimal,percent:z.string().regex(/^-?\d+\.\d{2}$/).nullable()}).strict().nullable();
+      const transitionPreview=z.object({policyId:z.string().min(1),closingDate:z.string().date(),snapshotId:z.string().uuid(),closingAmount:costDecimal,
+              residual:costDecimal,amount:costDecimal,startsOn:z.string().date(),endsOn:z.string().date()}).strict();
       const data=z.object({baseline,latestVersion:z.number().int().nonnegative(),token:z.string().regex(/^[0-9a-f]{64}$/),saved:snapshot.nullable(),
         revenue:z.discriminatedUnion('profile',[z.object({profile:z.literal('elapsed'),applicableDays:z.number().int().nonnegative(),missingDays:z.number().int().nonnegative(),staleDays:z.number().int().nonnegative(),earnedAmount:costDecimal.nullable(),remainingRevenue:signedDecimal.nullable()}).strict(),
-          z.object({profile:z.literal('effort'),status:z.enum(['matched','inactive','incomplete','missing','stale']),snapshotId:z.string().uuid().nullable(),
+          z.object({profile:z.literal('effort'),scheduled:transitionPreview.optional(),status:z.enum(['matched','inactive','incomplete','missing','stale']),snapshotId:z.string().uuid().nullable(),
             version:z.number().int().positive().nullable(),earnedAmount:costDecimal.nullable(),remainingRevenue:signedDecimal.nullable()}).strict(),
-          z.object({profile:z.literal('transition'),earnedAmount:z.null(),remainingRevenue:z.null()}).strict()]),
+          z.object({profile:z.literal('transition'),earnedAmount:z.null(),remainingRevenue:z.null(),
+            closingStatus:z.enum(['inactive','incomplete','missing','stale','incompatible']).optional(),
+            preview:transitionPreview.optional()}).strict()]),
         budgetVariance:z.object({hours:signedDecimal.nullable(),laborCost:signedDecimal.nullable()}).strict(),
         marginComparison:z.object({actual:margin,remaining:margin,forecastCurrent:z.boolean()}).strict().optional(),laborMargin:margin}).strict().parse(value);
       const saved=data.saved,r=saved?.report;
