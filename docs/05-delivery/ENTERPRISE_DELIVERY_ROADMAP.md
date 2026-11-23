@@ -269,3 +269,7 @@ Approved project expense allocations now reconcile to the dated engagement budge
 ### Buyer-configured fixed-fee budget warnings
 
 Finance can inspect dated warning states for effort and labor-cost budgets. The [notification work package](../tasks/WOS-06-FIXED-FEE-RISK-NOTICES.md) tracks source identity, current recipient authority, atomic delivery and recovery. PR #341 added prospective recipient and template configuration, with current employment, held-role and entity checks. The merged workflow includes automatic breach checks, in-app delivery to the three required relationships, retry after incomplete delivery, and scoped delivery diagnostics. Recovery checks now cover deferred database rejection of a breach or receipt set. Buyer-required external channels and other commercial risk sources remain open.
+
+### Purchase-order risk review
+
+Finance can inspect released purchase orders across the selected legal entity for expiry, exhausted availability and the configured utilization threshold. The register reads current committed and gross consumed values. Proactive purchase-order notifications remain open, including recipient resolution for contract-level orders shared across engagements.

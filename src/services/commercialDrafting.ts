@@ -823,6 +823,20 @@ export const commercialDraftingService = {
       if (periods.length!==expected.length || periods.some((p,i)=>p.startsOn!==expected[i].startsOn || p.endsOn!==expected[i].endsOn)) throw invalid();
       return periods;
     }),
+  purchaseOrderRisks(expiresBy:string,after:string|null,context:CommercialDraftingContext) {
+    const current=assertCommercialDraftingContext(context,true);
+    if (!current.canReleasePurchaseOrder) throw invalid();
+    const query=new URLSearchParams({expiresBy});
+    if (after) query.set('after',after);
+    const order=z.object({id:z.string().min(1),number:z.string().min(1),currency:z.string().regex(/^[A-Z]{3}$/),
+      endsOn:z.string().date(),contractVersionId:z.string().min(1),committed:costDecimal,consumed:costDecimal,remaining:costDecimal,
+      warning:z.boolean(),expired:z.boolean(),exhausted:z.boolean(),expiresInWindow:z.boolean()}).strict();
+    return request(context,'GET','/purchase-order-risks?'+query,undefined,value=>{
+      const result=z.object({asOf:z.string().date(),expiresBy:z.literal(expiresBy),orders:z.array(order).max(50),nextAfter:z.string().nullable()}).strict().parse(value);
+      if(result.nextAfter!==null && (result.orders.length!==50 || result.nextAfter!==result.orders[49].id)) throw invalid();
+      return result;
+    },true);
+  },
   purchaseOrderBalance: (order:PurchaseOrder, context:CommercialDraftingContext) =>
     request(context,'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/balance',undefined,value=>{
       const row=object(value);
