@@ -1,11 +1,13 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {calculateLaborMargin} from '../../../shared/labor-margin.mjs';
 import {z} from 'zod';
 import {decimalAmount,fail} from './contracts.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 
 export const forecastGrant='commercial.fixed_fee_forecast.record';
-export const forecastQuery=riskQuery.extend({version:z.coerce.number().int().positive().max(2147483647).optional()}).strict();
-export const forecastCommand=riskQuery.extend({expectedVersion:z.number().int().nonnegative().max(2147483646),
+const forecastView=riskQuery.extend({view:z.literal('labor_margin').optional()});
+export const forecastQuery=forecastView.extend({version:z.coerce.number().int().positive().max(2147483647).optional()}).strict();
+export const forecastCommand=forecastView.extend({expectedVersion:z.number().int().nonnegative().max(2147483646),
   expectedToken:z.string().regex(/^[0-9a-f]{64}$/),requestId:z.string().uuid(),remainingHours:decimalAmount,remainingCost:decimalAmount,
   expectedTotalRevenue:decimalAmount.optional(),
   reason:z.string().trim().min(3).max(1000)}).strict();
@@ -25,6 +27,15 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
   const {rows:[latest]}=await client.query(`select ${fields} from commercial_fixed_fee_forecasts where ${where} order by version desc limit 1`,args);
   const latestVersion=latest?.version??0;
   let saved=latest??null;
+  function response(saved, latestVersion) {
+    const result={baseline,token,latestVersion,saved};
+    if (input.view==='labor_margin') {
+      const report=saved?.report;
+      result.laborMargin=report?.expectedTotalRevenue!==undefined && report.estimatedCost!=null
+        ? calculateLaborMargin(report.expectedTotalRevenue,report.estimatedCost) : null;
+    }
+    return result;
+  }
   if (audit) {
     const {rows:[prior]}=await client.query(`select ${fields},evidence_token from commercial_fixed_fee_forecasts
       where ${where} and actor_id=$5 and request_id=$6`,[...args,req.user.sub,input.requestId]);
@@ -33,7 +44,7 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
         prior.report.expectedTotalRevenue!==input.expectedTotalRevenue || prior.report.remainingHours!==input.remainingHours || prior.report.remainingCost!==input.remainingCost)
         fail(409,'FORECAST_CONFLICT','This request already recorded different forecast assumptions.');
       const {evidence_token,...snapshot}=prior;
-      return {baseline,token,latestVersion,saved:snapshot};
+      return response(snapshot,latestVersion);
     }
     if (latestVersion!==input.expectedVersion || token!==input.expectedToken) fail(409,'FORECAST_CONFLICT','Inspect the current actuals and latest forecast again.');
     const {rows:[estimate]}=await client.query(`select case when $1::boolean then trim_scale($2::numeric+$3::numeric)::text end as "estimatedHours",
@@ -47,11 +58,11 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
       [...args,id,version,input.requestId,token,report,input.reason,req.user.sub,req.user.activeRole,req.operationId]));
     await audit(client,req,{module:'Commercial Drafting',entityType:'Fixed Fee Completion Forecast',entityId:id,action:'Recorded',
       oldValue:latest?{forecastId:latest.id,version:latestVersion}:null,newValue:{engagementId,through,version},source:'Web',details:'Retained reviewed remaining effort and labor cost estimates.'});
-    return {baseline,token,latestVersion:version,saved};
+    return response(saved,version);
   }
   if (input.version && input.version!==latestVersion) {
     ({rows:[saved]}=await client.query(`select ${fields} from commercial_fixed_fee_forecasts where ${where} and version=$5`,[...args,input.version]));
     if (!saved) fail(404,'FORECAST_UNAVAILABLE','Forecast version unavailable for the selected date.');
   }
-  return {baseline,token,latestVersion,saved};
+  return response(saved,latestVersion);
 }

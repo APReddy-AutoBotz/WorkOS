@@ -153,6 +153,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       await desk.getByLabel('Expected total revenue at completion (GBP, optional)').fill('130.1234');
       await desk.getByLabel('Forecast assumptions').fill('Synthetic remaining delivery work');
       await desk.getByRole('button',{name:'Record completion forecast'}).click();
+      await desk.getByText('Forecast margin after labor cost: Unavailable').waitFor();
       await desk.getByText('Expected total revenue at completion: GBP 130.1234').waitFor();
       await desk.getByText('Estimate at completion: 10.75 hours · Labor cost Unavailable GBP').waitFor();
     } finally {try {if (browser) await browser.close();} finally {await fixture.close();}}
@@ -203,12 +204,21 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     for (const r of [one,two]) assert.equal(r.status,201,JSON.stringify(r.body));
     assert.deepEqual(one.body.saved,two.body.saved);
     assert.equal(one.body.saved.report.expectedTotalRevenue,'0');
+    const marginAt=async version=>(await request(forecastPath+'?through='+today+'&view=labor_margin&version='+version)).body.laborMargin;
+    assert.equal((await forecast(2)).laborMargin,undefined);
+    assert.deepEqual(await marginAt(2),{amount:'-101.0365',percent:null});
+    assert.equal(await marginAt(1),null);
+    assert.equal((await request(forecastPath+'?through='+today+'&view=labor_margin',{identity:identities.reader})).status,403);
     assert.equal((await record({...revised,expectedTotalRevenue:'1'})).status,409);
     assert.deepEqual([one.body.saved.version,one.body.saved.report.estimatedCost,one.body.saved.report.estimatedHours,
       one.body.saved.report.budgetCost,one.body.saved.report.budgetHours],[2,'101.0365','10.75','60.5','5.25']);
     assert.equal((await record({...revised,remainingCost:'0'})).status,409);
     assert.equal((await record({...revised,requestId:randomUUID()})).status,409);
     assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Fixed Fee Completion Forecast'")).rows[0].n,2);
+    const positive=await record({...makeCommand(await forecast()),view:'labor_margin',expectedTotalRevenue:'130.1234'});
+    assert.equal(positive.status,201);
+    assert.deepEqual(positive.body.laborMargin,{amount:'29.0869',percent:'22.35'});
+    assert.deepEqual(await marginAt(3),positive.body.laborMargin);
     const futureVersion=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},addUtcDays(today,1));
     await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),futureVersion));
     const next=amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),futureVersion);

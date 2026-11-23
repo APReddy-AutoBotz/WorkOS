@@ -792,3 +792,5 @@ Check the budget approval reference, effective amendment and selected through da
 Apply migration 100 and assign the opt-in fixed-fee forecast recording permission to authorized finance operators with engagement-wide worker and cost visibility. Investigate missing approval or cost evidence when a completion estimate is unavailable. Inspect again if the actuals or latest version changed. On rollback, withdraw recording access and retain the forecast table, versions and audit records.
 
 To suspend fixed-fee revenue outlook recording, withdraw the forecast recording grant. Retain the updated forecast reader when reverting the writing path so operators can inspect versions containing the optional revenue amount. Preserve the immutable forecast reports and their audit records.
+
+The optional labor_margin view of the fixed-fee forecast API derives its values from the requested immutable version under the existing financial permissions and worker-scope checks. To roll back, deploy the previous forecast UI and API together. Forecast records require no conversion.

@@ -749,3 +749,5 @@ WOS-COM-005 / WOS-COM-007 / WOS-RPT-003 / WOS-RPT-004 — Fixed-fee engagement h
 WOS-COM-012 / WOS-RPT-003 — Fixed-fee completion forecasts for hours and labor cost use reviewed remaining estimates, verified work and retained worker costs. Migration 100 and the fixed-fee effort PostgreSQL/API/browser journey cover scope, opt-in recording, stale evidence, audit rollback, concurrent replay, complete and partial estimates, and immutable version retrieval.
 
 WOS-COM-012 / WOS-RPT-003 — Fixed-fee forecasts retain an optional total revenue estimate in engagement currency. The PostgreSQL/API/browser journey checks explicit zero, omission, invalid input, conflicting replay and historical version retrieval.
+
+WOS-COM-007 / WOS-COM-012 / WOS-COM-015 / WOS-RPT-003 — Scoped finance users can inspect forecast margin after labor cost against a retained fixed-fee version. The fixed-fee PostgreSQL/API/browser journey exercises historical results, positive and zero revenue, incomplete evidence, restricted roles and the original API shape.
