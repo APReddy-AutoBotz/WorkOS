@@ -650,6 +650,17 @@ export const commercialDraftingService = {
         billableHours:hours(r.billableHours),nonBillableHours:hours(r.nonBillableHours)};
     },false);
   },
+  portfolioMargins(monthStart:string,thresholdPercent:string,after:string|null,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canViewServiceMargin) throw invalid();
+    const query=new URLSearchParams({monthStart,thresholdPercent});
+    if (after!==null) query.set('after',after);
+    return request(context,'GET','/service-margin-portfolio?'+query,undefined,value=>z.object({
+      monthStart:z.literal(monthStart),thresholdPercent:z.literal(thresholdPercent),next:z.string().nullable(),
+      items:z.array(z.object({id:z.string(),name:z.string(),currency:z.string().regex(/^[A-Z]{3}$/),
+        version:z.number().int().positive().nullable(),percent:z.string().regex(/^-?\d+\.\d{2}$/).nullable(),
+        status:z.enum(['Unretained','Unavailable','Below','AtOrAbove'])}).strict()).max(50)
+    }).strict().parse(value),false);
+  },
   serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string;thresholdPercent?:string}={}) {
     if (!assertCommercialDraftingContext(context).canViewServiceMargin || (options.expectedToken && !context.canRetainServiceMargin)) throw invalid();
     const query=new URLSearchParams({monthStart});

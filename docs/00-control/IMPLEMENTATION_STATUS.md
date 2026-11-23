@@ -1,5 +1,11 @@
 # WorkOS implementation status
 
+## Commercial reporting checkpoint on 24 November 2026
+
+On main at `1f45ddd49a56df67296b1f12130804135f167262`, finance can compare an individual retained managed-service monthly margin with an entered threshold. [Reporting PR](https://github.com/APReddy-AutoBotz/WorkOS/pull/348) and [validation run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45250489157).
+
+The portfolio view extends this evidence across engagements. Automated margin notifications, fixed-fee actual expenses and buyer release acceptance remain open. The retainer risk register and alert delivery have successful candidate checks and await integration in [PR 346](https://github.com/APReddy-AutoBotz/WorkOS/pull/346) and [PR 347](https://github.com/APReddy-AutoBotz/WorkOS/pull/347).
+
 ## Delivery status on 23 November 2026
 
 The verified baseline for this update is main commit `72fec6948a71017dd9d10a81f3bff259e058e24d`. Finance can sign a fixed-fee reporting period, retrieve its opening and closing evidence, and record a separately explained reduction. An audited reopening permits a new signed version. Buyers can adopt an effective-dated engagement expense budget. [Signed statements and their CI run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45179354894) · [Expense budgets and their CI run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45181143886)

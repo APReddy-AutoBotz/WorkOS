@@ -3,6 +3,7 @@ import {ServicePeriodReview} from './ServicePeriodReview';
 import {ServiceUnitCapture} from './ServiceUnitCapture';
 import {RetainerConsumption} from '../components/RetainerConsumption';
 import {FixedFeeInstallmentRegister} from '../components/FixedFeeInstallmentRegister';
+import {MarginPortfolio} from './MarginPortfolio';
 import {PurchaseOrderRiskRegister} from '../components/PurchaseOrderRiskRegister';
 import {PurchaseOrderReleasePanel} from '../components/PurchaseOrderReleasePanel';
 import {hasRatePermission} from '../services/rateCandidates';
@@ -495,6 +496,7 @@ export const CommercialDraftingWorkspace = () => {
           </>}
         </section>
         <section className={panelClass} aria-label={`${engagementPlural} drafts`}><h2 className="mb-4 text-lg font-bold">{engagementPlural} ({workspace.engagements.length})</h2>
+            {state.context?.canViewServiceMargin && <div key={state.generation}><MarginPortfolio context={state.context} today={workspace.asOf.slice(0,10)}/></div>}
           {!workspace.engagements.length && <p>No {engagementPlural.toLowerCase()} returned for this scope.</p>}
           <ul className="space-y-3">{workspace.engagements.map(engagement => <li key={engagement.id} className="break-words rounded-xl border border-slate-200 p-3">
             <h3 className="font-bold">{engagement.code} · {engagement.name}</h3><p className="mt-1 text-sm">{modelLabel(engagement.model)} · {engagement.status} · {engagement.billable ? 'Commercial terms linked' : 'Non-billable'}.</p>

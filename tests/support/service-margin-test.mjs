@@ -13,12 +13,17 @@ export async function verifyServiceMargin({pool,request,post,capture,review,rece
     select $1,k,true from unnest($2::text[]) k on conflict(role_name,permission_key) do update set enabled=true`,[role,grants]);
   assert.equal((await request(query,{identity:identities.reader})).status,403);
   assert.equal((await request(path+'?monthStart=2200-01-01')).status,404);
+  const portfolio='/service-margin-portfolio?monthStart='+monthStart+'&thresholdPercent=45';
+  const currentRow=async()=>{const r=await request(portfolio);assert.equal(r.status,200,JSON.stringify(r.body));return r.body.items.find(row=>row.id===engagement.id);};
+  assert.equal((await currentRow()).status,'Unretained');
+  assert.equal((await request(portfolio,{identity:identities.reader})).status,403);
   const initial=await read();
   assert.equal(initial.report.margin,null);
   assert.equal(initial.report.missingCosts,1);
   assert.equal(initial.report.verifiedEntries,2);
   assert.equal(initial.report.approvedEntries,3);
   const v1=await retain(initial.token);assert.equal(v1.version,1);
+  assert.equal((await currentRow()).status,'Unavailable');
   const other=await capture('CALL','OPS-43','0.75');
   const secondReview=await review(other.id,'Accepted');
   const rate=await adoptHourlyRate({request,ids:identities,workerId,today,end,currency:'GBP'},'cost','12.3456');
@@ -43,8 +48,12 @@ export async function verifyServiceMargin({pool,request,post,capture,review,rece
   assert.equal((await request(query+'&thresholdPercent=50')).status,400);
   assert.equal((await request(query+'&version=2&thresholdPercent=44.444')).status,400);
   assert.deepEqual((await read()).report,p);
+  const row=await currentRow();
+  assert.deepEqual([row.version,row.percent,row.status],[2,'44.44','Below']);
+  assert.ok(!(await request(portfolio+'&after='+encodeURIComponent(row.id))).body.items.some(item=>item.id===row.id));
   assert.equal((await pool.query('select count(*)::int n from commercial_service_margin_versions')).rows[0].n,2);
   await assert.rejects(pool.query('delete from commercial_service_margin_versions'));
   await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.cost_candidates.view'");
+  assert.equal((await request(portfolio)).status,403);
   assert.equal((await request(query+'&version=1&thresholdPercent=50')).status,403);
 }
