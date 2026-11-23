@@ -150,8 +150,10 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       await desk.getByRole('button',{name:'Inspect completion forecast'}).click();
       await desk.getByLabel('Remaining forecast hours').fill('6.25');
       await desk.getByLabel('Remaining labor cost (GBP)').fill('30.1725');
+      await desk.getByLabel('Expected total revenue at completion (GBP, optional)').fill('130.1234');
       await desk.getByLabel('Forecast assumptions').fill('Synthetic remaining delivery work');
       await desk.getByRole('button',{name:'Record completion forecast'}).click();
+      await desk.getByText('Expected total revenue at completion: GBP 130.1234').waitFor();
       await desk.getByText('Estimate at completion: 10.75 hours · Labor cost Unavailable GBP').waitFor();
     } finally {try {if (browser) await browser.close();} finally {await fixture.close();}}
     const saved=(await costs()).find(r=>r.entryId===entry.entryId);
@@ -187,7 +189,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual([exhausted.status,exhausted.allocation,exhausted.remainingAllocation,exhausted.contractVersionId,exhausted.amendmentId],
       ['exhausted','70.864','0',revision.id,event.id]);
     const inspected=await forecast();
-    const revised=makeCommand(inspected);
+    const revised={...makeCommand(inspected),expectedTotalRevenue:'0'};
+    assert.equal((await record({...revised,expectedTotalRevenue:'-1'})).status,400);
     assert.equal((await record({...revised,estimatedCost:'0'})).status,400);
     await pool.query(`create function reject_test_forecast_audit() returns trigger language plpgsql as $$begin
       raise exception 'Synthetic forecast audit failure';end $$;
@@ -199,6 +202,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const [one,two]=await Promise.all([record(revised),record(revised)]);
     for (const r of [one,two]) assert.equal(r.status,201,JSON.stringify(r.body));
     assert.deepEqual(one.body.saved,two.body.saved);
+    assert.equal(one.body.saved.report.expectedTotalRevenue,'0');
+    assert.equal((await record({...revised,expectedTotalRevenue:'1'})).status,409);
     assert.deepEqual([one.body.saved.version,one.body.saved.report.estimatedCost,one.body.saved.report.estimatedHours,
       one.body.saved.report.budgetCost,one.body.saved.report.budgetHours],[2,'101.0365','10.75','60.5','5.25']);
     assert.equal((await record({...revised,remainingCost:'0'})).status,409);
@@ -225,11 +230,13 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,unresolvedEntries:1,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.equal((await inspect()).body.complete,false);
     const oldForecast=(await forecast(1)).saved;
+    assert.equal(oldForecast.report.expectedTotalRevenue,'130.1234');
     assert.equal(oldForecast.report.estimatedCost,null);
     assert.equal(oldForecast.report.actualHours,'4.5');
     const missing=await forecast();
     const incompleteForecast=await record({...makeCommand(missing),remainingHours:'0',remainingCost:'0'});
     assert.equal(incompleteForecast.status,201);
+    assert.equal(incompleteForecast.body.saved.report.expectedTotalRevenue,undefined);
     assert.deepEqual([incompleteForecast.body.saved.report.estimatedHours,incompleteForecast.body.saved.report.estimatedCost],[null,null]);
     assert.equal((await forecast(2)).saved.report.estimatedCost,'101.0365');
     await assert.rejects(pool.query("update commercial_fixed_fee_forecasts set reason='Synthetic history edit' where id=$1",[oldForecast.id]));

@@ -412,7 +412,7 @@ export const commercialDraftingService = {
     },false);
   },
   fixedFeeForecast(eng:string,through:string,context:CommercialDraftingContext,options:{version?:number;command?:{
-    remainingHours:string;remainingCost:string;reason:string;expectedToken:string;expectedVersion:number;requestId:string}}={}) {
+    remainingHours:string;remainingCost:string;expectedTotalRevenue?:string;reason:string;expectedToken:string;expectedVersion:number;requestId:string}}={}) {
     const current=assertCommercialDraftingContext(context),cmd=options.command;
     if (!current.canViewFixedFeeRisk || (cmd && !current.canRecordFixedFeeForecast)) throw invalid();
     const path=serviceEngPath(eng)+'/fixed-fee-forecast',query=new URLSearchParams({through});
@@ -423,12 +423,12 @@ export const commercialDraftingService = {
         costedEntries:z.number().int().nonnegative(),hoursComplete:z.boolean(),costComplete:z.boolean(),
         actualHours:costDecimal,actualCost:costDecimal,budgetHours:costDecimal.nullable(),budgetCost:costDecimal.nullable()}).strict();
       const snapshot=z.object({id:z.string().uuid(),version:z.number().int().positive(),reason:z.string().min(3),createdAt:z.string().datetime(),
-        report:baseline.extend({remainingHours:costDecimal,remainingCost:costDecimal,estimatedHours:costDecimal.nullable(),estimatedCost:costDecimal.nullable()}).strict()}).strict();
+        report:baseline.extend({remainingHours:costDecimal,remainingCost:costDecimal,expectedTotalRevenue:costDecimal.optional(),estimatedHours:costDecimal.nullable(),estimatedCost:costDecimal.nullable()}).strict()}).strict();
       const data=z.object({baseline,latestVersion:z.number().int().nonnegative(),token:z.string().regex(/^[0-9a-f]{64}$/),saved:snapshot.nullable()}).strict().parse(value);
       const saved=data.saved,r=saved?.report;
       if (!!saved!==(data.latestVersion>0) || (saved && saved.version>data.latestVersion) ||
         (options.version && saved?.version!==options.version) || (cmd && (saved?.version!==cmd.expectedVersion+1 ||
-          r?.remainingHours!==cmd.remainingHours || r?.remainingCost!==cmd.remainingCost || saved.reason!==cmd.reason.trim()))) throw invalid();
+          r?.expectedTotalRevenue!==cmd.expectedTotalRevenue || r?.remainingHours!==cmd.remainingHours || r?.remainingCost!==cmd.remainingCost || saved.reason!==cmd.reason.trim()))) throw invalid();
       if (r && (r.estimatedHours!==(r.hoursComplete?sumExactAmounts([r.actualHours,r.remainingHours]):null) ||
           r.estimatedCost!==(r.costComplete?sumExactAmounts([r.actualCost,r.remainingCost]):null))) throw invalid();
       return data;
