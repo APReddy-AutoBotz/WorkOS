@@ -248,3 +248,5 @@ To forecast fixed-fee completion, choose a work-through date in **Check allocati
 Finance users can also enter expected total revenue at completion in the engagement currency. Leave it blank when the outlook is unknown. Each saved version preserves the assumption independently of earned revenue and invoicing.
 
 The fixed-fee forecast also shows expected revenue less projected labor cost for the selected version. Both inputs must be available. A zero revenue forecast still shows the projected labor loss, with no percentage.
+
+Each fixed-fee forecast shows how far its estimated hours and labor cost are over or under the budgets retained at review. An exact match shows “On budget”. A missing budget or incomplete estimate makes only that comparison unavailable.

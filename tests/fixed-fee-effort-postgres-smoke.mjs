@@ -153,6 +153,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       await desk.getByLabel('Expected total revenue at completion (GBP, optional)').fill('130.1234');
       await desk.getByLabel('Forecast assumptions').fill('Synthetic remaining delivery work');
       await desk.getByRole('button',{name:'Record completion forecast'}).click();
+      await desk.getByText('Forecast hours versus budget: Unavailable').waitFor();
+      await desk.getByText('Forecast labor cost versus budget: Unavailable').waitFor();
       await desk.getByText('Forecast margin after labor cost: Unavailable').waitFor();
       await desk.getByText('Expected total revenue at completion: GBP 130.1234').waitFor();
       await desk.getByText('Estimate at completion: 10.75 hours · Labor cost Unavailable GBP').waitFor();
@@ -204,6 +206,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     for (const r of [one,two]) assert.equal(r.status,201,JSON.stringify(r.body));
     assert.deepEqual(one.body.saved,two.body.saved);
     assert.equal(one.body.saved.report.expectedTotalRevenue,'0');
+    const comparison=async version=>{
+      const r=await request(forecastPath+'?through='+today+'&view=budget_comparison&version='+version);
+      assert.equal(r.status,200); return r.body.budgetVariance;
+    };
+    assert.deepEqual(await comparison(1),{hours:null,laborCost:null});
+    assert.deepEqual(await comparison(2),{hours:'5.5',laborCost:'40.5365'});
     const marginAt=async version=>(await request(forecastPath+'?through='+today+'&view=labor_margin&version='+version)).body.laborMargin;
     assert.equal((await forecast(2)).laborMargin,undefined);
     assert.deepEqual(await marginAt(2),{amount:'-101.0365',percent:null});
@@ -219,6 +227,10 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal(positive.status,201);
     assert.deepEqual(positive.body.laborMargin,{amount:'29.0869',percent:'22.35'});
     assert.deepEqual(await marginAt(3),positive.body.laborMargin);
+    const lower=await record({...makeCommand(await forecast()),view:'budget_comparison',remainingHours:'0',remainingCost:'0'});
+    assert.equal(lower.status,201);
+    assert.deepEqual(lower.body.budgetVariance,{hours:'-0.75',laborCost:'10.364'});
+    assert.equal((await request(forecastPath+'?through='+today+'&view=budget_comparison',{identity:identities.reader})).status,403);
     const futureVersion=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},addUtcDays(today,1));
     await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),futureVersion));
     const next=amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),futureVersion);
@@ -246,6 +258,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const missing=await forecast();
     const incompleteForecast=await record({...makeCommand(missing),remainingHours:'0',remainingCost:'0'});
     assert.equal(incompleteForecast.status,201);
+    assert.deepEqual(await comparison(incompleteForecast.body.saved.version),{hours:null,laborCost:null});
     assert.equal(incompleteForecast.body.saved.report.expectedTotalRevenue,undefined);
     assert.deepEqual([incompleteForecast.body.saved.report.estimatedHours,incompleteForecast.body.saved.report.estimatedCost],[null,null]);
     assert.equal((await forecast(2)).saved.report.estimatedCost,'101.0365');

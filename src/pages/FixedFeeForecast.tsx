@@ -1,6 +1,12 @@
 import {useState} from 'react';
 import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
+function budgetComparison(delta:string|null, unit:string) {
+  if (delta===null) return 'Unavailable';
+  if (delta==='0') return 'On budget';
+  return delta.startsWith('-') ? delta.slice(1)+' '+unit+' under budget' : delta+' '+unit+' over budget';
+}
+
 export function FixedFeeForecast({context,engagement,through}:{context:CommercialDraftingContext;engagement:string;through:string}) {
   const [data,setData]=useState<Awaited<ReturnType<typeof commercialDraftingService.fixedFeeForecast>>|null>(null);
   const [hours,setHours]=useState(''),[cost,setCost]=useState(''),[revenue,setRevenue]=useState(''),[reason,setReason]=useState('');
@@ -29,6 +35,8 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
           <p>Actuals at review: {saved.report.actualHours} hours · Labor cost {saved.report.actualCost} {saved.report.currency}</p>
           <p>Remaining forecast: {saved.report.remainingHours} hours · Labor cost {saved.report.remainingCost} {saved.report.currency}</p>
           <p>Estimate at completion: {saved.report.estimatedHours??'Unavailable'} hours · Labor cost {saved.report.estimatedCost??'Unavailable'} {saved.report.currency}</p>
+          <p>Forecast hours versus budget: {budgetComparison(data.budgetVariance.hours,'hours')}</p>
+          <p>Forecast labor cost versus budget: {budgetComparison(data.budgetVariance.laborCost,saved.report.currency)}</p>
           <p>Expected total revenue at completion: {saved.report.expectedTotalRevenue===undefined ? 'Unspecified' : saved.report.currency+' '+saved.report.expectedTotalRevenue}</p>
           <p>Forecast margin after labor cost: {data.laborMargin ? saved.report.currency+' '+data.laborMargin.amount : 'Unavailable'}
             {data.laborMargin && (data.laborMargin.percent===null ? ' · Percentage unavailable for zero revenue' : ' · '+data.laborMargin.percent+'%')}</p>

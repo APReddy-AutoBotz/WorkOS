@@ -249,3 +249,5 @@ Fixed-fee hours and labor-cost estimates at completion now retain reviewed versi
 The fixed-fee forecast supports a reviewed total revenue outlook. Actual earned revenue and remaining revenue still require separate evidence and controls.
 
 Fixed-fee forecasts show the expected margin after labor cost for each retained version. Actual and remaining revenue and margin, other cost categories, and an authorized earned-management policy remain open.
+
+Fixed-fee forecast review shows exact overrun or headroom for hours and labor cost against the budgets retained with each version. Buyer-configured thresholds and alert routing remain open.

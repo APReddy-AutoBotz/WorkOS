@@ -25,6 +25,11 @@ export const formatQuantity = ({units, scale}) => {
   return scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}`.replace(/0+$/, '').replace(/\.$/, '') : digits;
 };
 export const canonicalHours = value => formatQuantity(decimalQuantity(value));
+export const decimalDifference = (value, baseline) => {
+  const [left, right, scale] = align(decimalQuantity(value), decimalQuantity(baseline));
+  const delta = left - right;
+  return (delta < 0n ? '-' : '') + formatQuantity({units: delta < 0n ? -delta : delta, scale});
+};
 export const compareHours = (a, b) => {
   const [left, right] = align(decimalQuantity(a), decimalQuantity(b));
   return left < right ? -1 : left > right ? 1 : 0;
