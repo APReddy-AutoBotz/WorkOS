@@ -3,6 +3,7 @@ import {ServicePeriodReview} from './ServicePeriodReview';
 import {ServiceUnitCapture} from './ServiceUnitCapture';
 import {RetainerConsumption} from '../components/RetainerConsumption';
 import {FixedFeeInstallmentRegister} from '../components/FixedFeeInstallmentRegister';
+import {RetainerRiskRegister} from '../components/RetainerRiskRegister';
 import {PurchaseOrderRiskRegister} from '../components/PurchaseOrderRiskRegister';
 import {PurchaseOrderReleasePanel} from '../components/PurchaseOrderReleasePanel';
 import {hasRatePermission} from '../services/rateCandidates';
@@ -450,6 +451,7 @@ export const CommercialDraftingWorkspace = () => {
       </section>}
       <div className="grid min-w-0 gap-6 lg:grid-cols-2">
         <section className={panelClass} aria-label="Contracts and SOWs"><h2 className="mb-4 text-lg font-bold">Contracts / SOWs ({workspace.contracts.length})</h2>
+          {state.context?.canInspectRetainerRisks && <div key={state.generation}><RetainerRiskRegister context={state.context}/></div>}
           {!workspace.contracts.length && <p>No contracts returned for this scope.</p>}
           <ul className="space-y-4">{workspace.contracts.map(contract => <li key={contract.id} className="min-w-0 rounded-xl border border-slate-200 p-4">
             <h3 className="break-words font-bold">{contract.number} · {contract.terms.name}</h3>

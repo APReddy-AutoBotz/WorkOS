@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {commercialFixture, withCommercialDatabase, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
-import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
+import {amendmentTransition, createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
 
 const historyEntries=Array.from({length:103},(_,entryId)=>({entryId}));
 const paged={periods:[{entries:historyEntries.slice(0,97)},{entries:historyEntries.slice(97)}]};
@@ -83,6 +83,13 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const full=(await request(path)).body.periods;
     assert.deepEqual(full[0].capacity,{consumed:'3.75',carriedIn:'0',remaining:'0',overage:'2.7499',expired:'0',carriedOut:'0'});
     assert.equal(full[1].capacity,undefined);
+    const register='/retainer-capacity-risks';
+    const risk=await request(register);
+    assert.equal(risk.status,200,JSON.stringify(risk.body));
+    assert.deepEqual(risk.body.findings.filter(row=>row.versionId===pin),
+      [{contractId:contract.id,number:contract.number,versionId:pin,version:1,kind:'overconsumption',startsOn:today,endsOn:today,hours:'2.7499'}]);
+    assert(!(await request(register+'?after='+encodeURIComponent(pin))).body.findings.some(row=>row.versionId===pin));
+    assert.equal((await request(register,{identity:identities.reader})).body.error.code,'RETAINER_SCOPE_REQUIRED');
     for (const identity of [identities.reader,identities.first])
       assert((await request(path,{identity})).body.periods.every(p=>p.capacity===undefined));
     const previewPath=path.replace('retainer-consumption','retainer-overage-preview');
@@ -122,6 +129,11 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(identities.manager,revised.versions[0].id),empty);
     assert((await request(path.replace(pin,revised.versions[0].id))).body.periods.every(p=>!p.capacity));
     assert.deepEqual(await read(),approved);
+    await amendmentTransition(request,'Contract',contract.id,1,pin,'On Hold');
+    const interrupted=await request(register);
+    assert.equal(interrupted.status,200);
+    assert.deepEqual(interrupted.body.findings.filter(row=>row.versionId===pin),
+      [{contractId:contract.id,number:contract.number,versionId:pin,version:1,kind:'review_terms',startsOn:today,endsOn:today}]);
   });
 });
 console.log('Retainer consumption passed pending and final approval, decimal totals, period, version and worker scope.');

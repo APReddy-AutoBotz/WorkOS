@@ -4,12 +4,12 @@ import {retainerBalances} from './retainer-balances.mjs';
 import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
-export async function getRetainerConsumption(client, req, buildEmployeeScopeWhere, priceOverage=false, statementStart=null) {
+export async function getRetainerConsumption(client, req, buildEmployeeScopeWhere, priceOverage=false, statementStart=null, source=req.params) {
   await assertCommercialAuthority(client, req, 'employees.view');
   await assertCommercialAuthority(client, req, 'reports.view_utilization');
   if (priceOverage) await authorizeRateCandidate(client,req,'billing');
   const {organizationId, legalEntityId} = req.organizationScope;
-  const {id:contractId, versionId} = req.params;
+  const {id:contractId, versionId} = source;
   const params = [organizationId, legalEntityId, contractId, versionId];
   const version = await client.query(
     `select retainer_periods,retainer_capacity_policy,retainer_overage_policy,retainer_rounding,effective_from::text,currency,(now() at time zone 'UTC')::date::text today from commercial_contract_versions where organization_id=$1 and legal_entity_id=$2
@@ -48,6 +48,7 @@ export async function getRetainerConsumption(client, req, buildEmployeeScopeWher
       join lateral (select d.status,d.id from work_submission_decisions d where d.submission_id=submission.id
         order by d.created_at desc,d.id desc limit 1) decision on decision.status='Approved'
       where eng.organization_id=$1 and eng.legal_entity_id=$2 and eng.contract_id=$3 and eng.model='retainer'
+        ${source.throughToday ? "and entry.work_date<=(now() at time zone 'UTC')::date" : ''}
         and ${workerScope}
         and exists (select 1 from jsonb_array_elements(submission.entries) item
           where item->>'entryId'=entry.id::text and item->>'kind'='governed' and item->>'bindingId'=b.id

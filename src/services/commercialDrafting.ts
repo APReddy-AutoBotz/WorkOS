@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -114,6 +114,8 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canRecordFixedFeeProgress:permissions.includes('commercial.fixed_fee_progress.record'),
     canRecordFixedFeeElapsed:permissions.includes('commercial.fixed_fee_elapsed.record'),
     canViewFixedFeeMargin:permissions.includes('commercial.fixed_fee_margin.view'),
+    canInspectRetainerRisks:!['Employee','TeamLead','ProjectManager','CountryDirector'].includes(user.role) &&
+      ['employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
     canConfigurePoRiskNotices:permissions.includes('commercial.po_risk.configure'),
     canConfigureRiskNotices:permissions.includes('commercial.fixed_fee_risk.configure'),
     canSignFixedFeeStatement:permissions.includes('commercial.fixed_fee_statement.sign'),
@@ -859,6 +861,18 @@ export const commercialDraftingService = {
     return request(context,'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/risk-history'+(after?'?after='+encodeURIComponent(after):''),undefined,
       value=>z.object({orderId:z.literal(order.id),currency:z.literal(order.currency),threshold:costDecimal,expiredOn:z.string().date().nullable(),
         priorCommitments:z.number().int().nonnegative(),movements:z.array(movement).max(50),nextAfter:z.string().uuid().nullable()}).strict().parse(value),true);
+  },
+  retainerRisks(after:string|null,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canInspectRetainerRisks) throw invalid();
+    const source={contractId:z.string().min(1),number:z.string().min(1),versionId:z.string().min(1),version:z.number().int().positive()};
+    const findings=z.array(z.union([
+      z.object({...source,kind:z.literal('missing_policy')}).strict(),
+      z.object({...source,kind:z.literal('review_terms'),startsOn:z.string().date(),endsOn:z.string().date()}).strict(),
+      z.object({...source,kind:z.enum(['overconsumption','expiry']),startsOn:z.string().date(),endsOn:z.string().date(),
+        hours:z.string().regex(/^\d+(?:\.\d+)?$/)}).strict()
+    ])).max(2400);
+    return request(context,'GET','/retainer-capacity-risks'+(after?'?after='+encodeURIComponent(after):''),undefined,
+      value=>z.object({asOf:z.string().date(),scannedVersions:z.number().int().min(0).max(10),findings,nextAfter:z.string().min(1).nullable()}).strict().parse(value),false);
   },
   purchaseOrderRisks(expiresBy:string,after:string|null,context:CommercialDraftingContext,routing=false) {
     const current=assertCommercialDraftingContext(context,true);

@@ -277,3 +277,7 @@ Finance can inspect released purchase orders across the selected legal entity fo
 ### Purchase-order alert assignments
 
 Purchase-order alerts now cover unused released orders, shared orders, verified threshold crossings and exhaustion. The delivery work includes a finance register for assignment gaps, retriable in-app delivery, a dated opening observation for at-risk upgraded orders, and receipt access checks after reassignment. Broader commercial risk coverage still includes retainer and portfolio margin alerts.
+
+### Retainer risk reporting
+
+Finance can inspect capacity findings across governed retainer contract versions. The register uses approved work, effective capacity policies and UTC service dates. Mandatory retainer inbox delivery and portfolio margin alerts remain outstanding.
