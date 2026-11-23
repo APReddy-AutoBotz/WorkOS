@@ -1,5 +1,9 @@
 # WorkOS implementation status
 
+## Utilization evidence
+
+The compatibility actual utilization report now displays missing approval or capacity explicitly in its table, summary and global export. The actual and planned KPI cards display measured values without fixed trend indicators. Governed effective-capacity reports use their existing approved-work sources.
+
 ## Deployment reproducibility
 
 The application build and runtime share one pinned Node image index. The buyer PostgreSQL image pin matches the CI service. The initial pins come from the [tested main deployment inputs](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45273167876). Release acceptance still requires selecting a candidate and verifying it on buyer infrastructure.

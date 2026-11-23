@@ -23,6 +23,18 @@ import { getUtilizationEligibleEmployees } from '../services/calculations';
 import { formatHours, formatPercent, roundMetric } from '../lib/format';
 import { downloadAuditedCsv } from '../lib/reportExport';
 
+function approvedPercent(hours: number, count: number, weeklyHours: number | undefined) {
+  if (!weeklyHours || !Number.isFinite(weeklyHours) || weeklyHours <= 0 || count <= 0 || !Number.isFinite(hours)) return null;
+  return hours / (count * weeklyHours) * 100;
+}
+function logPercent(sheet: TimesheetSummary, weeklyHours: number | undefined) {
+  return sheet.status === 'Approved' ? approvedPercent(sheet.billableHours, 1, weeklyHours) : null;
+}
+function logPercentLabel(sheet: TimesheetSummary, actual: number | null) {
+  if (sheet.status !== 'Approved') return 'Not approved';
+  return actual === null ? 'Unavailable' : formatPercent(actual);
+}
+
 type ActualStatus = 'loading' | 'ready' | 'access' | 'unavailable' | 'error';
 type ActualSnapshot = { employees: Employee[]; timesheets: TimesheetSummary[]; settings: SystemSettings };
 type ActualResult = {
@@ -143,9 +155,7 @@ export const ActualUtilization = () => {
     // Average actual utilization across approved timesheets in the current scope
     const approvedTimesheets = scopedTimesheets.filter(timesheet => timesheet.status === 'Approved');
     const totalBillableHours = approvedTimesheets.reduce((sum, ts) => sum + ts.billableHours, 0);
-    const avgActual = approvedTimesheets.length > 0 && settings
-      ? (totalBillableHours / (approvedTimesheets.length * settings.expectedWeeklyHours)) * 100
-      : 0;
+    const avgActual = approvedPercent(totalBillableHours, approvedTimesheets.length, settings?.expectedWeeklyHours);
 
     const pendingReview = scopedTimesheets.filter(t => t.status === 'Submitted').length;
     const approved = scopedTimesheets.filter(t => t.status === 'Approved').length;
@@ -157,22 +167,18 @@ export const ActualUtilization = () => {
       .sort((a, b) => new Date(a.weekEnding).getTime() - new Date(b.weekEnding).getTime())
       .forEach(timesheet => latestApprovedByEmployee.set(timesheet.employeeId, timesheet));
     const employeesWithApprovedScope = active.filter(employee => latestApprovedByEmployee.has(employee.id));
-    const loggingVariance = employeesWithApprovedScope.length > 0
-      ? employeesWithApprovedScope.reduce((sum, employee) => {
-        const latestApproved = latestApprovedByEmployee.get(employee.id);
-        const scopedActual = latestApproved && settings
-          ? roundMetric((latestApproved.billableHours / settings.expectedWeeklyHours) * 100)
-          : 0;
-        return sum + Math.abs(employee.plannedUtilization - scopedActual);
-      }, 0) / employeesWithApprovedScope.length
-      : 0;
+    const variances = employeesWithApprovedScope.flatMap(employee => {
+      const actual = logPercent(latestApprovedByEmployee.get(employee.id)!, settings?.expectedWeeklyHours);
+      return actual === null ? [] : [Math.abs(employee.plannedUtilization - roundMetric(actual))];
+    });
+    const loggingVariance = variances.length ? variances.reduce((sum, gap) => sum + gap, 0) / variances.length : null;
 
     return [
-      { title: 'Avg. Actual Util.', value: formatPercent(avgActual), change: -0.5, changeType: 'decrease', icon: 'Zap' },
+      { title: 'Avg. Actual Util.', value: avgActual === null ? 'Unavailable' : formatPercent(avgActual), icon: 'Zap' },
       { title: 'Submission Rate', value: formatPercent(submissionRate), icon: 'CheckCircle2' },
       { title: 'Pending Review', value: pendingReview, icon: 'Timer' },
       { title: 'Approved Logs', value: approved, icon: 'FileCheck' },
-      { title: 'Logging Variance', value: formatPercent(loggingVariance), icon: 'AlertTriangle' },
+      { title: 'Logging Variance', value: loggingVariance === null ? 'Unavailable' : formatPercent(loggingVariance), icon: 'AlertTriangle' },
       { title: 'Missing Logs', value: missingLogs, icon: 'Clock' }
     ];
   }, [employees, scopedTimesheets, settings]);
@@ -193,20 +199,18 @@ export const ActualUtilization = () => {
       const plannedEmployees = Array.from(approvedEmployeeIds)
         .map(employeeId => activeById.get(employeeId))
         .filter(Boolean) as Employee[];
-      const planned = plannedEmployees.length
+      const planned = plannedEmployees.length > 0 && plannedEmployees.length === approvedEmployeeIds.size
         ? plannedEmployees.reduce((sum, employee) => sum + employee.plannedUtilization, 0) / plannedEmployees.length
-        : 0;
+        : null;
       const actualHours = approvedSheets.reduce((sum, timesheet) => sum + timesheet.billableHours, 0);
-      const actual = approvedEmployeeIds.size > 0 && settings
-        ? (actualHours / (approvedEmployeeIds.size * settings.expectedWeeklyHours)) * 100
-        : 0;
+      const actual = approvedPercent(actualHours, approvedEmployeeIds.size, settings?.expectedWeeklyHours);
 
       return {
         weekEnding,
         weekLabel: new Date(`${weekEnding}T00:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
-        planned: Math.round(planned),
-        actual: Math.round(actual),
-        gap: Math.round(actual - planned),
+        planned: planned === null ? null : Math.round(planned),
+        actual: actual === null ? null : Math.round(actual),
+        gap: actual === null || planned === null ? null : Math.round(actual - planned),
         coverage: active.length ? Math.round((submittedEmployeeIds.size / active.length) * 100) : 0,
         pending: weekSheets.filter(timesheet => timesheet.status === 'Submitted').length,
       };
@@ -214,7 +218,7 @@ export const ActualUtilization = () => {
   }, [employees, scopedTimesheets, settings]);
 
   const varianceWatchlist = useMemo(() => {
-    const expectedWeeklyHours = settings?.expectedWeeklyHours || 40;
+    const expectedWeeklyHours = settings?.expectedWeeklyHours;
     return employees
       .filter(employee => getUtilizationEligibleEmployees([employee]).length > 0)
       .map(employee => {
@@ -223,7 +227,9 @@ export const ActualUtilization = () => {
           .sort((a, b) => new Date(a.weekEnding).getTime() - new Date(b.weekEnding).getTime())
           .at(-1);
         if (!latestApproved) return null;
-        const actual = roundMetric((latestApproved.billableHours / expectedWeeklyHours) * 100);
+        const percentage = logPercent(latestApproved, expectedWeeklyHours);
+        if (percentage === null) return null;
+        const actual = roundMetric(percentage);
         const planned = Math.round(employee.plannedUtilization);
         return {
           employee,
@@ -258,7 +264,7 @@ export const ActualUtilization = () => {
         weekEnding: timesheet.weekEnding,
         totalHours: timesheet.totalHours,
         billableHours: timesheet.billableHours,
-        actualUtilization: timesheet.status === 'Approved' ? formatPercent((timesheet.billableHours / (settings?.expectedWeeklyHours || 40)) * 100) : '0%',
+        actualUtilization: logPercentLabel(timesheet, logPercent(timesheet, settings?.expectedWeeklyHours)),
         status: timesheet.status,
         submittedAt: timesheet.submittedAt || '',
         approvedAt: timesheet.approvedAt || '',
@@ -289,7 +295,7 @@ export const ActualUtilization = () => {
     <div className="animate-in fade-in duration-500 pb-12">
       <PageHeader
         title="Actual Utilization"
-        subtitle="Historical reporting based on submitted timesheet effort and service delivery logs."
+        subtitle="Average actual utilization divides approved billable hours by configured weekly hours per approved log."
         breadcrumb={['Reports', 'Utilization']}
         actions={
           <div className="flex flex-wrap items-center gap-3">
@@ -361,6 +367,7 @@ export const ActualUtilization = () => {
           <div className="flex items-start justify-between gap-6 mb-6">
             <div>
               <h3 className="text-sm font-bold text-heading">Actual vs Planned Reconciliation</h3>
+              <p className="text-xs text-gray-600">Weekly actual uses approved billable hours divided by configured weekly hours per approved worker. A gap requires planned utilization for the same workers.</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Approved effort compared with allocation plan by week</p>
             </div>
             <div className="hidden sm:flex items-center gap-4 text-[9px] font-bold uppercase tracking-widest text-gray-400">
@@ -377,7 +384,7 @@ export const ActualUtilization = () => {
 
           <div className="space-y-4">
             {weeklyReconciliation.map(row => {
-              const varianceTone = Math.abs(row.gap) >= 20 ? 'text-danger' : Math.abs(row.gap) >= 10 ? 'text-primary' : 'text-success';
+              const varianceTone = row.gap === null ? 'text-gray-500' : Math.abs(row.gap) >= 20 ? 'text-danger' : Math.abs(row.gap) >= 10 ? 'text-primary' : 'text-success';
               return (
                 <div key={row.weekEnding} className="grid grid-cols-1 xl:grid-cols-[92px_1fr_220px] gap-4 items-center p-4 bg-slate-50/60 rounded-2xl border border-slate-100">
                   <div>
@@ -388,22 +395,22 @@ export const ActualUtilization = () => {
                     <div className="flex items-center gap-3">
                       <span className="w-14 text-[10px] font-bold uppercase tracking-widest text-gray-400">Actual</span>
                       <div className="flex-1 h-3 bg-white border border-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(row.actual, 100)}%` }} />
+                        <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(row.actual ?? 0, 100)}%` }} />
                       </div>
-                      <span className="w-12 text-right text-xs font-bold text-heading">{row.actual}%</span>
+                      <span className="w-12 text-right text-xs font-bold text-heading">{row.actual === null ? 'N/A' : formatPercent(row.actual)}</span>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="w-14 text-[10px] font-bold uppercase tracking-widest text-gray-400">Planned</span>
                       <div className="flex-1 h-3 bg-white border border-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-slate-300 rounded-full" style={{ width: `${Math.min(row.planned, 100)}%` }} />
+                        <div className="h-full bg-slate-300 rounded-full" style={{ width: `${Math.min(row.planned ?? 0, 100)}%` }} />
                       </div>
-                      <span className="w-12 text-right text-xs font-bold text-heading">{row.planned}%</span>
+                      <span className="w-12 text-right text-xs font-bold text-heading">{row.planned === null ? 'N/A' : formatPercent(row.planned)}</span>
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-white rounded-xl border border-slate-100 p-3">
                       <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Gap</p>
-                      <p className={cn("text-sm font-bold mt-1", varianceTone)}>{row.gap > 0 ? '+' : ''}{row.gap}%</p>
+                      <p className={cn("text-sm font-bold mt-1", varianceTone)}>{row.gap === null ? 'N/A' : (row.gap > 0 ? '+' : '') + formatPercent(row.gap)}</p>
                     </div>
                     <div className="bg-white rounded-xl border border-slate-100 p-3">
                       <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Coverage</p>
@@ -551,7 +558,7 @@ export const ActualUtilization = () => {
             </thead>
             <tbody className="divide-y divide-border-light font-bold">
               {filteredLogs.map((ts, idx) => {
-                const util = ts.status === 'Approved' ? (ts.billableHours / (settings?.expectedWeeklyHours || 40)) * 100 : 0;
+                const util = logPercent(ts, settings?.expectedWeeklyHours);
                 const billableP = ts.totalHours > 0 ? (ts.billableHours / ts.totalHours) * 100 : 0;
 
                 return (
@@ -581,11 +588,11 @@ export const ActualUtilization = () => {
                        <div className="flex flex-col items-center">
                           <span className={cn(
                              "text-sm font-bold",
-                             util > 100 ? "text-danger" : util >= 80 ? "text-heading" : "text-primary"
-                          )}>{formatPercent(util)}</span>
-                          <div className="w-20 h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                             util === null ? "text-gray-500" : util > 100 ? "text-danger" : util >= 80 ? "text-heading" : "text-primary"
+                          )}>{logPercentLabel(ts, util)}</span>
+                          {util !== null && <div className="w-20 h-1 bg-gray-100 rounded-full mt-1 overflow-hidden">
                              <div className={cn("h-full transition-all duration-500", util > 100 ? "bg-danger" : "bg-primary")} style={{ width: `${Math.min(util, 100)}%` }} />
-                          </div>
+                          </div>}
                        </div>
                     </td>
                     <td className="py-5 px-8 text-right">

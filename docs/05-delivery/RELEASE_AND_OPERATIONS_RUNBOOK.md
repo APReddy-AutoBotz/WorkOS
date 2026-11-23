@@ -1,5 +1,9 @@
 # WorkOS Release and Operations Runbook
 
+## Interpreting compatibility actual utilization
+
+For an approved timesheet, compare billable hours with the configured expected weekly hours. A measured zero is valid. For an unavailable result, check approval status and weekly capacity before using the value in a comparison. The global CSV preserves the same distinction. Weekly reconciliation requires a comparable plan for every approved worker before displaying a gap. Use the governed report when effective available capacity is required. Reverting the presentation change requires no data migration.
+
 ## Updating deployment image pins
 
 The Dockerfile selects one Node/Alpine image index for both build and runtime. The Compose database and CI service select the same PostgreSQL image index. Record the official multi-platform digest and supported buyer architectures when refreshing a pin. Apply a PostgreSQL digest update to both files in one PR and retain the successful migration, restore, startup and container checks. For a major PostgreSQL upgrade, follow a separate data conversion and recovery plan. Reverting a Git pin alone does not downgrade an existing database.

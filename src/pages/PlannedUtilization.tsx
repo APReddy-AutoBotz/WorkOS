@@ -156,8 +156,8 @@ export const PlannedUtilization = () => {
 
     return [
       { title: 'Avg. Planned Util.', value: formatPercent(avgPlanned), icon: 'Target' },
-      { title: 'Overloaded', value: overAllocated, change: 2, changeType: 'increase', icon: 'AlertTriangle' },
-      { title: 'Underutilized', value: underUtilized, change: -3, changeType: 'decrease', icon: 'ArrowDownRight' },
+      { title: 'Overloaded', value: overAllocated, icon: 'AlertTriangle' },
+      { title: 'Underutilized', value: underUtilized, icon: 'ArrowDownRight' },
       { title: 'Bench Count', value: bench, icon: 'Users' },
       { title: 'Overload Density', value: active.length > 0 ? formatPercent(overAllocated / active.length * 100, 0) : '0%', icon: 'Activity' },
       { title: 'Utilization FTE', value: active.length, icon: 'Users' }

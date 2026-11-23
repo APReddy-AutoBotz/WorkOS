@@ -4,6 +4,8 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+- Corrected actual utilization displays and CSVs when approval or capacity evidence is missing.
+
 - Pinned the tested Node and PostgreSQL image indexes for reproducible container inputs.
 
 - Managed-service engagements can adopt an effective-dated standing margin threshold through the commercial amendment workflow.

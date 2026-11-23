@@ -207,7 +207,7 @@ const csv = rows => rows.length ? [Object.keys(rows[0]), ...rows.map(row => Obje
 const expectedCsv = (name, source, expectedHours = 40) => csv(source.map(item => name === 'Global Report' ? {
   employeeId: item.employeeId, employeeName: item.employeeName, weekEnding: item.weekEnding,
   totalHours: item.totalHours, billableHours: item.billableHours,
-  actualUtilization: item.status === 'Approved' ? percent(item.billableHours / (expectedHours || 40) * 100) : '0%',
+  actualUtilization: item.status !== 'Approved' ? 'Not approved' : expectedHours > 0 ? percent(item.billableHours / expectedHours * 100) : 'Unavailable',
   status: item.status, submittedAt: item.submittedAt || '', approvedAt: item.approvedAt || '',
   rejectedAt: item.rejectedAt || '', rejectionReason: item.rejectionReason || '',
 } : {
@@ -270,13 +270,14 @@ try {
   ], 'month choices derive from logs and preserve descending order');
   await expectKpis([['Avg. Actual Util.', '77.9%'], ['Submission Rate', '77.8%'], ['Pending Review', '1'],
     ['Approved Logs', '6'], ['Logging Variance', '21.3%'], ['Missing Logs', '1']]);
+  assert.equal(await kpi('Avg. Actual Util.').locator('..').getByText('0.5%', {exact:true}).count(),0);
   const firstRow = table().locator('tbody tr').first();
   assert.deepEqual((await firstRow.locator('td').allTextContents()).slice(1), [
     '2024-04-26', '48.3h', '99%', '120%', 'Approved',
   ], 'existing approved-only utilization, total-hours rounding and billable-percent formatting remain visible');
   for (const state of ['Submitted', 'Rejected', 'Draft']) {
     const row = table().locator('tbody tr').filter({has: page.getByText(state, {exact: true})});
-    assert.equal(await row.locator('td').nth(4).getByText('0%', {exact: true}).count(), 1, `${state} effort never becomes actual utilization`);
+    assert.equal(await row.locator('td').nth(4).getByText('Not approved', {exact: true}).count(), 1, `${state} effort never becomes actual utilization`);
   }
   const week = reconciliationRows().first();
   assert.deepEqual(await week.locator('p').allTextContents(), ['Week Ending', '26 Apr', 'Gap', '-4%', 'Coverage', '88%', 'Review', '1']);
@@ -317,7 +318,8 @@ try {
   await expectExport('Audit Trail', []);
   await period().selectOption('2024-04');
   await expectTableRows([monthLogs()[6]]);
-  await expectKpis([['Avg. Actual Util.', '0%'], ['Submission Rate', '100%'], ['Pending Review', '1'], ['Approved Logs', '0'], ['Logging Variance', '0%'], ['Missing Logs', '7']]);
+  await expectKpis([['Avg. Actual Util.', 'Unavailable'], ['Submission Rate', '100%'], ['Pending Review', '1'], ['Approved Logs', '0'], ['Logging Variance', 'Unavailable'], ['Missing Logs', '7']]);
+  assert.deepEqual(await reconciliationRows().first().locator('span.w-12').allTextContents(), ['N/A','N/A']);
   await expectExport('Global Report', [monthLogs()[6]]);
   await statusFilter().selectOption('Approved Only');
   await expectTableRows(monthLogs().slice(0, 6));
@@ -390,11 +392,18 @@ try {
   assert.deepEqual(await watchlistRows().locator('div.min-w-0 > p:first-child').allTextContents(),
     ['Synthetic configured-alpha', 'Synthetic configured-gamma', 'Synthetic configured-beta', 'Synthetic configured-epsilon', 'Synthetic configured-delta']);
   await expectExport('Global Report', monthLogs('configured'), 32);
-  const fallback = await refresh(lastId(configured));
+  const zero = await refresh(lastId(configured));
+  const zeroLogs = [log('zero', 'alpha', '2024-04-26', 'Approved', 0, 8)];
+  await settle(zero, bundle('zero', {timesheets:zeroLogs}));
+  await expectKpis([['Avg. Actual Util.', '0%']]);
+  assert.equal(await table().locator('tbody tr').first().locator('td').nth(4).innerText(),'0%');
+  await expectExport('Global Report',zeroLogs);
+  const fallback = await refresh(lastId(zero));
   await settle(fallback, bundle('fallback', {expectedHours: 0}));
   await expectSuccess('fallback');
-  assert.equal(await table().locator('tbody tr').first().locator('td').nth(4).getByText('120%', {exact: true}).count(), 1);
-  assert.equal(await watchlistRows().first().getByText('120%', {exact: true}).count(), 1);
+  assert.equal(await table().locator('tbody tr').first().locator('td').nth(4).getByText('Unavailable', {exact: true}).count(), 1);
+  await expectKpis([['Avg. Actual Util.', 'Unavailable'], ['Logging Variance', 'Unavailable']]);
+  await page.getByText(noVarianceText, {exact:true}).waitFor();
   await expectExport('Global Report', monthLogs('fallback'), 0);
 
   // Empty employees alone is not a composite-empty report: log rows and both
@@ -410,7 +419,7 @@ try {
   await expectReady();
   await table().getByText(noLogsText, {exact: true}).waitFor();
   assert.equal(await page.getByText(filteredEmptyText, {exact: true}).count(), 0);
-  await expectKpis([['Avg. Actual Util.', '0%'], ['Missing Logs', '8']]);
+  await expectKpis([['Avg. Actual Util.', 'Unavailable'], ['Missing Logs', '8']]);
   await expectExport('Global Report', []);
   await expectExport('Audit Trail', []);
   const empty = await refresh(lastId(employeesOnly));
