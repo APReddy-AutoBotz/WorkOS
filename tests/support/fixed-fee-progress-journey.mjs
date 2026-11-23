@@ -48,6 +48,14 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),next));
   await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),next,
     {endsOn:end,effortPolicy:'disabled',elapsedTimePolicy:'2'}));
+  const transitionPath='/engagements/'+engagement.id+'/fixed-fee-transition';
+  const reason='Reviewed closing effort and remaining service dates';
+  const ungranted={policyId:'synthetic',snapshotId:randomUUID(),reason};
+  assert.equal((await request(transitionPath,{method:'POST',body:ungranted})).status,403);
+  grants.push('commercial.fixed_fee_transition.approve');
+  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_transition.approve',true)");
+  assert.equal((await request(transitionPath,{method:'POST',body:{...ungranted,amount:'20'}})).status,400);
+  assert.equal((await request(transitionPath,{method:'POST',body:ungranted})).status,409);
   const fixture=await startFixtureServer({root:fileURLToPath(new URL('../../',import.meta.url)),fixtures:['commercial-drafting'],apiUrl:baseUrl});
   let browser;
   try {
@@ -76,6 +84,9 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     await forecast.getByRole('button',{name:'Inspect completion forecast'}).click();
     await forecast.getByText('Reconciled delivery-effort revenue through '+today+': GBP 60').waitFor();
     await forecast.getByText(/Proposed first-day cumulative value: GBP 60.33/).waitFor();
+    await forecast.getByLabel('Transition approval reason').fill(reason);
+    await forecast.getByRole('button',{name:'Approve residual schedule'}).click();
+    await forecast.getByText(/^Finance approval [a-f0-9-]{36}$/).waitFor();
     await forecast.getByLabel('Remaining forecast hours').fill('0.75');
     await forecast.getByLabel('Remaining labor cost (GBP)').fill('5');
     await forecast.getByLabel('Expected total revenue at completion (GBP, optional)').fill('70');
@@ -107,10 +118,42 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   assert.deepEqual(second.saved,replay.saved);
   assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Fixed Fee Progress Value'")).rows[0].n,2);
   assert.deepEqual((await get(1)).saved,results[0].saved);
+  assert.equal(scheduled.approvalId,null);
+  const approve={snapshotId:scheduled.snapshotId,policyId:scheduled.policyId,reason};
+  assert.equal((await request(transitionPath,{method:'POST',body:approve,identity:identities.reader})).status,403);
+  await pool.query(`create trigger reject_transition_audit before insert on audit_logs for each row
+    when(new.entity_type='Fixed Fee Transition') execute function reject_test_progress_audit()`);
+  assert.equal((await request(transitionPath,{method:'POST',body:approve})).status,503);
+  assert.equal((await live()).revenue.scheduled.approvalId,null);
+  await pool.query('drop trigger reject_transition_audit on audit_logs');
+  const responses=await Promise.all([post(transitionPath,approve),post(transitionPath,approve)]);
+  assert.deepEqual(responses[0],responses[1]);
+  assert.equal((await request(transitionPath,{method:'POST',body:{...approve,reason:'Different decision'}})).status,409);
+  assert.equal((await live()).revenue.scheduled.approvalId,responses[0].approvalId);
+  assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Fixed Fee Transition'")).rows[0].n,2);
+  await assert.rejects(pool.query('update commercial_fixed_fee_transition_approvals set reason=$1 where id=$2',['Replacement reason',responses[0].approvalId]));
+  // Advance only this disposable transaction's clock to exercise elapsed service dates.
+  const client=await pool.connect();
+  try {
+    await client.query('begin');
+    await client.query(`create schema transition_test_clock;
+      create function transition_test_clock.now() returns timestamptz language sql stable as $$select pg_catalog.now()+interval '40 days'$$;
+      set local search_path=transition_test_clock,public,pg_catalog`);
+    const {organizationId,legalEntityId}=commercialFixture;
+    const req={params:{id:engagement.id},user:{sub:identities.manager.id,activeRole:'Admin'},organizationScope:{organizationId,legalEntityId},
+      headers:{'x-organization-id':organizationId,'x-legal-entity-id':legalEntityId}};
+    for (const [date,earned,remaining] of [[tomorrow,'60.33','9.67'],[end,'70','0']]) {
+      const args=[organizationId,legalEntityId,engagement.id,date];
+      const result=await policyRevenue(client,req,()=>'true',args,'GBP','70');
+      assert.deepEqual([result.earnedAmount,result.remainingRevenue,result.preview?.approvalId],[earned,remaining,responses[0].approvalId]);
+      assert.equal((await client.query('select fixed_fee_elapsed_report($1,$2,$3,$4::date) report',args)).rows[0].report,null);
+    }
+  } finally {await client.query('rollback');client.release();}
   const sheet=randomUUID();
   await pool.query(`insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours,organization_id,legal_entity_id)
     values($1,$2,$3,'Approved',1,1,$4,$5)`,[sheet,commercialFixture.ownerId,addUtcDays(today,7),commercialFixture.organizationId,commercialFixture.legalEntityId]);
   await pool.query("insert into timesheet_entries(timesheet_id,project_id,work_type,work_date,hours,category_code,billable) values($1,$2,'Project Work',$3,1,'BILL',true)",[sheet,project.id,today]);
+  assert.equal((await request(transitionPath,{method:'POST',body:approve})).status,409);
   const incomplete=await get();
   assert.deepEqual([(await live()).revenue.status,(await live()).revenue.remainingRevenue],['incomplete',null]);
   assert.deepEqual([incomplete.report.unresolved,incomplete.report.amount],[1,null]);

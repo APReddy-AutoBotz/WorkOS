@@ -1,6 +1,7 @@
 import {fixedFeeProgress,progressCommand,progressGrant,progressQuery} from './fixed-fee-progress.mjs';
 import {elapsedPeriodQuery,reconcileElapsedPeriod} from './fixed-fee-elapsed-period.mjs';
 import {fixedFeeElapsed,elapsedGrant,elapsedQuery,elapsedCommand} from './fixed-fee-elapsed.mjs';
+import {approveFixedFeeTransition,transitionCommand,transitionGrant} from './fixed-fee-transition.mjs';
 import {fixedFeeForecast,forecastCommand,forecastQuery,forecastGrant} from './fixed-fee-forecast.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 import {fixedFeeCosts,fixedCostCommand,fixedCostGrant} from './fixed-fee-cost.mjs';
@@ -57,7 +58,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if(error?.code==='MGM01')res.status(403).json({error:{code:'MARGIN_DENIED',message:'Current reporting authority is required.'}});
+      }else if(error?.code==='MFT01')res.status(409).json({error:{code:'TRANSITION_UNAVAILABLE',message:'Inspect the current transition evidence.'}});
+      else if(error?.code==='MGM01')res.status(403).json({error:{code:'MARGIN_DENIED',message:'Current reporting authority is required.'}});
       else if(error?.code==='MGM02')res.status(409).json({error:{code:'MARGIN_CHANGED',message:'Inspect the current period again.'}});
       else if(error?.code==='MEC01')res.status(403).json({error:{code:'SERVICE_COST_DENIED',message:'Current worker cost authority is required.'}});
       else if(error?.code==='MEC02' || ([effortCostGrant,fixedCostGrant].includes(permission) && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_COST_CHANGED',message:'Review accepted effort, the adopted hourly cost and the financial period.'}});
@@ -137,6 +139,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   const elapsedPath='/engagements/:id/fixed-fee-elapsed';
   router.get(elapsedPath,handle(elapsedQuery,false,(c,r,i)=>fixedFeeElapsed(c,r,i,buildEmployeeScopeWhere)));
   router.post(elapsedPath,handle(elapsedCommand,true,(c,r,i)=>fixedFeeElapsed(c,r,i,buildEmployeeScopeWhere,audit),elapsedGrant,true));
+  router.post('/engagements/:id/fixed-fee-transition',handle(transitionCommand,true,(c,r,i)=>approveFixedFeeTransition(c,r,i,buildEmployeeScopeWhere,audit),transitionGrant,true));
   const forecastPath='/engagements/:id/fixed-fee-forecast';
   router.get(forecastPath,handle(forecastQuery,false,(c,r,i)=>fixedFeeForecast(c,r,i,buildEmployeeScopeWhere)));
   router.post(forecastPath,handle(forecastCommand,true,(c,r,i)=>fixedFeeForecast(c,r,i,buildEmployeeScopeWhere,audit),forecastGrant,true));

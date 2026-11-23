@@ -28,6 +28,18 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
     } finally {setBusy(false);}
   };
   const saved=data?.saved;
+  const transition=data?.revenue.profile==='effort'?data.revenue.scheduled:data?.revenue.profile==='transition'?data.revenue.preview:undefined;
+  const [approvalReason,setApprovalReason]=useState('');
+  async function approveTransition() {
+    if (!transition) return;
+    setBusy(true);
+    try {
+      await commercialDraftingService.approveFixedFeeTransition(engagement,context,{policyId:transition.policyId,snapshotId:transition.snapshotId,reason:approvalReason});
+      if (isCommercialDraftingContextCurrent(context)) {setApprovalReason('');await inspect();}
+    } catch {
+      if (isCommercialDraftingContextCurrent(context)) {setData(null);setMessage('Inspect the transition again before approving.');}
+    } finally {setBusy(false);}
+  }
   return <section aria-label="Fixed-fee completion forecast">
     <fieldset disabled={busy}><legend>Fixed-fee estimates at completion</legend>
       <button type="button" onClick={()=>void inspect()}>Inspect completion forecast</button>
@@ -42,10 +54,15 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
           data.revenue.preview?<div>
             <p>Verified effort value through {data.revenue.preview.closingDate}: {data.baseline.currency} {data.revenue.preview.closingAmount}</p>
             <p>Allocation to spread from {data.revenue.preview.startsOn} through {data.revenue.preview.endsOn}: {data.baseline.currency} {data.revenue.preview.residual}</p>
-            <p>Proposed cumulative value through {through}: {data.baseline.currency} {data.revenue.preview.amount}. Finance approval pending.</p>
+            <p>Cumulative schedule value through {through}: {data.baseline.currency} {data.revenue.preview.amount}.</p>
           </div>:<p>Transition review unavailable{data.revenue.closingStatus?' · '+data.revenue.closingStatus:''}.</p>
         }
         {data.revenue.profile==='effort' && data.revenue.scheduled && <p>Scheduled switch on {data.revenue.scheduled.startsOn}: carry forward {data.baseline.currency} {data.revenue.scheduled.closingAmount} and spread {data.baseline.currency} {data.revenue.scheduled.residual} through {data.revenue.scheduled.endsOn}. Proposed first-day cumulative value: {data.baseline.currency} {data.revenue.scheduled.amount}.</p>}
+        {transition && (transition.approvalId?<p>Finance approval {transition.approvalId}</p>:
+          <><p>Finance approval pending.</p>{context.canApproveFixedFeeTransition && <>
+            <label>Transition approval reason <input value={approvalReason} maxLength={1000} onChange={e=>setApprovalReason(e.target.value)}/></label>
+            <button type="button" disabled={approvalReason.trim().length<3} onClick={()=>void approveTransition()}>Approve residual schedule</button>
+          </>}</>)}
         {data.marginComparison && <p>Actual margin after labor cost: {marginText(data.marginComparison.actual,data.baseline.currency)}</p>}
         {saved && <div><p>Forecast version {saved.version} · {saved.reason}</p>
           <p>Budget at review: {saved.report.budgetHours??'Unset'} hours · Labor cost {saved.report.budgetCost??'Unset'} {saved.report.currency}</p>

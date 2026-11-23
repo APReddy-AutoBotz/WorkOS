@@ -811,4 +811,4 @@ For an unavailable effort-based forecast, inspect the progress evidence for the 
 
 ### Inspect a fixed-fee valuation switch
 
-Inspect the completion forecast on the final effort day after retaining the verified closing progress snapshot. Check the carry-forward and the residual against the approved engagement allocation. A proposed total requires finance approval before use in earned revenue.
+Inspect the completion forecast on the final effort day after retaining the verified closing progress snapshot. Check the carry-forward and the residual against the approved engagement allocation. Grant commercial.fixed_fee_transition.approve to the designated finance reviewer. Enter the approval reason and choose Approve residual schedule. Review again if the closing snapshot changes. Historical daily elapsed versions remain available for inspection. To suspend new approvals, revoke the grant. Preserve migration 104 and its records during rollback to keep full-allocation daily postings disabled after a switch.

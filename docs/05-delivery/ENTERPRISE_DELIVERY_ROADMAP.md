@@ -270,4 +270,4 @@ Fixed-fee forecast comparisons now consume reconciled effort-based valuation for
 
 ### Fixed-fee transition review
 
-Finance can inspect the carry-forward proposal. Retaining an approved transition and reconciling it into earned revenue and margin remain release work.
+Finance can inspect and approve the residual schedule. The forecast reconciles the approved closing evidence and allocation into earned value and labor margin. Signed-off financial period close and non-labor cost coverage remain open.
