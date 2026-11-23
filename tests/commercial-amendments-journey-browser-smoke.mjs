@@ -222,7 +222,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       await page.getByRole('region',{name:'Protected amendment history'}).getByText(/Margin threshold -2.25%/).first().waitFor();
       const later=await seedApplicableAmendmentVersion(pool,identities.manager,{...service.contract,latestVersion:2},future);
       await amendmentApply(apiRequest,'Contract',service.contract.id,amendmentInput(await amendmentWorkspace(apiRequest,'Contract',service.contract.id),later));
-      const revision=amendmentInput(policy,later);
+      const revision=amendmentInput(await amendmentWorkspace(apiRequest,'Engagement',service.engagement.id),later);
       const carried=await apiRequest(previewRoute,{method:'POST',body:revision});
       assert.equal(carried.status,201,JSON.stringify(carried.body));assert.equal(carried.body.after.marginThresholdPercent,'-2.25');
       await amendmentApply(apiRequest,'Engagement',service.engagement.id,{...revision,marginThresholdPercent:'disabled'});
