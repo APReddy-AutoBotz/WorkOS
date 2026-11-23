@@ -1,3 +1,4 @@
+import {checkElapsedHistory} from './support/fixed-fee-revenue-history.mjs';
 import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import {runMigrations} from '../server/migrate.mjs';
 import {startFixtureServer} from './support/compiled-fixture-server.mjs';
@@ -154,6 +155,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       await periodDesk.getByRole('button',{name:'Reconcile period'}).click();
       await periodDesk.getByText('0 matched · 0 missing · 0 stale · 1 outside policy').waitFor();
       await periodDesk.getByText('Reconciled elapsed-time value: Unavailable').waitFor();
+      const disabledRevenue=await request(forecastPath+'?through='+today+'&view=revenue_reconciliation');
+      assert.equal(disabledRevenue.status,200,JSON.stringify(disabledRevenue.body));
+      assert.deepEqual(disabledRevenue.body.revenue,{applicableDays:0,missingDays:0,staleDays:0,earnedAmount:null,remainingRevenue:null});
       const desk=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
       await desk.getByRole('button',{name:'Inspect completion forecast'}).click();
       await desk.getByText('Reconciled elapsed-time revenue through '+today+': Unavailable').waitFor();
@@ -224,6 +228,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const [firstDay,retryDay]=await Promise.all([post(elapsedPath,retainDay),post(elapsedPath,retainDay)]);
     assert.deepEqual(firstDay.saved,retryDay.saved);
     assert.equal(firstDay.saved.version,1);
+    await checkElapsedHistory(pool,commercialFixture.organizationId,commercialFixture.legalEntityId,engagement.id,today);
     const reconciled=(await request(range)).body;
     assert.deepEqual([reconciled.matched,reconciled.missing,reconciled.stale,reconciled.inapplicable,reconciled.amount,reconciled.currency],[1,0,0,1,'2.29','GBP']);
     assert.deepEqual(reconciled.days[1],{serviceDay:today,status:'matched',snapshotId:firstDay.saved.id,version:1,retainedAmount:'2.29',applicableAmount:'2.29'});

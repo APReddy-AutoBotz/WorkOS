@@ -6,8 +6,8 @@ export async function earnedRevenue(client,args,currency,expectedRevenue) {
   const {rows:[coverage]}=await client.query(`with terms as (
     select effective_on,starts_on,ends_on from commercial_amendments where organization_id=$1
       and legal_entity_id=$2 and entity_type='Engagement' and entity_id=$3 and effective_on<=$4::date
-  ), boundaries as (
-    select $4::date+1 day union select effective_on from terms union select starts_on from terms
+  ), boundaries(day) as (
+    select $4::date+1 union select effective_on from terms union select starts_on from terms
     union select ends_on+1 from terms where ends_on<$4::date
     union select l.effective_on from commercial_lifecycle_events l join commercial_engagements e
       on e.organization_id=l.organization_id and e.legal_entity_id=l.legal_entity_id and e.id=$3
