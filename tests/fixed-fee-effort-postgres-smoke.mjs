@@ -51,7 +51,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts']);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
@@ -73,6 +73,20 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       on conflict(role_name,permission_key) do update set enabled=true`,[['commercial.fixed_fee_cost.view','commercial.cost_candidates.view']]);
     assert.equal((await request(riskPath+today,{identity:identities.reader})).status,403);
     await pool.query("update role_permissions set enabled=false where role_name='Employee' and permission_key='commercial.fixed_fee_cost.view'");
+    const forecastPath='/engagements/'+engagement.id+'/fixed-fee-forecast';
+    const forecast=async(version)=>{
+      const r=await request(forecastPath+'?through='+today+(version?'&version='+version:''));
+      assert.equal(r.status,200,JSON.stringify(r.body));return r.body;
+    };
+    const original=await forecast();
+    const makeCommand=(source)=>({through:today,expectedVersion:source.latestVersion,expectedToken:source.token,
+      remainingHours:'6.25',remainingCost:'30.1725',requestId:randomUUID(),reason:'Synthetic remaining delivery estimate'});
+    const firstCmd=makeCommand(original);
+    const record=body=>request(forecastPath,{method:'POST',body});
+    assert.equal((await record(firstCmd)).status,403);
+    assert.equal((await request(forecastPath+'?through='+today,{identity:identities.reader})).status,403);
+    grants.push('commercial.fixed_fee_forecast.record');
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_forecast.record',true) on conflict(role_name,permission_key) do update set enabled=true");
     const costs=async()=>{
       const r=await inspect();assert.equal(r.status,200,JSON.stringify(r.body));return r.body.entries;
     };
@@ -131,6 +145,14 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       await exposure.getByRole('button',{name:'Check allocation risk'}).click();
       await exposure.getByText('Engagement allocation GBP 50 · Retained labor cost 30.864 · Allocation less retained cost 19.136').waitFor();
       await exposure.getByText('Some approved work still needs a verified cost.').waitFor();
+      assert.equal((await record(firstCmd)).status,409);
+      const desk=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
+      await desk.getByRole('button',{name:'Inspect completion forecast'}).click();
+      await desk.getByLabel('Remaining forecast hours').fill('6.25');
+      await desk.getByLabel('Remaining labor cost (GBP)').fill('30.1725');
+      await desk.getByLabel('Forecast assumptions').fill('Synthetic remaining delivery work');
+      await desk.getByRole('button',{name:'Record completion forecast'}).click();
+      await desk.getByText('Estimate at completion: 10.75 hours · Labor cost Unavailable GBP').waitFor();
     } finally {try {if (browser) await browser.close();} finally {await fixture.close();}}
     const saved=(await costs()).find(r=>r.entryId===entry.entryId);
     assert(saved.snapshotId);
@@ -164,6 +186,24 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual([exhausted.laborCostBudget,exhausted.remainingLaborBudget,exhausted.laborBudgetStatus],['60.5','-10.364','exceeded']);
     assert.deepEqual([exhausted.status,exhausted.allocation,exhausted.remainingAllocation,exhausted.contractVersionId,exhausted.amendmentId],
       ['exhausted','70.864','0',revision.id,event.id]);
+    const inspected=await forecast();
+    const revised=makeCommand(inspected);
+    assert.equal((await record({...revised,estimatedCost:'0'})).status,400);
+    await pool.query(`create function reject_test_forecast_audit() returns trigger language plpgsql as $$begin
+      raise exception 'Synthetic forecast audit failure';end $$;
+      create trigger reject_test_forecast before insert on audit_logs for each row when(new.entity_type='Fixed Fee Completion Forecast')
+      execute function reject_test_forecast_audit()`);
+    assert.equal((await record(revised)).status,503);
+    assert.equal((await forecast()).latestVersion,1);
+    await pool.query('drop trigger reject_test_forecast on audit_logs');
+    const [one,two]=await Promise.all([record(revised),record(revised)]);
+    for (const r of [one,two]) assert.equal(r.status,201,JSON.stringify(r.body));
+    assert.deepEqual(one.body.saved,two.body.saved);
+    assert.deepEqual([one.body.saved.version,one.body.saved.report.estimatedCost,one.body.saved.report.estimatedHours,
+      one.body.saved.report.budgetCost,one.body.saved.report.budgetHours],[2,'101.0365','10.75','60.5','5.25']);
+    assert.equal((await record({...revised,remainingCost:'0'})).status,409);
+    assert.equal((await record({...revised,requestId:randomUUID()})).status,409);
+    assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Fixed Fee Completion Forecast'")).rows[0].n,2);
     const futureVersion=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},addUtcDays(today,1));
     await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),futureVersion));
     const next=amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),futureVersion);
@@ -184,6 +224,15 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       values($1,$2,'Project Work',$3,1,'BILL',true)`,[historicalSheet,project.id,today]);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,unresolvedEntries:1,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.equal((await inspect()).body.complete,false);
+    const oldForecast=(await forecast(1)).saved;
+    assert.equal(oldForecast.report.estimatedCost,null);
+    assert.equal(oldForecast.report.actualHours,'4.5');
+    const missing=await forecast();
+    const incompleteForecast=await record({...makeCommand(missing),remainingHours:'0',remainingCost:'0'});
+    assert.equal(incompleteForecast.status,201);
+    assert.deepEqual([incompleteForecast.body.saved.report.estimatedHours,incompleteForecast.body.saved.report.estimatedCost],[null,null]);
+    assert.equal((await forecast(2)).saved.report.estimatedCost,'101.0365');
+    await assert.rejects(pool.query("update commercial_fixed_fee_forecasts set reason='Synthetic history edit' where id=$1",[oldForecast.id]));
     const incomplete=await risk();
     assert.deepEqual(incomplete.effortBudget,{budgetHours:'5.25',verifiedHours:'4.5',remainingHours:'0.75',unresolvedEntries:1,status:'incomplete'});
     assert.deepEqual([incomplete.status,incomplete.complete,incomplete.laborBudgetStatus],['incomplete',false,'exceeded']);

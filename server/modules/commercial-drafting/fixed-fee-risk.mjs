@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {fixedFeeWorkRows} from './fixed-fee-effort.mjs';
 import {sumHours} from '../../../shared/work-hours.mjs';
 import {z} from 'zod';
@@ -6,7 +7,7 @@ import {fail} from './contracts.mjs';
 
 export const riskQuery=z.object({through:z.string().date()}).strict();
 
-export async function fixedFeeRisk(client,req,{through},buildEmployeeScopeWhere) {
+export async function fixedFeeRisk(client,req,{through},buildEmployeeScopeWhere,forecast=false) {
   for (const grant of ['employees.view','reports.view_utilization','commercial.fixed_fee_cost.view','commercial.cost_candidates.view']) {
     await assertCommercialAuthority(client,req,grant);
   }
@@ -31,17 +32,18 @@ export async function fixedFeeRisk(client,req,{through},buildEmployeeScopeWhere)
     join timesheets s on s.id=t.timesheet_id and s.organization_id=$1 and s.legal_entity_id=$2 and s.status='Approved'
     where b.organization_id=$1 and b.legal_entity_id=$2 and b.engagement_id=$3 and b.model='fixed_fee' and t.work_date<=$4::date
   ), costs as (
-    select entry_id,worker_id,currency,amount from commercial_fixed_fee_work_costs where organization_id=$1 and legal_entity_id=$2
+    select id,entry_id,worker_id,currency,amount from commercial_fixed_fee_work_costs where organization_id=$1 and legal_entity_id=$2
       and engagement_id=$3 and work_date<=$4::date
   ), amounts as (
     select count(w.id)::int approved,count(c.entry_id)::int costed,
       count(*) filter(where w.id is null or c.entry_id is null)::int unmatched,
       coalesce(sum(c.amount),0) retained,
+      ${forecast?"encode(sha256(convert_to(coalesce(string_agg(c.id::text,',' order by c.id),''),'UTF8')),'hex')":"null::text"} cost_token,
       bool_and(rate_candidate_worker_visible($5::jsonb,coalesce(c.worker_id,w.employee_id)) is true) visible,
       bool_and(c.currency is null or c.currency=(select currency from terms)) currency_matches
     from work w full join costs c on c.entry_id=w.id
   )
-  select t.version_id "contractVersionId",t.amendment_id "amendmentId",t.currency,trim_scale(t.allocation)::text allocation,
+  select a.cost_token,t.version_id "contractVersionId",t.amendment_id "amendmentId",t.currency,trim_scale(t.allocation)::text allocation,
     a.approved "approvedEntries",a.costed "costedEntries",a.visible,a.currency_matches,(a.approved>0 and a.unmatched=0) "complete",
     trim_scale(a.retained)::text "retainedCost",trim_scale(t.allocation-a.retained)::text "remainingAllocation",
     case when a.retained>t.allocation then 'exceeded' when a.approved=0 and a.costed=0 then 'no_work'
@@ -54,21 +56,26 @@ export async function fixedFeeRisk(client,req,{through},buildEmployeeScopeWhere)
   if (!row) fail(404,'FIXED_RISK_UNAVAILABLE','An activated fixed-fee engagement and a current or historical date are required.');
   if (row.visible===false) fail(403,'FIXED_RISK_DENIED','Engagement-wide cost visibility is required.');
   if (row.currency_matches===false) fail(409,'FIXED_RISK_CURRENCY','Retained costs must reconcile in the allocation currency.');
-  const {visible,currency_matches,budgetHours,...report}=row;
+  const {visible,currency_matches,cost_token,budgetHours,...report}=row;
   report.effortBudget=null;
-  if (budgetHours!==null) {
+  if (budgetHours!==null || forecast) {
+    const evidence=forecast?createHash('sha256'):null;
     let after=null,verifiedHours='0',unresolved=0;
     do {
       const page=await fixedFeeWorkRows(client,req,{through,after},buildEmployeeScopeWhere);
       verifiedHours=sumHours([verifiedHours,...page.verified.map(entry=>entry.hours)]);
+      if (evidence) for (const entry of page.verified) evidence.update(JSON.stringify([entry.id,entry.hours,entry.work_date,entry.billable]));
       unresolved+=page.unresolvedEntries;
       after=page.next;
     } while (after);
-    const {rows:[variance]}=await client.query(`select trim_scale($1::numeric-$2::numeric)::text as "remainingHours",
-      case when $2::numeric>$1::numeric then 'exceeded' when $3::int>0 then 'incomplete'
-        when $4::int=0 then 'no_work' when $2::numeric=$1::numeric then 'exhausted' else 'remaining' end status`,
-      [budgetHours,verifiedHours,unresolved,row.approvedEntries]);
-    report.effortBudget={budgetHours,verifiedHours,unresolvedEntries:unresolved,...variance};
+    if (forecast) report.forecastEvidence={verifiedHours,unresolved,workToken:evidence.digest('hex'),costToken:cost_token};
+    if (budgetHours!==null) {
+      const {rows:[variance]}=await client.query(`select trim_scale($1::numeric-$2::numeric)::text as "remainingHours",
+        case when $2::numeric>$1::numeric then 'exceeded' when $3::int>0 then 'incomplete'
+          when $4::int=0 then 'no_work' when $2::numeric=$1::numeric then 'exhausted' else 'remaining' end status`,
+        [budgetHours,verifiedHours,unresolved,row.approvedEntries]);
+      report.effortBudget={budgetHours,verifiedHours,unresolvedEntries:unresolved,...variance};
+    }
   }
   return {engagementId:req.params.id,through,...report};
 }
