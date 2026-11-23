@@ -747,3 +747,5 @@ WOS-COM-005 / WOS-COM-007 / WOS-RPT-003 / WOS-RPT-004 — The fixed-fee engageme
 WOS-COM-005 / WOS-COM-007 / WOS-RPT-003 / WOS-RPT-004 — Fixed-fee engagement hours budgets use amendment history and verified work. The commercial amendment browser and fixed-fee effort PostgreSQL journeys cover entry, before/after evidence, exact variance, unresolved work, inheritance and pending zero hours.
 
 WOS-COM-012 / WOS-RPT-003 — Fixed-fee completion forecasts for hours and labor cost use reviewed remaining estimates, verified work and retained worker costs. Migration 100 and the fixed-fee effort PostgreSQL/API/browser journey cover scope, opt-in recording, stale evidence, audit rollback, concurrent replay, complete and partial estimates, and immutable version retrieval.
+
+WOS-COM-012 / WOS-RPT-003 — Fixed-fee forecasts retain an optional total revenue estimate in engagement currency. The PostgreSQL/API/browser journey checks explicit zero, omission, invalid input, conflicting replay and historical version retrieval.

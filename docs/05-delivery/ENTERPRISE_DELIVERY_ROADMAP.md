@@ -244,4 +244,6 @@ Fixed-fee engagement amendments now record approved labor-cost budgets separatel
 
 Fixed-fee amendments now support approved effort budgets and work-date variance using verified billable and non-billable hours. Remaining commercial work includes cost-to-complete and hours forecasts, configurable thresholds and policy-governed earned-management valuation.
 
-Fixed-fee hours and labor-cost estimates at completion now retain reviewed versions against dated actuals, with independent completeness checks for hours and cost. Revenue and margin forecasts, configurable risk thresholds, and policy-governed fixed-fee earned-management valuation remain open.
+Fixed-fee hours and labor-cost estimates at completion now retain reviewed versions against dated actuals, with independent completeness checks for hours and cost. Margin forecasts, configurable risk thresholds, and policy-governed fixed-fee earned-management valuation remain open.
+
+The fixed-fee forecast supports a reviewed total revenue outlook. Actual earned revenue, remaining revenue and margin still require separate evidence and controls.

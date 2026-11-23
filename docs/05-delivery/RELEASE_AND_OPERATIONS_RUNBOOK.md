@@ -790,3 +790,5 @@ Before confirming a fixed-fee labor-cost budget, verify the engagement currency,
 Check the budget approval reference, effective amendment and selected through date when reconciling fixed-fee effort variance. Investigate unresolved work in the approved effort report. For application rollback, suspend affected engagement amendments until the writer preserves both hours and labor-cost budgets.
 
 Apply migration 100 and assign the opt-in fixed-fee forecast recording permission to authorized finance operators with engagement-wide worker and cost visibility. Investigate missing approval or cost evidence when a completion estimate is unavailable. Inspect again if the actuals or latest version changed. On rollback, withdraw recording access and retain the forecast table, versions and audit records.
+
+To suspend fixed-fee revenue outlook recording, withdraw the forecast recording grant. Retain the updated forecast reader when reverting the writing path so operators can inspect versions containing the optional revenue amount. Preserve the immutable forecast reports and their audit records.

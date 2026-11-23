@@ -244,3 +244,5 @@ When adopting new terms for a fixed-fee engagement in **Commercial amendments**,
 Use **Budgeted hours** when amending a fixed-fee engagement to approve an effort budget. **Check allocation risk** compares the effective hours budget with verified billable and non-billable work through your chosen date. Unresolved approved time is counted separately.
 
 To forecast fixed-fee completion, choose a work-through date in **Check allocation risk** and select **Inspect completion forecast**. Enter remaining delivery hours, remaining labor cost in engagement currency, and the assumptions behind them. Recording a version preserves the budgets, actuals and estimates reviewed that day. Incomplete hours or cost evidence leaves its respective completion estimate unavailable.
+
+Finance users can also enter expected total revenue at completion in the engagement currency. Leave it blank when the outlook is unknown. Each saved version preserves the assumption independently of earned revenue and invoicing.
