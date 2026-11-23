@@ -14,7 +14,15 @@ label=$(docker image inspect --format '{{index .Config.Labels "org.opencontainer
 [[ "$label" == "$revision" ]] || { echo "Container revision mismatch" >&2; exit 1; }
 mkdir -- "$out"
 # Read the installed production dependency tree without contacting a registry.
-docker run --rm --network none "$image_id" npm sbom --offline --omit=dev --sbom-format=cyclonedx > "$out/npm-runtime.cdx.json"
+# npm validates root devDependency declarations even for an omit-dev install.
+# Bind only the runtime declarations over the manifest in the disposable scanner container.
+runtime_manifest=$(mktemp)
+trap 'rm -f -- "$runtime_manifest"' EXIT
+docker run --rm --network none "$image_id" node -e \
+  "const p=require('./package.json'); delete p.devDependencies; process.stdout.write(JSON.stringify(p))" > "$runtime_manifest"
+chmod 644 "$runtime_manifest"
+docker run --rm --network none --mount "type=bind,source=$runtime_manifest,target=/app/package.json,readonly" \
+  "$image_id" npm sbom --offline --omit=dev --sbom-format=cyclonedx > "$out/npm-runtime.cdx.json"
 node --input-type=module - "$out/npm-runtime.cdx.json" <<'NODE'
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
