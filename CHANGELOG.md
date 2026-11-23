@@ -4,6 +4,8 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+- Finance can compare retained managed-service margins across engagements for a selected month and distinguish missing evidence from margins below an entered threshold.
+
 ### Added
 
 - WOS-00 programme charter, authoritative requirements and architecture baseline.

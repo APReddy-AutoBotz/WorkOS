@@ -1,5 +1,11 @@
 # WorkOS Release and Operations Runbook
 
+## Reviewing managed-service margins
+
+In Commercial Drafting, open the engagement list and select the portfolio month and threshold. Review all pages. A missing retained version requires the authorized reviewer to inspect and retain the individual engagement month. A missing percentage requires checking its revenue denominator and source coverage. After correcting evidence, retain a new version and rerun the report. Verify the report with the buyer's intended financial role and legal entity. A change in role or worker visibility can remove engagements from the result.
+
+This read-only report adds no migration. Reverting its application release preserves the individual engagement snapshots.
+
 ## WOS03 integration verification
 
 Run `node scripts/scan-bootstrap.mjs --self-test` as a required gate. It scans the candidate and checks adversarial fixtures; passing dependency audit alone does not satisfy it. Test credentials must remain ephemeral or explicitly approved placeholders. Keep the validation runner on Ubuntu24.04 while using the current Playwright lock; Ubuntu26.04 browser installation failed before tests in run43557067008. Changing the runner or browser version requires fresh browser acceptance.
