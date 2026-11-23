@@ -244,29 +244,11 @@ Fixed-fee engagement amendments now record approved labor-cost budgets separatel
 
 Fixed-fee amendments now support approved effort budgets and work-date variance using verified billable and non-billable hours. Remaining commercial work includes cost-to-complete and hours forecasts, configurable thresholds and policy-governed earned-management valuation.
 
-Fixed-fee hours and labor-cost estimates at completion now retain reviewed versions against dated actuals, with independent completeness checks for hours and cost. Configurable risk thresholds, and policy-governed fixed-fee earned-management valuation remain open.
+Fixed-fee forecasts retain reviewed estimates for hours, labor cost and total revenue. Finance can compare actual, remaining and projected labor margin with a separate margin permission. Hours and cost each require complete evidence.
 
-The fixed-fee forecast supports a reviewed total revenue outlook. The elapsed-time comparison uses reconciled daily records.
+For elapsed time, finance can retain daily values against the approved engagement allocation and service dates and reconcile them over a selected period. For delivery effort, finance can retain the cumulative value of verified billable and non-billable hours against the approved effort budget, capped at 100%. The forecast uses the approved policy and retained evidence for the selected date.
 
-Fixed-fee forecasts show the expected margin after labor cost for each retained version. Other cost categories remain open.
-
-Fixed-fee forecast review shows exact overrun or headroom for hours and labor cost against the budgets retained with each version. Buyer-configured thresholds and alert routing remain open.
-
-The owner selected the approved engagement allocation over its approved service dates as the basis for fixed-fee elapsed-time valuation. The daily reporting workflow is described below.
-
-Fixed-fee elapsed-time policy adoption and daily valuation use approved amendment allocations and inclusive service dates. Finance users can inspect and retain a versioned daily value. Fixed-fee progress/effort policies remain open.
-
-Finance users can reconcile fixed-fee elapsed values over a selected period and inspect each daily version. Progress-based valuation and immutable period close remain open.
-
-Fixed-fee forecasts now compare expected total revenue with reconciled elapsed-time value through the forecast date. Remaining work includes progress-based valuation and immutable period close.
-
-Authorized finance users can compare actual, remaining and projected fixed-fee margin after labor cost. A separate opt-in grant controls calculated margin visibility. Other costs, effort-based valuation and signed-off period close remain open.
-
-The owner approved capped delivery hours divided by the approved engagement effort budget for the progress profile. The implementation below retains the approved effort evidence.
-
-Effort-based fixed-fee engagements support explicit policy adoption, cumulative value inspection and version retention. Signed-off period close remains open.
-
-Fixed-fee forecast comparisons now consume reconciled effort-based valuation for the selected date. Cross-profile transition reconciliation, costs beyond labor and immutable period close remain open.
+Buyer-configured risk thresholds and alert routing remain open.
 
 ### Fixed-fee transition review
 
