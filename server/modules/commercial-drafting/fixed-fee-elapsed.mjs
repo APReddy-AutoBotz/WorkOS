@@ -8,13 +8,17 @@ const day=z.object({serviceDay:z.string().date()});
 export const elapsedQuery=day.extend({version:z.coerce.number().int().positive().optional()}).strict();
 export const elapsedCommand=day.extend({parentLifecycleId:z.string().min(1).max(200),lifecycleId:z.string().min(1).max(200),policyVersion:z.string().min(1).max(200),expectedVersion:z.number().int().nonnegative()}).strict();
 
-export async function fixedFeeElapsed(client,req,input,scope,audit) {
+export async function assertElapsedReadScope(client,req,scope) {
   for (const permission of ['commercial.fixed_fee_cost.view','commercial.cost_candidates.view','employees.view','reports.view_utilization'])
     await assertCommercialAuthority(client,req,permission);
   const coverage={entityWide:false};
   scope(req,[],'worker',coverage);
   if (!coverage.entityWide) fail(403,'ELAPSED_SCOPE_DENIED','Engagement-wide financial scope is required.');
   if (['Employee','TeamLead','CountryDirector','ProjectManager'].includes(req.user.activeRole)) fail(403,'ELAPSED_SCOPE_DENIED','Financial scope is required.');
+}
+
+export async function fixedFeeElapsed(client,req,input,scope,audit) {
+  await assertElapsedReadScope(client,req,scope);
   const {organizationId,legalEntityId}=req.organizationScope;
   const args=[organizationId,legalEntityId,req.params.id,input.serviceDay];
   const where='organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and service_day=$4';

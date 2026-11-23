@@ -412,6 +412,22 @@ export const commercialDraftingService = {
       return {id:text(r.id),decision,reason};
     },false);
   },
+  fixedFeeElapsedPeriod(eng:string,from:string,through:string,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canViewFixedFeeRisk) throw invalid();
+    const count=z.number().int().nonnegative(),amount=costDecimal.nullable();
+    const schema=z.object({engagementId:z.literal(eng),from:z.literal(from),through:z.literal(through),currency:z.string().regex(/^[A-Z]{3}$/),
+      matched:count,missing:count,stale:count,inapplicable:count,amount,days:z.array(z.object({serviceDay:z.string().date(),
+        status:z.enum(['matched','missing','stale','inapplicable']),snapshotId:z.string().uuid().nullable(),version:z.number().int().positive().nullable(),
+        retainedAmount:amount,applicableAmount:amount}).strict()).min(1).max(366)}).strict();
+    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-elapsed-period?'+new URLSearchParams({from,through}),undefined,value=>{
+      const data=schema.parse(value);
+      if (data.days.length!==(Date.parse(through)-Date.parse(from))/86400000+1 ||
+          data.days.some((d,i)=>Date.parse(d.serviceDay)!==Date.parse(from)+i*86400000) ||
+          (['matched','missing','stale','inapplicable'] as const).some(status=>data[status]!==data.days.filter(d=>d.status===status).length) ||
+          (data.amount!==null)!==(data.matched>0 && data.missing===0 && data.stale===0)) throw invalid();
+      return data;
+    },false);
+  },
   fixedFeeElapsed(eng:string,serviceDay:string,context:CommercialDraftingContext,options:{version?:number;command?:{expectedVersion:number;policyVersion:string;lifecycleId:string;parentLifecycleId:string}}={}) {
     const current=assertCommercialDraftingContext(context),cmd=options.command;
     if (!current.canViewFixedFeeRisk || (cmd && !current.canRecordFixedFeeElapsed)) throw invalid();

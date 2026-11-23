@@ -252,3 +252,5 @@ The fixed-fee forecast also shows expected revenue less projected labor cost for
 Each fixed-fee forecast shows how far its estimated hours and labor cost are over or under the budgets retained at review. An exact match shows “On budget”. A missing budget or incomplete estimate makes only that comparison unavailable.
 
 For fixed-fee operational earned-management valuation, an authorized amendment owner selects **Elapsed service days** and the rounding precision when approving engagement terms. In the engagement’s finance view, choose a service date and select **Inspect elapsed service day**. Finance users with the recording permission can retain the daily amount and its approval evidence. The default is disabled.
+
+To reconcile fixed-fee elapsed-time values, select the final service day, enter the period start, and choose **Reconcile period**. Daily evidence shows the latest retained version and the currently approved amount. A total appears only when at least one day matches and all applicable days reconcile.

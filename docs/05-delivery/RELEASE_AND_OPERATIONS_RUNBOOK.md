@@ -798,3 +798,5 @@ The optional labor_margin view of the fixed-fee forecast API derives its values 
 The budget_comparison forecast view adds signed hours and labor-cost variances to the scoped financial report. Reverting the UI and API together preserves all recorded versions. No data migration is required.
 
 To suspend daily valuation recording, withdraw commercial.fixed_fee_elapsed.record. To end the active elapsed-time profile, approve a fixed-fee engagement amendment selecting Disabled and an effective date. Preserve migration 101, commercial amendment history, daily values and matching audit records. Replacing the UI and API with older builds disables policy controls. Restore the policy-aware amendment handler before accepting edits to engagements with active elapsed-time policies.
+
+A missing elapsed-time day requires review of the applicable service date. For a stale day, inspect the latest approval and retained version before retaining a replacement where permitted. A held or disabled day with historical value stays flagged for review. Reverting the period API and UI requires no data conversion.
