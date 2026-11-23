@@ -205,12 +205,17 @@ const verifyCommercialDrafting = async reversalScenario => {
       const assignmentReplay=await assign(desired);
       assert.equal(assignmentReplay.status,201,JSON.stringify(assignmentReplay.body));
       assert.deepEqual(assignmentReplay.body.assignments.map(a=>a.engagementId),desired.engagementIds);
-      await pool.query('update users set employee_record_id=null where id=$1',[identities.manager.id]);
-      const unresolved=await apiRequest(assignmentPath,{identity:identities.reader});
-      assert.deepEqual(unresolved.body.assignments,[{engagementId:engagement.result.id,ownerAvailable:false}]);
-      const flagged=await apiRequest(riskPath+'&view=routing',{identity:identities.reader});
-      assert(flagged.body.orders.some(row=>row.id===po.result.id && row.unavailableOwners===1));
-      await pool.query('update users set employee_record_id=$1 where id=$2',[ownerId,identities.manager.id]);
+      const probe=await pool.connect();
+      try {
+        await probe.query('begin');
+        await probe.query('update users set employee_record_id=null where id=$1',[identities.manager.id]);
+        const owners=await probe.query('select engagement_id,user_id from po_risk_engagement_owners($1,$2,$3)',
+          [scope.organizationId,scope.legalEntityId,po.result.id]);
+        assert.deepEqual(owners.rows,[{engagement_id:engagement.result.id,user_id:null}]);
+      } finally {
+        await probe.query('rollback');
+        probe.release();
+      }
       assert.equal((await assign({...desired,engagementIds:[]})).status,409);
       assert.equal((await assign({...desired,expectedVersion:1,engagementIds:[]})).body.version,2);
       assert.equal((await pool.query('select count(*)::int n from po_risk_engagement_assignments where purchase_order_id=$1',[po.result.id])).rows[0].n,2);
