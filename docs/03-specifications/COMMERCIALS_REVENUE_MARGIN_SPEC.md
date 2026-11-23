@@ -325,3 +325,9 @@ A finance operator with forecast recording authority may enter expected total en
 For each retained fixed-fee forecast, calculate the forecast margin after labor cost from that version’s expected total revenue less estimated labor cost at completion. Show the exact signed currency amount and, for positive revenue, the amount divided by forecast revenue as a percentage rounded half away from zero to two places. Missing revenue or incomplete cost evidence leaves both measures unavailable. The measure excludes other costs and has no billing or earned-management effect.
 
 For each fixed-fee forecast version, calculate separate hours and labor-cost variances as retained estimate at completion minus the budget retained with that version. Use exact signed decimals in hours or engagement currency. Positive values indicate overruns and negative values indicate headroom. A missing input suppresses its own comparison.
+
+### Fixed-fee elapsed-time revenue basis (WOS-COM-011)
+
+The product owner selected the engagement’s approved monetary allocation and approved service dates as the basis for the elapsed-time profile. Each engagement in a multi-engagement contract uses its own allocation and dates. Both must be explicit and belong to the same effective approved engagement terms. Missing allocation, missing dates or an unavailable approval reference makes the valuation unavailable.
+
+A buyer must still authorize and select the effective-dated policy before WorkOS can retain any earned-management valuation. Each retained version must identify the applicable engagement terms, allocation, service dates, currency, rounding policy and policy approval. Changing the engagement terms must preserve earlier versions. Work capture, billing eligibility and invoice readiness retain their independent approval paths.

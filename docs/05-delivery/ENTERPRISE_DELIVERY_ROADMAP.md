@@ -251,3 +251,5 @@ The fixed-fee forecast supports a reviewed total revenue outlook. Actual earned 
 Fixed-fee forecasts show the expected margin after labor cost for each retained version. Actual and remaining revenue and margin, other cost categories, and an authorized earned-management policy remain open.
 
 Fixed-fee forecast review shows exact overrun or headroom for hours and labor cost against the budgets retained with each version. Buyer-configured thresholds and alert routing remain open.
+
+The owner selected the approved engagement allocation over its approved service dates as the basis for fixed-fee elapsed-time valuation. Delivery still requires explicit effective-dated policy adoption, server-side calculation, retained source evidence and authorized reporting.

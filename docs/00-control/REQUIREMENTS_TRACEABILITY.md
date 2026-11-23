@@ -753,3 +753,5 @@ WOS-COM-012 / WOS-RPT-003 — Fixed-fee forecasts retain an optional total reven
 WOS-COM-007 / WOS-COM-012 / WOS-COM-015 / WOS-RPT-003 — Scoped finance users can inspect forecast margin after labor cost against a retained fixed-fee version. The fixed-fee PostgreSQL/API/browser journey exercises historical results, positive and zero revenue, incomplete evidence, restricted roles and the original API shape.
 
 WOS-COM-007 / WOS-COM-012 / WOS-RPT-003 — Fixed-fee forecast review compares each version’s estimated hours and labor cost with its retained budgets. The fixed-fee effort API/browser journey covers overrun, headroom, incomplete inputs, scoped access and older versions.
+
+WOS-COM-011 — The commercial specification records the owner-selected revenue basis for the elapsed-time profile. Implementation and acceptance evidence remain pending.
