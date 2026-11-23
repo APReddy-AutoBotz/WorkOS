@@ -252,4 +252,6 @@ Fixed-fee forecasts show the expected margin after labor cost for each retained 
 
 Fixed-fee forecast review shows exact overrun or headroom for hours and labor cost against the budgets retained with each version. Buyer-configured thresholds and alert routing remain open.
 
-The owner selected the approved engagement allocation over its approved service dates as the basis for fixed-fee elapsed-time valuation. Delivery still requires explicit effective-dated policy adoption, server-side calculation, retained source evidence and authorized reporting.
+The owner selected the approved engagement allocation over its approved service dates as the basis for fixed-fee elapsed-time valuation. The daily reporting workflow is described below.
+
+Fixed-fee elapsed-time policy adoption and daily valuation use approved amendment allocations and inclusive service dates. Finance users can inspect and retain a versioned daily value. Fixed-fee progress/effort policies, multi-day reconciliation and actual-versus-remaining revenue reporting remain open.

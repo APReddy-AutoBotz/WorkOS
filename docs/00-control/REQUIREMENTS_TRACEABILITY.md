@@ -754,4 +754,6 @@ WOS-COM-007 / WOS-COM-012 / WOS-COM-015 / WOS-RPT-003 — Scoped finance users c
 
 WOS-COM-007 / WOS-COM-012 / WOS-RPT-003 — Fixed-fee forecast review compares each version’s estimated hours and labor cost with its retained budgets. The fixed-fee effort API/browser journey covers overrun, headroom, incomplete inputs, scoped access and older versions.
 
-WOS-COM-011 — The commercial specification records the owner-selected revenue basis for the elapsed-time profile. Implementation and acceptance evidence remain pending.
+WOS-COM-011 — The commercial specification records the owner-selected revenue basis for the elapsed-time profile. See the daily valuation acceptance coverage below.
+
+WOS-COM-007 / WOS-COM-011 / WOS-COM-014 — Migration 101, governed fixed-fee amendments and the elapsed service-day API implement opt-in policy selection, native-currency daily calculation, source retention and scoped historical readback. The fixed-fee PostgreSQL/API/browser journey exercises disabled policy, date and permission boundaries, exact rounding, stale inputs, concurrent replay and immutability.

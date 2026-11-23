@@ -51,7 +51,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values']);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
@@ -146,6 +146,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       await exposure.getByText('Engagement allocation GBP 50 · Retained labor cost 30.864 · Allocation less retained cost 19.136').waitFor();
       await exposure.getByText('Some approved work still needs a verified cost.').waitFor();
       assert.equal((await record(firstCmd)).status,409);
+      const elapsedDesk=exposure.getByRole('region',{name:'Fixed-fee operational earned-management value'});
+      await elapsedDesk.getByRole('button',{name:'Inspect elapsed service day'}).click();
+      await elapsedDesk.getByText('No effective approved elapsed-time policy for this service day.').waitFor();
       const desk=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
       await desk.getByRole('button',{name:'Inspect completion forecast'}).click();
       await desk.getByLabel('Remaining forecast hours').fill('6.25');
@@ -185,7 +188,32 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal((await request('/amendments/Contract/'+contract.id+'/preview',{method:'POST',body:invalidBudget})).status,422);
     await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),revision));
     assert.equal((await risk()).allocation,'50');
-    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{budget:'70.864',laborCostBudget:'60.5',budgetHours:'5.25'}));
+    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{endsOn:end,budget:'70.864',laborCostBudget:'60.5',budgetHours:'5.25',elapsedTimePolicy:'2'}));
+    const {rows:[fractions]}=await pool.query(`select array(select fixed_fee_elapsed_amount(1,2,i,3)::text from generate_series(1,3) i) thirds,
+      fixed_fee_elapsed_amount(0.01,2,1,2)::text tie, fixed_fee_elapsed_amount(0.01,2,2,2)::text residual,
+      fixed_fee_elapsed_amount(123.4567,3,1,1)::text single_day,
+      (select sum(fixed_fee_elapsed_amount(99999999999999.9999,4,i,366))::text from generate_series(1,366) i) leap_year,
+      fixed_fee_elapsed_amount(1,2,0,7) before_start,fixed_fee_elapsed_amount(1,2,8,7) after_end`);
+    assert.deepEqual(fractions,{thirds:['0.33','0.34','0.33'],tie:'0.01',residual:'0',single_day:'123.457',
+      leap_year:'99999999999999.9999',before_start:null,after_end:null});
+    const elapsedPath='/engagements/'+engagement.id+'/fixed-fee-elapsed';
+    const daily=await request(elapsedPath+'?serviceDay='+today);
+    assert.equal(daily.status,200,JSON.stringify(daily.body));
+    assert.deepEqual([daily.body.report.dayNumber,daily.body.report.serviceDays,daily.body.report.allocation,daily.body.report.amount,
+      daily.body.report.policyVersion,daily.body.saved],[1,31,'70.864','2.29',event.id,null]);
+    const retainDay={serviceDay:today,policyVersion:event.id,lifecycleId:daily.body.report.lifecycleId,parentLifecycleId:daily.body.report.parentLifecycleId,expectedVersion:0};
+    assert.equal((await request(elapsedPath,{method:'POST',body:retainDay})).status,403);
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_elapsed.record',true) on conflict(role_name,permission_key) do update set enabled=true");
+    assert.equal((await request(elapsedPath,{method:'POST',body:{...retainDay,amount:'1'}})).status,400);
+    assert.equal((await request(elapsedPath,{method:'POST',body:{...retainDay,policyVersion:'stale'}})).status,409);
+    const [firstDay,retryDay]=await Promise.all([post(elapsedPath,retainDay),post(elapsedPath,retainDay)]);
+    assert.deepEqual(firstDay.saved,retryDay.saved);
+    assert.equal(firstDay.saved.version,1);
+    assert.equal((await request(elapsedPath+'?serviceDay='+today+'&version=1')).body.saved.id,firstDay.saved.id);
+    assert.equal((await request(elapsedPath+'?serviceDay='+today,{identity:identities.reader})).status,403);
+    assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,-1))).body.report,null);
+    assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,1))).body.report,null);
+    await assert.rejects(pool.query('update commercial_fixed_fee_elapsed_values set version=2 where id=$1',[firstDay.saved.id]));
     const exhausted=await risk();
     assert.deepEqual(exhausted.effortBudget,{budgetHours:'5.25',verifiedHours:'4.5',remainingHours:'0.75',unresolvedEntries:0,status:'remaining'});
     assert.deepEqual([exhausted.laborCostBudget,exhausted.remainingLaborBudget,exhausted.laborBudgetStatus],['60.5','-10.364','exceeded']);
@@ -233,7 +261,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal((await request(forecastPath+'?through='+today+'&view=budget_comparison',{identity:identities.reader})).status,403);
     const futureVersion=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},addUtcDays(today,1));
     await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),futureVersion));
-    const next=amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),futureVersion);
+    const next=amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),futureVersion,{elapsedTimePolicy:'disabled'});
+    const {elapsedTimePolicy,...unchecked}=next;
+    assert.equal((await request('/amendments/Engagement/'+engagement.id+'/preview',{method:'POST',body:unchecked})).status,422);
     const inherited=await amendmentPreview(request,'Engagement',engagement.id,next);
     assert.deepEqual([inherited.before.budgetHours,inherited.after.budgetHours],['5.25','5.25']);
     assert.deepEqual([inherited.before.laborCostBudget,inherited.after.laborCostBudget],['60.5','60.5']);
