@@ -116,7 +116,7 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   assert.deepEqual([(await live()).revenue.status,(await live()).revenue.earnedAmount],['stale',null]);
   assert.equal((await request(path,{method:'POST',body:cmd})).status,409);
   const replacement={...cmd,expectedVersion:1,expectedToken:changed.token};
-  await withLockedFeeDate({pool,request,post,date:today,check:async()=>{
+  await withLockedFeeDate({pool,request,post,date:today,frequency:'Fiscal',check:async()=>{
     assertFeePeriodConflict(await request(path,{method:'POST',body:replacement}));
     assert.equal((await get(1)).saved.id,results[0].saved.id);
     assert.equal((await get()).latestVersion,1);
