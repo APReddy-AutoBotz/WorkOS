@@ -4,7 +4,7 @@ import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
 export const riskConfigureGrant='commercial.fixed_fee_risk.configure';
-const namedRecipient=z.object({userId:z.string().uuid(),role:z.string().trim().min(1).max(100)}).strict();
+const namedRecipient=z.object({userId:z.string().uuid().toLowerCase(),role:z.string().trim().min(1).max(100)}).strict();
 const locale=z.string().min(2).max(64).refine(value=>{
   try {return Intl.getCanonicalLocales(value)[0]===value;} catch {return false;}
 });

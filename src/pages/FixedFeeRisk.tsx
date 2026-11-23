@@ -57,7 +57,7 @@ export function FixedFeeRisk({context,engagement,today}:{context:CommercialDraft
       </>}
       <p>{report.costedEntries} retained costs · {report.approvedEntries} approved entries · Contract version {report.contractVersionId}{report.amendmentId && ' · Amendment '+report.amendmentId}</p>
     </div>}
-    {context.canConfigureRiskNotices && <FixedFeeNoticePolicy key={context.identityKey+engagement} context={context} engagement={engagement} today={today}/>}
+    {context.canConfigureRiskNotices && <div key={context.identityKey+engagement}><FixedFeeNoticePolicy context={context} engagement={engagement} today={today}/></div>}
     {report && <div key={context.identityKey+engagement+through}><FixedFeeProgress context={context} engagement={engagement} through={through}/><FixedFeeStatement context={context} engagement={engagement} through={through}/><FixedFeeElapsed context={context} engagement={engagement} serviceDay={through}/><FixedFeeForecast context={context} engagement={engagement} through={through}/></div>}
     {message && <p role="status">{message}</p>}
   </section>;

@@ -21,3 +21,9 @@ Deliver commercial.risk_threshold_breached as CONTROL_MANDATORY with a versioned
 - Withdraw a recipient role and move a worker across legal entities between configuration and delivery. Confirm visible failure, no partial recipients, and one complete delivery after correction. Withdrawing current scope must also prevent retained notice disclosure.
 - Verify preference opt-out cannot suppress required in-app notices. Exercise producer rollback, independent core commit, retry and safe failure diagnostics.
 - Run fresh and upgrade migrations, production startup, browser journeys, authorization checks and the complete CI workflow before merge.
+
+## Operating the recipient policy
+
+An administrator assigns the scoped `commercial.fixed_fee_risk.configure` permission to an authorized buyer role. In the fixed-fee allocation risk section, open **Review budget warning recipients**. Select a prospective date, identify both named users and their held roles, enter the template locale and text, and record the reason. Reopen the panel to verify the saved version. Revisions on the same effective date take precedence in version order.
+
+Migration 107 adds an empty policy history and a permission definition. It grants no default access and sends no notices. To roll back application code, retain the immutable policy rows. For an incorrect assignment, publish a corrected prospective version and verify the account's current role and legal-entity membership before evaluating a breach.
