@@ -30,6 +30,8 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
           <p>Remaining forecast: {saved.report.remainingHours} hours · Labor cost {saved.report.remainingCost} {saved.report.currency}</p>
           <p>Estimate at completion: {saved.report.estimatedHours??'Unavailable'} hours · Labor cost {saved.report.estimatedCost??'Unavailable'} {saved.report.currency}</p>
           <p>Expected total revenue at completion: {saved.report.expectedTotalRevenue===undefined ? 'Unspecified' : saved.report.currency+' '+saved.report.expectedTotalRevenue}</p>
+          <p>Forecast margin after labor cost: {data.laborMargin ? saved.report.currency+' '+data.laborMargin.amount : 'Unavailable'}
+            {data.laborMargin && (data.laborMargin.percent===null ? ' · Percentage unavailable for zero revenue' : ' · '+data.laborMargin.percent+'%')}</p>
           {saved.version>1 && <button type="button" onClick={()=>void inspect(saved.version-1)}>Previous forecast version</button>}
         </div>}
         {context.canRecordFixedFeeForecast && (!saved || saved.version===data.latestVersion) &&
