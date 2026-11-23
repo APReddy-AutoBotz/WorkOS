@@ -1,8 +1,9 @@
+import {amendmentEngagementInput} from './commercial-amendments-test.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {processPurchaseOrderRisks} from '../../server/modules/commercial-drafting/purchase-order-risk-worker.mjs';
 
-export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId,scope,today,work,open}) {
+export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId,scope,today,work,open,historicalOrder}) {
   const assignment='/purchase-orders/'+orderId+'/risk-assignments', policy='/purchase-orders/'+orderId+'/risk-policy';
   const post=(path,body)=>request(path,{method:'POST',identity:ids.requester,body});
   const state=()=>pool.query(`select e.id,d.failure,d.attempts,d.delivered_at from po_risk_events e join po_risk_dispatch d on d.event_id=e.id
@@ -24,7 +25,14 @@ export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId
   assert.equal(pending.attempts,1);
   assert.equal((await request(policy,{identity:ids.requester})).status,403);
   await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.po_risk.configure',true) on conflict(role_name,permission_key) do update set enabled=true");
-  const saved=await post(assignment,{expectedVersion:0,engagementIds:[roots.engagement.id],reason:'Route the shared order explicitly'});
+  const sibling=await request('/engagements',{method:'POST',body:amendmentEngagementInput('SYN-PO-SHARED',roots.contract,{
+    contractVersionId:(await pool.query('select contract_version_id from commercial_purchase_orders where id=$1',[orderId])).rows[0].contract_version_id,
+    startsOn:today,endsOn:roots.engagement.endsOn,ownerId:ids.optional.employeeRecordId
+  })});
+  assert.equal(sibling.status,201,JSON.stringify(sibling.body));
+  const assigned=[roots.engagement.id,sibling.body.id];
+  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Employee','employees.view',true) on conflict(role_name,permission_key) do update set enabled=true");
+  const saved=await post(assignment,{expectedVersion:0,engagementIds:assigned,reason:'Route the shared order explicitly'});
   assert.equal(saved.status,201,JSON.stringify(saved.body));
   // Use the employee account already linked to the engagement owner, if present.
   let owner=(await pool.query('select id,username from users where employee_record_id=$1',[scope.ownerId])).rows[0];
@@ -45,28 +53,32 @@ export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId
   await retry();
   assert.equal((await state()).failure,'RECIPIENTS_UNAVAILABLE');
   assert.equal((await pool.query('select * from po_risk_inbox where event_id=$1',[pending.id])).rowCount,0);
-  assert.equal((await post(assignment,{expectedVersion:2,engagementIds:[roots.engagement.id],reason:'Confirm the current engagement'})).status,201);
+  assert.equal((await post(assignment,{expectedVersion:2,engagementIds:assigned,reason:'Confirm the current engagement'})).status,201);
   await retry();
   assert.equal((await state()).attempts,3);
   assert((await state()).delivered_at);
-  const {rows:[receipt]}=await pool.query('select id,user_id,reasons from po_risk_inbox where event_id=$1',[pending.id]);
+  const {rows:[receipt]}=await pool.query('select id,user_id,reasons from po_risk_inbox where event_id=$1 and user_id=$2',[pending.id,owner.id]);
   assert.equal(receipt.user_id,owner.id);
   assert.deepEqual(receipt.reasons,['commercial_manager','engagement_owner','finance_billing_owner']);
   const identity={...owner,role:'Admin'},inbox=await request(work+'/inbox',{identity});
   assert.equal(inbox.status,200,JSON.stringify(inbox.body));
-  const viewer=await open(identity);
+  const viewer=await open(identity,scope.ownerId);
   const panel=viewer.p.getByRole('region',{name:'Canonical work approval notifications'});
   const loadPage=viewer.p.waitForResponse(r=>r.url().includes(work+'/inbox') && r.request().method()==='GET');
   await panel.getByRole('button',{name:'Load my governed notifications'}).click();
-  assert.equal((await loadPage).status(),200);
+  let page=await loadPage;
   const article=panel.getByRole('article',{name:'Governed notification '+receipt.id});
-  while (await article.count()===0 && await panel.getByRole('button',{name:'More governed notifications'}).count()) {
+  for (;;) {
+    assert.equal(page.status(),200);
+    const payload=await page.json();
+    if (payload.notifications.some(n=>n.id===receipt.id)) break;
+    assert(payload.nextAfter,'Recipient must be listed before the last page');
     const more=viewer.p.waitForResponse(r=>r.url().includes(work+'/inbox?'));
     await panel.getByRole('button',{name:'More governed notifications'}).click();
-    await more;
-    await panel.getByRole('button',{name:'Load my governed notifications'}).waitFor();
+    page=await more;
   }
-  await article.getByText('Purchase order '+orderId+' · threshold').waitFor();
+  try {await article.getByText('Purchase order '+orderId+' · threshold').waitFor();}
+  catch (error) {throw new Error('Could not render alert. Inbox status: '+await panel.getByRole('status').allTextContents(),{cause:error});}
   const acknowledging=viewer.p.waitForResponse(r=>r.url().endsWith('/inbox/'+receipt.id+'/read'));
   await article.getByRole('button',{name:'Mark governed notification read '+receipt.id}).click();
   assert.equal((await acknowledging).status(),200);
@@ -77,10 +89,18 @@ export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId
   assert(read.body.notification.readAt);
   const status=await request('/purchase-orders/'+orderId+'/risk-deliveries',{identity:ids.requester});
   assert.equal(status.status,200);
-  assert.equal(status.body.events.find(e=>e.id===pending.id).history.length,3);
+  const diagnostic=status.body.events.find(e=>e.id===pending.id);
+  assert.equal(diagnostic.basis,historicalOrder?'opening_balance':'commitment');
+  assert.equal(diagnostic.history.length,3);
   const unrelated=await request(work+'/inbox/'+receipt.id+'/read',{identity:ids.second,method:'POST',
     body:{expectedOwnerKey:(await request(work+'/inbox',{identity:ids.second})).body.ownerKey}});
   assert.equal(unrelated.status,404);
+  const other=(await pool.query('select id,reasons from po_risk_inbox where event_id=$1 and user_id=$2',[pending.id,ids.optional.id])).rows[0];
+  assert.deepEqual(other.reasons,['engagement_owner']);
+  assert.equal((await post(assignment,{expectedVersion:3,engagementIds:[roots.engagement.id],reason:'Only the first engagement remains assigned'})).status,201);
+  const revoked=await request(work+'/inbox/'+other.id+'/read',{identity:ids.optional,method:'POST',
+    body:{expectedOwnerKey:(await request(work+'/inbox',{identity:ids.optional})).body.ownerKey}});
+  assert.equal(revoked.status,404);
   await processPurchaseOrderRisks(pool);
   assert.equal((await state()).attempts,3);
   assert.deepEqual((await pool.query('select failure from po_risk_delivery_attempts where event_id=$1 order by attempt',[pending.id])).rows.map(x=>x.failure),

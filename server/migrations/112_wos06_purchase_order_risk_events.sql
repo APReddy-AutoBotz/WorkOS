@@ -19,6 +19,27 @@ returns table(kind text) language sql immutable strict as $$
  ) signal(kind,reached) where signal.reached
 $$;
 
+-- Record the currently observable condition of orders with pre-witness commitments once.
+-- The observation date is the migration date. Historical crossing dates are unknown.
+create table po_risk_opening_balances (
+ purchase_order_id text primary key references commercial_purchase_order_releases(purchase_order_id),
+ observed_on date not null, available numeric not null check(available>=0), warning boolean not null,exhaustion boolean not null
+);
+insert into po_risk_opening_balances(purchase_order_id,observed_on,available,warning,exhaustion)
+ select p.id,(now() at time zone 'UTC')::date,b.remaining,
+   b.warning and not coalesce('threshold'=any(verified.kinds),false),b.remaining=0 and not coalesce('exhaustion'=any(verified.kinds),false)
+ from commercial_purchase_orders p join commercial_purchase_order_releases r on r.purchase_order_id=p.id
+ cross join lateral commercial_po_balance(p.id) b
+ cross join lateral(select array_agg(distinct k.kind) kinds from commercial_po_line_commitments c
+   cross join lateral po_commitment_risk_kinds(p.value,p.warning_threshold_percent,c.available_before,c.available_after) k
+   where c.purchase_order_id=p.id) verified
+ where (b.warning or b.remaining=0) and exists(select from commercial_po_line_commitments c
+   where c.purchase_order_id=p.id and c.available_before is null);
+create trigger immutable_po_risk_opening_balance before update or delete on po_risk_opening_balances
+ for each row execute function reject_commercial_draft_rewrite();
+create trigger sealed_po_risk_opening_balance before insert on po_risk_opening_balances
+ for each row execute function reject_commercial_draft_rewrite();
+
 create view po_risk_sources as
 select * from po_expiry_risk_sources((now() at time zone 'UTC')::date)
 union all
@@ -26,7 +47,11 @@ select p.organization_id,p.legal_entity_id,p.id,signal.kind,c.line_id::text,(c.c
        c.available_before,c.available_after
 from commercial_po_line_commitments c join commercial_purchase_orders p on
  (p.organization_id,p.legal_entity_id,p.id)=(c.organization_id,c.legal_entity_id,c.purchase_order_id)
-cross join lateral po_commitment_risk_kinds(p.value,p.warning_threshold_percent,c.available_before,c.available_after) signal;
+cross join lateral po_commitment_risk_kinds(p.value,p.warning_threshold_percent,c.available_before,c.available_after) signal
+union all
+select p.organization_id,p.legal_entity_id,p.id,k.kind,'opening:'||p.id,o.observed_on,null::numeric,o.available
+from po_risk_opening_balances o join commercial_purchase_orders p on p.id=o.purchase_order_id
+cross join lateral (values('threshold',o.warning),('exhaustion',o.exhaustion)) k(kind,reached) where k.reached;
 
 create table po_risk_events (
  id uuid primary key default gen_random_uuid(),

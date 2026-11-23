@@ -457,7 +457,7 @@ export const commercialDraftingService = {
     if (!assertCommercialDraftingContext(context).canConfigurePoRiskNotices) throw invalid();
     const failure=z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable();
     const history=z.object({attempt:z.number().int().positive(),at:z.string().datetime({offset:true}),failure}).strict();
-    const event=z.object({id:z.string().uuid(),kind:z.enum(['expiry','exhaustion','threshold']),riskDate:z.string().date(),
+    const event=z.object({id:z.string().uuid(),kind:z.enum(['expiry','exhaustion','threshold']),basis:z.enum(['expiry_date','opening_balance','commitment']),riskDate:z.string().date(),
       attempts:z.number().int().nonnegative(),failure,deliveredAt:z.string().datetime({offset:true}).nullable(),
       nextAttempt:z.string().datetime({offset:true}).nullable(),history:z.array(history).max(5)}).strict();
     return request(context,'GET','/purchase-orders/'+encodeURIComponent(order)+'/risk-deliveries',undefined,

@@ -1,3 +1,4 @@
+import {runMigrations} from '../server/migrate.mjs';
 import {verifyPurchaseOrderNotices} from './support/purchase-order-risk-delivery.mjs';
 import { canonicalHours } from '../shared/work-hours.mjs';
 import { INVOICE_EXPORT_EVENT_KEYS } from '../shared/invoice-export-notification.mjs';
@@ -11,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import {
   commercialFixture as f,
   withCommercialDatabase,
+  withCommercialMigrationsThrough,
   migrateCommercialDatabase,
   withCommercialApi,
 } from './support/commercial-drafting-test.mjs';
@@ -37,7 +39,9 @@ const base = '/api/v1/governed-tm-valuations',
     return v.body;
   };
 await withCommercialDatabase(async ({ pool, databaseUrl }) => {
-  await migrateCommercialDatabase(pool);
+  const historicalOrder=process.argv.includes('--reject-reversal');
+  if (historicalOrder) await withCommercialMigrationsThrough(109,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
+  else await migrateCommercialDatabase(pool);
   assert.equal(
     (
       await pool.query(
@@ -886,7 +890,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         try {
           const origin = fixture.url;
           browser = await chromium.launch({ headless: true });
-          const open = async (identity) => {
+          const open = async (identity,sessionId=identity.id) => {
             const ctx = await browser.newContext({
               viewport: { width: 1800, height: 1400 },
               timezoneId: 'UTC',
@@ -900,8 +904,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               },
               {
                 user: {
-                  id: identity.id,
-                  employeeId: identity.id,
+                  id: sessionId,
+                  employeeId: sessionId,
                   userName: identity.username,
                   name: 'Synthetic invoice actor',
                   role: 'Admin',
@@ -1163,9 +1167,10 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           const riskRegister=ok(await request('/purchase-order-risks?expiresBy='+fx.today,{identity:ids.requester}));
           assert.deepEqual(riskRegister.orders.map(row=>[row.number,row.warning,row.exhausted,row.expiresInWindow,Number(row.remaining)]),
             [['SYN-PO-100',true,false,false,20]]);
+          if (historicalOrder) await migrateCommercialDatabase(pool);
           const history=ok(await request('/purchase-orders/'+riskRegister.orders[0].id+'/risk-history',{identity:ids.requester}));
-          assert.deepEqual(history.movements.map(m=>[Number(m.availableBefore),Number(m.availableAfter),m.warning,m.exhausted]),[[100,20,true,false]]);
-          assert.equal(history.priorCommitments,0);
+          assert.deepEqual(history.movements.map(m=>[Number(m.availableBefore),Number(m.availableAfter),m.warning,m.exhausted]),historicalOrder?[]:[[100,20,true,false]]);
+          assert.equal(history.priorCommitments,historicalOrder?1:0);
           const initial=ok(await assignPo('SYN-PO-100'));
           assert.equal(initial.replayed,true);
           assert.equal((await assignPo('SYN-PO-79')).status,409);
@@ -1819,7 +1824,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           assert.equal(await exportUi.getByRole('region', { name: 'Verified invoice CSV' }).count(), 0);
           assert.deepEqual(requester.errors, []);
           assert.deepEqual(requester.external, []);
-          await verifyPurchaseOrderNotices({pool,request,ids,roots,orderId:riskRegister.orders[0].id,scope:f,today:fx.today,work,open});
+          await verifyPurchaseOrderNotices({pool,request,ids,roots,orderId:riskRegister.orders[0].id,scope:f,today:fx.today,work,open,historicalOrder});
           console.log('real React/API/PostgreSQL approved invoice CSV download passed.');
         } finally {
           for (const ctx of contexts) await ctx.close();

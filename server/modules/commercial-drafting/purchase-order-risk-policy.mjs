@@ -50,7 +50,7 @@ async function requireRiskConfigurationScope(client,req) {
 
 export async function purchaseOrderDeliveryStatus(client,req) {
   const scope=await requireRiskConfigurationScope(client,req);
-  const {rows:events}=await client.query(`select e.id,e.kind,e.risk_date::text as "riskDate",
+  const {rows:events}=await client.query(`select e.id,e.kind,case when e.kind='expiry' then 'expiry_date' when e.available_before is null then 'opening_balance' else 'commitment' end basis,e.risk_date::text as "riskDate",
     d.attempts,d.failure,d.delivered_at as "deliveredAt",case when d.delivered_at is null then d.next_attempt end as "nextAttempt",
     (select coalesce(jsonb_agg(jsonb_build_object('attempt',h.attempt,'at',h.attempted_at,'failure',h.failure) order by h.attempt desc),'[]'::jsonb)
        from (select attempt,attempted_at,failure from po_risk_delivery_attempts where event_id=e.id order by attempt desc limit 5) h) history

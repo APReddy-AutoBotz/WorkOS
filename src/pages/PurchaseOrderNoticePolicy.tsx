@@ -45,7 +45,7 @@ export function PurchaseOrderNoticePolicy({context,order,today}:{context:Commerc
     <button type="button" disabled={busy} onClick={()=>void read()}>Review purchase-order risk recipients</button>
     <button type="button" disabled={busy} onClick={()=>void inspectDelivery()}>Check order alert deliveries</button>
     {delivery && <div>{delivery.events.length===0 && <p>No recorded order alerts.</p>}
-      {delivery.events.map(e=><details key={e.id}><summary>{e.riskDate} · {e.kind} · {e.deliveredAt?'Delivered':
+      {delivery.events.map(e=><details key={e.id}><summary>{e.riskDate} · {e.kind}{e.basis==='opening_balance'?' at upgrade':''} · {e.deliveredAt?'Delivered':
         e.failure==='POLICY_UNAVAILABLE'?'Configure a notice policy':e.failure==='RECIPIENTS_UNAVAILABLE'?'Check assigned owners and named recipients':
         e.failure?'Delivery needs a retry':'Pending'}</summary>{e.nextAttempt && <p>Next attempt {e.nextAttempt}</p>}
         <ol>{e.history.map(h=><li key={h.attempt}>Attempt {h.attempt} · {h.at} · {h.failure??'Delivered'}</li>)}</ol>
