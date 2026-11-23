@@ -743,3 +743,5 @@ WOS-COM-007 / WOS-RPT-003 — Migration 099 and the fixed-fee effort PostgreSQL/
 WOS-COM-007 / WOS-RPT-004 — Fixed-fee allocation risk is available from Commercial drafting. The PostgreSQL/API/browser effort journey compares partial and complete labor costs, exercises engagement-level amendments and verifies denial for a worker-restricted viewer.
 
 WOS-COM-005 / WOS-COM-007 / WOS-RPT-003 / WOS-RPT-004 — The fixed-fee engagement amendment can retain an explicit effective-dated labor-cost budget. The amendment and fixed-fee effort browser/API/PostgreSQL journeys cover entry, approval evidence, preview integrity, inheritance, a pending zero budget, and an overrun distinct from the contract allocation.
+
+WOS-COM-005 / WOS-COM-007 / WOS-RPT-003 / WOS-RPT-004 — Fixed-fee engagement hours budgets use amendment history and verified work. The commercial amendment browser and fixed-fee effort PostgreSQL journeys cover entry, before/after evidence, exact variance, unresolved work, inheritance and pending zero hours.

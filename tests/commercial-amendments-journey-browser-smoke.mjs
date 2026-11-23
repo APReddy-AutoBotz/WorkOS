@@ -62,6 +62,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
         if(type!=='Contract'){
           await page.getByLabel('Amended ends on',{exact:true}).fill(version.endsOn);
           await page.getByLabel('Amended budget (decimal)',{exact:true}).fill(budget||workspace.currentTerms.budget);
+          if(type==='Engagement') await page.getByLabel('Budgeted hours',{exact:true}).fill('42.25');
           if(type==='Engagement') await page.getByLabel('Labor-cost budget',{exact:true}).fill('5200.0125');
         }else{
           assert.equal(await page.getByLabel('Amended ends on',{exact:true}).inputValue(),version.endsOn);
@@ -75,7 +76,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
         const path=`${amendmentPrefix}/${type}/${id}${preview?'/preview':''}`;
         const responsePromise=page.waitForResponse(response=>new URL(response.url()).pathname===path&&response.request().method()==='POST');
         await action();const response=await responsePromise;assert.equal(response.status(),status,`real browser ${path}: ${await response.text()}`);
-        const body=response.request().postDataJSON();assert.deepEqual(Object.keys(body).sort(),[...previewFields,...(type==='Engagement'?['laborCostBudget']:[]),...(preview?[]:['previewToken'])].sort());
+        const body=response.request().postDataJSON();assert.deepEqual(Object.keys(body).sort(),[...previewFields,...(type==='Engagement'?['laborCostBudget','budgetHours']:[]),...(preview?[]:['previewToken'])].sort());
         assert.equal(body.reason,reason);assert.equal(body.approvalReference,approvalReference);assert.equal(typeof body.budget,'string');
         if(type==='Engagement') assert.equal(body.laborCostBudget,'5200.0125');
         assert.equal(response.request().headers()['x-organization-id'],amendmentScope.organizationId);assert.equal(response.request().headers()['x-legal-entity-id'],amendmentScope.legalEntityId);
@@ -111,6 +112,8 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       for(const [type,entity] of [['Engagement',roots.engagement],['Project',roots.project]])assert.equal((await amendmentWorkspace(apiRequest,type,entity.id)).currentTerms.contractVersionId,roots.pin,'parent adoption never cascades');
       await prepare('Engagement',roots.engagement.id,v2,'10000.0001');await preview('Engagement',roots.engagement.id);await apply('Engagement',roots.engagement.id);
       const budgetState=await amendmentWorkspace(apiRequest,'Engagement',roots.engagement.id);
+      assert.equal(budgetState.currentTerms.budgetHours,'42.25');
+      assert.equal(budgetState.history[0].after.terms.budgetHours,'42.25');
       assert.equal(budgetState.currentTerms.laborCostBudget,'5200.0125');
       assert.equal(budgetState.history[0].after.terms.laborCostBudget,'5200.0125');
       await prepare('Project',roots.project.id,v2,'4000.0001');await preview('Project',roots.project.id);

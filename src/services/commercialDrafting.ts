@@ -417,19 +417,27 @@ export const commercialDraftingService = {
       const states=z.enum(['no_work','incomplete','remaining','exhausted','exceeded']);
       const report=z.object({engagementId:z.literal(eng),through:z.literal(through),currency:z.string().regex(/^[A-Z]{3}$/),
         contractVersionId:z.string().min(1),amendmentId:z.string().min(1).nullable(),allocation:costDecimal,retainedCost:costDecimal,
+        effortBudget:z.object({budgetHours:costDecimal,verifiedHours:costDecimal,remainingHours:signed,
+          unresolvedEntries:z.number().int().nonnegative(),status:states}).strict().nullable(),
         remainingAllocation:signed,status:states,laborCostBudget:costDecimal.nullable(),remainingLaborBudget:signed.nullable(),laborBudgetStatus:states.nullable(),
         approvedEntries:z.number().int().nonnegative(),costedEntries:z.number().int().nonnegative(),complete:z.boolean()}).strict().parse(value);
       if (report.complete && (report.approvedEntries===0 || report.costedEntries!==report.approvedEntries)) throw invalid();
-      const check=(budget:string,remaining:string|null,state:string|null)=>{
-        const a=decimalQuantity(budget),c=decimalQuantity(report.retainedCost),scale=Math.max(a.scale,c.scale);
+      const check=(budget:string,remaining:string|null,state:string|null,actual=report.retainedCost,
+        noWork=report.approvedEntries===0 && report.costedEntries===0,complete=report.complete)=>{
+        const a=decimalQuantity(budget),c=decimalQuantity(actual),scale=Math.max(a.scale,c.scale);
         const difference=a.units*10n**BigInt(scale-a.scale)-c.units*10n**BigInt(scale-c.scale);
         const expected=(difference<0n?'-':'')+formatQuantity({units:difference<0n?-difference:difference,scale});
-        const status=difference<0n?'exceeded':report.approvedEntries===0 && report.costedEntries===0?'no_work':!report.complete?'incomplete':difference===0n?'exhausted':'remaining';
+        const status=difference<0n?'exceeded':noWork?'no_work':!complete?'incomplete':difference===0n?'exhausted':'remaining';
         if (remaining!==expected || state!==status) throw invalid();
       };
       check(report.allocation,report.remainingAllocation,report.status);
       if (report.laborCostBudget!==null) check(report.laborCostBudget,report.remainingLaborBudget,report.laborBudgetStatus);
       else if (report.remainingLaborBudget!==null || report.laborBudgetStatus!==null) throw invalid();
+      const effort=report.effortBudget;
+      if (effort) {
+        if (effort.unresolvedEntries>report.approvedEntries) throw invalid();
+        check(effort.budgetHours,effort.remainingHours,effort.status,effort.verifiedHours,report.approvedEntries===0,effort.unresolvedEntries===0);
+      }
       return report;
     },false);
   },

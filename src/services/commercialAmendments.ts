@@ -25,7 +25,7 @@ export const assertCommercialAmendmentContext = (context: CommercialAmendmentCon
   return owner;
 };
 
-export type AmendmentTerms = {contractVersionId: string; startsOn: string; endsOn: string; budget: string; laborCostBudget?:string};
+export type AmendmentTerms = {contractVersionId: string; startsOn: string; endsOn: string; budget: string; laborCostBudget?:string; budgetHours?:string};
 export type AmendmentEvent = AmendmentTerms & {
   id: string; sequence: number; effectiveOn: string; reason: string; approvalReference: string;
   actorId: string; activeRole: string; correlationId: string; operationId: string;
@@ -81,11 +81,13 @@ export const normalizeAmendmentTerms = (value: unknown): AmendmentTerms => {
   const item = object(value); const startsOn = date(item.startsOn); const endsOn = date(item.endsOn);
   if (endsOn < startsOn) throw invalid();
   return {contractVersionId: text(item.contractVersionId), startsOn, endsOn, budget: decimal(item.budget),
+    ...(item.budgetHours===undefined?{}:{budgetHours:decimal(item.budgetHours)}),
     ...(item.laborCostBudget===undefined?{}:{laborCostBudget:decimal(item.laborCostBudget)})};
 };
 const amountKey = (value: string) => {const [whole, fraction = ''] = value.split('.'); return `${whole}.${fraction.padEnd(4, '0')}`;};
 export const sameAmendmentTerms = (left: AmendmentTerms, right: AmendmentTerms) => left.contractVersionId === right.contractVersionId
   && left.startsOn === right.startsOn && left.endsOn === right.endsOn && amountKey(left.budget) === amountKey(right.budget)
+  && (left.budgetHours===undefined || right.budgetHours===undefined ? left.budgetHours===right.budgetHours : amountKey(left.budgetHours)===amountKey(right.budgetHours))
   && (left.laborCostBudget===undefined || right.laborCostBudget===undefined
     ? left.laborCostBudget===right.laborCostBudget : amountKey(left.laborCostBudget)===amountKey(right.laborCostBudget));
 export const normalizeAmendmentEvent = (value: unknown): AmendmentEvent => {
@@ -111,9 +113,9 @@ export const normalizeCommercialAmendmentWorkspace = (value: unknown): Amendment
   // History is newest first, with strictly later effective dates at the top.
   if (lifecycle.effectiveOn > asOf || lifecycle.contractVersionId !== activationTerms.contractVersionId || history.length !== sequence
     || history.some((event, index) => event.sequence !== sequence - index || (index > 0 && event.effectiveOn >= history[index - 1].effectiveOn))) throw invalid();
-  if (activationTerms.laborCostBudget!==undefined ||
+  if (activationTerms.budgetHours!==undefined || activationTerms.laborCostBudget!==undefined ||
     ((entityType!=='Engagement' || normalizedIdentity.model!=='fixed_fee') &&
-      [currentTerms,...history].some(terms=>terms.laborCostBudget!==undefined))) throw invalid();
+      [currentTerms,...history].some(terms=>terms.budgetHours!==undefined || terms.laborCostBudget!==undefined))) throw invalid();
   const future = history.filter(event => event.effectiveOn > asOf);
   const effective = history.find(event => event.effectiveOn <= asOf);
   if (future.length > 1 || pending !== Boolean(future.length) || !sameAmendmentTerms(currentTerms, effective || activationTerms)
@@ -152,7 +154,7 @@ const entityPath = (type: LifecycleEntityType, id: string) => {
 // client-provided scope, identity, model, currency, billing state or audit data.
 const commandBody = (input: AmendmentInput) => ({expectedSequence: input.expectedSequence, expectedLifecycleSequence: input.expectedLifecycleSequence,
   expectedContractVersion: input.expectedContractVersion, contractVersionId: input.contractVersionId, effectiveOn: input.effectiveOn,
-  startsOn: input.startsOn, endsOn: input.endsOn, budget: input.budget, ...(input.laborCostBudget===undefined?{}:{laborCostBudget:input.laborCostBudget}), reason: input.reason, approvalReference: input.approvalReference});
+  startsOn: input.startsOn, endsOn: input.endsOn, budget: input.budget, ...(input.budgetHours===undefined?{}:{budgetHours:input.budgetHours}), ...(input.laborCostBudget===undefined?{}:{laborCostBudget:input.laborCostBudget}), reason: input.reason, approvalReference: input.approvalReference});
 export const commercialAmendmentService = {
   getWorkspace: (type: LifecycleEntityType, id: string, context: CommercialAmendmentContext | null) =>
     request(context, 'GET', entityPath(type, id), undefined, value => {
