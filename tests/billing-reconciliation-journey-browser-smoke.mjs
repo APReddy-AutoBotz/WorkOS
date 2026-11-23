@@ -882,7 +882,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         );
         const fixture = await startFixtureServer({
           root: fileURLToPath(new URL('../', import.meta.url)),
-          fixtures: ['invoice-csv'],
+          fixtures: ['invoice-csv','commercial-drafting'],
           apiUrl,
         });
         let browser;
@@ -916,6 +916,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                     'commercial.contracts.view',
                     'commercial.contracts.manage',
                     'commercial.purchase_orders.release',
+                    'commercial.po_risk.configure',
                     'commercial.tm_billing.view',
                     'commercial.invoice_drafts.view',
                     'commercial.invoice_drafts.prepare',
@@ -1824,7 +1825,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           assert.equal(await exportUi.getByRole('region', { name: 'Verified invoice CSV' }).count(), 0);
           assert.deepEqual(requester.errors, []);
           assert.deepEqual(requester.external, []);
-          await verifyPurchaseOrderNotices({pool,request,ids,roots,orderId:riskRegister.orders[0].id,scope:f,today:fx.today,work,open,historicalOrder});
+          await verifyPurchaseOrderNotices({pool,request,ids,roots,orderId:riskRegister.orders[0].id,scope:f,today:fx.today,work,open,historicalOrder,origin});
           console.log('real React/API/PostgreSQL approved invoice CSV download passed.');
         } finally {
           for (const ctx of contexts) await ctx.close();

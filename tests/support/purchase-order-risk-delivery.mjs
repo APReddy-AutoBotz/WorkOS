@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {processPurchaseOrderRisks} from '../../server/modules/commercial-drafting/purchase-order-risk-worker.mjs';
 
-export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId,scope,today,work,open,historicalOrder}) {
+export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId,scope,today,work,open,historicalOrder,origin}) {
   const assignment='/purchase-orders/'+orderId+'/risk-assignments', policy='/purchase-orders/'+orderId+'/risk-policy';
   const post=(path,body)=>request(path,{method:'POST',identity:ids.requester,body});
   const state=()=>pool.query(`select e.id,d.failure,d.attempts,d.delivered_at from po_risk_events e join po_risk_dispatch d on d.event_id=e.id
@@ -44,7 +44,20 @@ export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId
   await pool.query('insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true) on conflict do nothing',[owner.id,scope.organizationId,scope.legalEntityId]);
   const named={userId:owner.id,role:'Admin'}, command={expectedVersion:0,effectiveFrom:today,manager:named,finance:named,
     locale:'en-GB',title:'Review this purchase order',body:'A released purchase order needs attention.',reason:'Synthetic scoped mandatory recipients'};
-  const configured=await post(policy,command);
+  const reviewer=await open(ids.requester);
+  await reviewer.p.goto(origin+'/tests/fixtures/commercial-drafting.html?live=1');
+  const order=reviewer.p.getByRole('listitem').filter({hasText:'SYN-PO-100'}).filter({has:reviewer.p.getByRole('button',{name:'Inspect release'})});
+  await order.getByRole('button',{name:'Inspect release'}).click();
+  const form=order.getByRole('region',{name:'Purchase-order risk recipients'});
+  await form.getByRole('button',{name:'Review purchase-order risk recipients'}).click();
+  for (const [label,value] of [['Commercial manager user ID',named.userId],['Commercial manager role',named.role],
+    ['Finance or billing owner user ID',named.userId],['Finance or billing owner role',named.role],['Template locale',command.locale],
+    ['Notification title',command.title],['Notification body',command.body],['Reason for change',command.reason]]) {
+    await form.getByLabel(label,{exact:true}).fill(value);
+  }
+  const saving=reviewer.p.waitForResponse(r=>r.url().endsWith(policy) && r.request().method()==='POST');
+  await form.getByRole('button',{name:'Save notice policy'}).click();
+  const response=await saving,configured={status:response.status(),body:await response.json()};
   assert.equal(configured.status,201,JSON.stringify(configured.body));
   assert.deepEqual((await post(policy,command)).body,configured.body);
   const clear=await post(assignment,{expectedVersion:1,engagementIds:[],reason:'Review removed engagement assignment'});
@@ -92,6 +105,8 @@ export async function verifyPurchaseOrderNotices({pool,request,ids,roots,orderId
   const diagnostic=status.body.events.find(e=>e.id===pending.id);
   assert.equal(diagnostic.basis,historicalOrder?'opening_balance':'commitment');
   assert.equal(diagnostic.history.length,3);
+  await form.getByRole('button',{name:'Check order alert deliveries'}).click();
+  await form.getByText(/threshold.*Delivered/).waitFor();
   const unrelated=await request(work+'/inbox/'+receipt.id+'/read',{identity:ids.second,method:'POST',
     body:{expectedOwnerKey:(await request(work+'/inbox',{identity:ids.second})).body.ownerKey}});
   assert.equal(unrelated.status,404);
