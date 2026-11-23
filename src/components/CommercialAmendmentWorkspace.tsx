@@ -29,7 +29,7 @@ const records = (workspace: LifecycleWorkspace | undefined, type: LifecycleEntit
   type === 'Contract' ? workspace?.contracts || [] : type === 'Engagement' ? workspace?.engagements || [] : workspace?.projects || [];
 const latestDate = (...dates: string[]) => dates.reduce((latest, value) => value > latest ? value : latest, '');
 const nextDate = (value: string) => {const date = new Date(`${value}T00:00:00.000Z`); date.setUTCDate(date.getUTCDate() + 1); return date.toISOString().slice(0, 10);};
-const termsText = (terms: AmendmentTerms, currency: string) => `${terms.startsOn} to ${terms.endsOn} · ${currency} ${terms.budget}${terms.effortPolicy===undefined || terms.effortPolicy==='disabled'?'':' · Approved delivery effort, half-up to '+terms.effortPolicy+' decimals'}${terms.elapsedTimePolicy===undefined?'':terms.elapsedTimePolicy==='disabled'?' · Elapsed-time valuation disabled':' · Elapsed-time valuation, half-up to '+terms.elapsedTimePolicy+' decimals'}${terms.budgetHours===undefined?'':' · Budgeted hours '+terms.budgetHours}${terms.laborCostBudget===undefined?'':' · Labor-cost budget '+currency+' '+terms.laborCostBudget}`;
+const termsText = (terms: AmendmentTerms, currency: string) => `${terms.startsOn} to ${terms.endsOn} · ${currency} ${terms.budget}${terms.effortPolicy===undefined || terms.effortPolicy==='disabled'?'':' · Approved delivery effort, half-up to '+terms.effortPolicy+' decimals'}${terms.elapsedTimePolicy===undefined?'':terms.elapsedTimePolicy==='disabled'?' · Elapsed-time valuation disabled':' · Elapsed-time valuation, half-up to '+terms.elapsedTimePolicy+' decimals'}${terms.budgetHours===undefined?'':' · Budgeted hours '+terms.budgetHours}${terms.expenseBudget===undefined?'':' · Expense budget '+currency+' '+terms.expenseBudget}${terms.laborCostBudget===undefined?'':' · Labor-cost budget '+currency+' '+terms.laborCostBudget}`;
 const commandError = (error: unknown, applying: boolean) => {
   if ([400, 404, 422].includes(errorStatus(error))) return 'Not saved. Check the selected immutable version, effective date, preserved start date, budget, reason and approval reference. The server also validates parent adoption and dependencies.';
   if (applying) return 'The amendment outcome could not be confirmed. Do not submit again. Reload and inspect protected history before deciding what to do next.';
@@ -163,7 +163,7 @@ export const CommercialAmendmentWorkspace = ({selectionWorkspace}: {selectionWor
   const inputFor = (owner: WorkspaceState): AmendmentInput => ({expectedSequence: owner.detail!.sequence,
     expectedLifecycleSequence: owner.detail!.lifecycle.sequence, expectedContractVersion: owner.detail!.latestContractVersion,
     contractVersionId: owner.draft!.contractVersionId, effectiveOn: owner.draft!.effectiveOn, startsOn: owner.draft!.startsOn,
-    endsOn: owner.draft!.endsOn, budget: owner.draft!.budget, ...(owner.draft!.effortPolicy===undefined?{}:{effortPolicy:owner.draft!.effortPolicy}), ...(owner.draft!.elapsedTimePolicy===undefined?{}:{elapsedTimePolicy:owner.draft!.elapsedTimePolicy}), ...(owner.draft!.budgetHours?{budgetHours:owner.draft!.budgetHours}:{}), ...(owner.draft!.laborCostBudget?{laborCostBudget:owner.draft!.laborCostBudget}:{}), reason: owner.draft!.reason.trim(), approvalReference: owner.draft!.approvalReference.trim()});
+    endsOn: owner.draft!.endsOn, budget: owner.draft!.budget, ...(owner.draft!.effortPolicy===undefined?{}:{effortPolicy:owner.draft!.effortPolicy}), ...(owner.draft!.elapsedTimePolicy===undefined?{}:{elapsedTimePolicy:owner.draft!.elapsedTimePolicy}), ...(owner.draft!.budgetHours?{budgetHours:owner.draft!.budgetHours}:{}), ...(owner.draft!.expenseBudget?{expenseBudget:owner.draft!.expenseBudget}:{}), ...(owner.draft!.laborCostBudget?{laborCostBudget:owner.draft!.laborCostBudget}:{}), reason: owner.draft!.reason.trim(), approvalReference: owner.draft!.approvalReference.trim()});
   const preview = async (event: FormEvent) => {
     event.preventDefault(); const owner = live.current;
     if (!canEdit(owner) || owner.draft!.lease !== state.draft?.lease || !owner.draft!.contractVersionId) return;
@@ -277,6 +277,9 @@ export const CommercialAmendmentWorkspace = ({selectionWorkspace}: {selectionWor
               <Field label="Budgeted hours"><input className={inputClass} inputMode="decimal" maxLength={19}
                 required={detail.currentTerms.budgetHours!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.budgetHours??''}
                 onChange={event=>edit({budgetHours:event.target.value})}/></Field>
+              <Field label="Expense budget"><input className={inputClass} inputMode="decimal" maxLength={19}
+                required={detail.currentTerms.expenseBudget!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.expenseBudget??''}
+                onChange={event=>edit({expenseBudget:event.target.value})}/></Field>
               <Field label="Labor-cost budget"><input className={inputClass} inputMode="decimal" maxLength={19}
                 required={detail.currentTerms.laborCostBudget!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.laborCostBudget??''}
                 onChange={event=>edit({laborCostBudget:event.target.value})}/></Field></>}

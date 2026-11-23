@@ -359,3 +359,7 @@ Apply the entity reporting calendar to the daily service date or cumulative work
 ### Signed fixed-fee period movement
 
 The selected entity reporting period defines both boundaries. Compare the cumulative management value through the preceding calendar day with the cumulative value through period end. Opening zero is permitted before engagement service began. Require verified retained evidence on each other boundary. Retain the currency, opening and closing sources, period revision, movement, signer, timestamp and reason. A financially locked or closed period ending on or before the current UTC day can be signed with explicit finance authority. A second signature requires an audited reopening and a later locked revision. A decline in verified cumulative value may be signed only with an explicit finance explanation of the reduction. Preserve that explanation and the signed negative movement alongside the original statement history.
+
+### Fixed-fee expense budgets
+
+WOS-COM-007. The engagement amendment may specify a nonnegative expense budget in engagement currency to four decimal places. Retain it in versioned terms, preview evidence and amendment history. Omitting the value carries forward the approved amount. Before its first adoption the budget is unset. Show the applicable value on the scoped, dated allocation report. Actual expenses require independent evidence before inclusion in costs or margin.

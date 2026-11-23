@@ -781,3 +781,7 @@ WOS-APR-007, WOS-COM-011 and WOS-NFR-DAT-006. Migration 105 and the fixed-fee Po
 ### Fixed-fee period statements
 
 WOS-APR-007, WOS-COM-011, WOS-RPT-003 and WOS-NFR-DAT-006. Migration 106, the fixed-fee PostgreSQL and browser journeys, and the opt-in permission registry cover locked-period sign-off, immutable evidence, duplicate requests and correction after reopening.
+
+### WOS-COM-007 fixed-fee expense budgets
+
+The commercial amendment API and browser journey cover approved decimal expense budgets. The fixed-fee PostgreSQL journey verifies dated reporting, inherited terms, explicit zero, preview tampering and denied scope.

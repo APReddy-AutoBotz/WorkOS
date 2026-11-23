@@ -257,3 +257,7 @@ Finance can inspect and approve the residual schedule. The forecast reconciles t
 ### Period integrity for fixed-fee valuation
 
 Database-enforced period controls now cover elapsed values, effort values and residual-schedule approvals. Finance can use the existing audited reopening workflow to permit a new version. Finance can sign a statement of verified opening and closing management values for a locked period. The statement retains its supporting source IDs and each correction requires an audited reopening and a new signed version. Negative movement requires a separate finance explanation retained with the signed version.
+
+### Fixed-fee expense budgets
+
+Commercial managers can adopt an expense budget with the engagement amendment. Finance can inspect its effective amount separately from the labor budget. Actual non-labor cost evidence, reconciliation into margins and buyer-configured alerts remain open.
