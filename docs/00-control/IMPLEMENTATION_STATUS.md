@@ -1,5 +1,11 @@
 # WorkOS implementation status
 
+## Delivery status on 24 November 2026
+
+Purchase-order assignments and mandatory in-app risk notices reached main at `93f4e52617fe1e07d1920ad7627bdfc4f09ad5b5`. Both PRs passed application, migration, browser, container and full-history secret checks. The finance register includes unused released orders and records an opening observation for older at-risk orders. [Assignment verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45229294703) · [Delivery verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45232820190)
+
+The next retainer work covers pooled capacity reporting and version-specific owner assignments. Portfolio margin alerts, non-labor actual costs, release-candidate operational evidence and buyer acceptance remain open.
+
 ## Delivery status on 23 November 2026
 
 The verified baseline for this update is main commit `72fec6948a71017dd9d10a81f3bff259e058e24d`. Finance can sign a fixed-fee reporting period, retrieve its opening and closing evidence, and record a separately explained reduction. An audited reopening permits a new signed version. Buyers can adopt an effective-dated engagement expense budget. [Signed statements and their CI run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45179354894) · [Expense budgets and their CI run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45181143886)

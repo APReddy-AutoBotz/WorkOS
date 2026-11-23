@@ -9,7 +9,7 @@ export function RetainerAlertAssignments({versionId,contractId,context,engagemen
   const [message,setMessage]=useState('');
   const [busy,setBusy]=useState(false);
   const pending=useRef(false);
-  const choices=engagements.filter(e=>e.contractId===contractId && e.model==='retainer' && e.contractVersionId===versionId);
+  const choices=engagements.filter(e=>e.contractId===contractId && e.model==='retainer');
   async function submit(write:boolean) {
     if (pending.current || (write && version===null)) return;
     pending.current=true;setBusy(true);setMessage('');

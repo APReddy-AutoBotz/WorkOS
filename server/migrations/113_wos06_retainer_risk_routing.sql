@@ -10,11 +10,6 @@ create table retainer_risk_assignments (
 create trigger immutable_retainer_risk_assignments before update or delete on retainer_risk_assignments
  for each row execute function reject_commercial_draft_rewrite();
 
-create function retainer_engagement_pin(org text,entity text,eng text,original text) returns text language sql stable as $$
- select coalesce((select a.contract_version_id from commercial_amendments a where a.organization_id=org and a.legal_entity_id=entity
-   and a.entity_type='Engagement' and a.entity_id=eng and a.effective_on<=(now() at time zone 'UTC')::date order by a.sequence desc limit 1),original)
-$$;
-
 create function guard_retainer_risk_assignments() returns trigger language plpgsql as $$
 declare root_contract text;latest integer;
 begin
@@ -27,7 +22,7 @@ begin
  end if;
  select coalesce(max(version),0) into latest from retainer_risk_assignments where contract_version_id=new.contract_version_id;
  if new.version<>latest+1 or cardinality(new.engagement_ids)<>(select count(*) from commercial_engagements e
-   where e.organization_id=new.organization_id and e.legal_entity_id=new.legal_entity_id and e.contract_id=root_contract and e.model='retainer' and retainer_engagement_pin(e.organization_id,e.legal_entity_id,e.id,e.contract_version_id)=new.contract_version_id and e.id=any(new.engagement_ids)) then
+   where e.organization_id=new.organization_id and e.legal_entity_id=new.legal_entity_id and e.contract_id=root_contract and e.model='retainer' and e.id=any(new.engagement_ids)) then
    raise exception 'Review version and contract engagement assignments.' using errcode='RRA02';
  end if;
  return new;
@@ -39,7 +34,7 @@ create function retainer_risk_engagement_owners(org text,entity text,version_pin
    select a.engagement_ids from retainer_risk_assignments a where a.organization_id=org and a.legal_entity_id=entity and a.contract_version_id=p.id
      order by a.version desc limit 1) a on true
  join commercial_engagements e on e.id=any(a.engagement_ids) and e.organization_id=org and e.legal_entity_id=entity and e.contract_id=p.contract_id and e.model='retainer'
- left join employees w on retainer_engagement_pin(org,entity,e.id,e.contract_version_id)=p.id and w.id=e.owner_id and w.organization_id=org and w.legal_entity_id=entity and w.status in ('Active','On Leave')
+ left join employees w on w.id=e.owner_id and w.organization_id=org and w.legal_entity_id=entity and w.status in ('Active','On Leave')
    and coalesce(w.joining_date,'-infinity'::date)<=(now() at time zone 'UTC')::date and coalesce(w.exit_date,'infinity'::date)>=(now() at time zone 'UTC')::date
  left join users u on u.employee_record_id=w.id and u.status='Active' and exists(select from user_roles ur join roles r on r.id=ur.role_id
    where ur.user_id=u.id and invoice_notice_named_recipient(org,entity,u.id,r.name))

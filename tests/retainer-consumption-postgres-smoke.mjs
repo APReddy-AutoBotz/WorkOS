@@ -140,6 +140,14 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(identities.manager,revised.versions[0].id),empty);
     assert((await request(path.replace(pin,revised.versions[0].id))).body.periods.every(p=>!p.capacity));
     assert.deepEqual(await read(),approved);
+    const futurePin=revised.versions[0].id;
+    const gaps=(await request(register+'?view=routing')).body.findings;
+    assert(gaps.some(f=>f.versionId===futurePin && f.kind==='missing_assignments'));
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.retainer_risk.configure',true) on conflict(role_name,permission_key) do update set enabled=true");
+    const pathFor=version=>'/retainer-versions/'+version+'/risk-assignments';
+    const planned=await post(pathFor(futurePin),{expectedVersion:0,engagementIds:[engagement.id],reason:'Assign before the upcoming version is adopted'});
+    assert.equal(planned.assignments[0].engagementId,engagement.id);
+    assert.deepEqual((await request(pathFor(pin))).body.assignments,[]);
     await amendmentTransition(request,'Project',project.id,1,pin,'On Hold');
     await amendmentTransition(request,'Engagement',engagement.id,1,pin,'On Hold');
     await amendmentTransition(request,'Contract',contract.id,1,pin,'On Hold');
