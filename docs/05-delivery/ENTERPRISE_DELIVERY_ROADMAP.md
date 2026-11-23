@@ -4,6 +4,10 @@ Updated 2026-11-23. Owner direction: review the complete code, improve WorkOS in
 
 Managed-service reporting supports a read-only comparison of a retained monthly margin percentage with a user-entered threshold (WOS-RPT-004). Finance can also page through the latest visible engagement margins for a month, including engagements with no retained version. An unavailable percentage stays unavailable. Automated margin alerts remain pending.
 
+## Release evidence
+
+WOS-OPS-008 links the tested container to its source revision, portable archive, checksums and runtime software inventory. Buyer custody, release tag, signing decisions and Gate D acceptance remain open.
+
 ## Delivery priorities
 
 Timesheet desk decisions now check the reviewed work version under the database lock. Direct integrations can pass the same precondition on the legacy status endpoint. Retirement of unconditional legacy calls requires a separate compatibility decision.

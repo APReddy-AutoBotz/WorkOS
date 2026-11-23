@@ -30,6 +30,8 @@ COPY shared ./shared
 COPY --from=build /app/dist ./dist
 
 ARG BUILD_SHA=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}" \
+      org.opencontainers.image.version="${APP_VERSION}"
 ENV BUILD_SHA=${BUILD_SHA}
 USER node
 EXPOSE 4000

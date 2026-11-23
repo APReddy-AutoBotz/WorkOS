@@ -1,5 +1,22 @@
 # WorkOS Release and Operations Runbook
 
+## Verifying the tested container
+
+Download the `tested-image-<commit>-<attempt>` artifact from a successful WorkOS CI run and unpack it in an empty directory. For buyer handover select the accepted main or release commit. A pull request build identifies the tested merge revision, which can differ from the branch head. Compare `source-commit.txt` with the selected revision.
+
+On a host with Docker and GNU coreutils, run the following commands in the extracted directory. Stop if any verification fails.
+
+```bash
+set -e
+sha256sum --check SHA256SUMS
+docker load --input image.tar.gz
+image_id=$(cat image-id.txt)
+test "$(docker image inspect --format '{{.Id}}' "$image_id")" = "$image_id"
+test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id")" = "$(cat source-commit.txt)"
+```
+
+The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
+
 ## Reviewing managed-service margins
 
 In Commercial Drafting, open the engagement list and select the portfolio month and threshold. Review all pages. A missing retained version requires the authorized reviewer to inspect and retain the individual engagement month. A missing percentage requires checking its revenue denominator and source coverage. After correcting evidence, retain a new version and rerun the report. Verify the report with the buyer's intended financial role and legal entity. A change in role or worker visibility can remove engagements from the result.
