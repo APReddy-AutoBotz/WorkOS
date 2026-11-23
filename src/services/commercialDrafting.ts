@@ -449,9 +449,9 @@ export const commercialDraftingService = {
     remainingHours:string;remainingCost:string;expectedTotalRevenue?:string;reason:string;expectedToken:string;expectedVersion:number;requestId:string}}={}) {
     const current=assertCommercialDraftingContext(context),cmd=options.command;
     if (!current.canViewFixedFeeRisk || (cmd && !current.canRecordFixedFeeForecast)) throw invalid();
-    const path=serviceEngPath(eng)+'/fixed-fee-forecast',query=new URLSearchParams({through,view:'budget_comparison'});
+    const path=serviceEngPath(eng)+'/fixed-fee-forecast',query=new URLSearchParams({through,view:'revenue_reconciliation'});
     if (options.version) query.set('version',String(options.version));
-    return request(context,cmd?'POST':'GET',cmd?path:path+'?'+query,cmd?{...cmd,through,view:'budget_comparison'}:undefined,value=>{
+    return request(context,cmd?'POST':'GET',cmd?path:path+'?'+query,cmd?{...cmd,through,view:'revenue_reconciliation'}:undefined,value=>{
       const baseline=z.object({engagementId:z.literal(eng),through:z.literal(through),currency:z.string().regex(/^[A-Z]{3}$/),
         contractVersionId:z.string().min(1),amendmentId:z.string().min(1).nullable(),approvedEntries:z.number().int().nonnegative(),
         costedEntries:z.number().int().nonnegative(),hoursComplete:z.boolean(),costComplete:z.boolean(),
@@ -460,6 +460,7 @@ export const commercialDraftingService = {
         report:baseline.extend({remainingHours:costDecimal,remainingCost:costDecimal,expectedTotalRevenue:costDecimal.optional(),estimatedHours:costDecimal.nullable(),estimatedCost:costDecimal.nullable()}).strict()}).strict();
       const signedDecimal=z.string().regex(/^-?\d+(?:\.\d+)?$/);
       const data=z.object({baseline,latestVersion:z.number().int().nonnegative(),token:z.string().regex(/^[0-9a-f]{64}$/),saved:snapshot.nullable(),
+        revenue:z.object({applicableDays:z.number().int().nonnegative(),missingDays:z.number().int().nonnegative(),staleDays:z.number().int().nonnegative(),earnedAmount:costDecimal.nullable(),remainingRevenue:signedDecimal.nullable()}).strict(),
         budgetVariance:z.object({hours:signedDecimal.nullable(),laborCost:signedDecimal.nullable()}).strict(),
         laborMargin:z.object({amount:signedDecimal,percent:z.string().regex(/^-?\d+\.\d{2}$/).nullable()}).strict().nullable()}).strict().parse(value);
       const saved=data.saved,r=saved?.report;
