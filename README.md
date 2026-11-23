@@ -292,3 +292,9 @@ In Commercial amendments, set **Budget warning (% used)** to a whole percentage 
 ### Review purchase-order risk
 
 In the commercial workspace, use **Check purchase-order risks** to review released orders for the selected legal entity. Choose an inclusive expiry date. The register includes already expired orders, orders ending by that date, and orders whose committed plus gross consumed value reaches their configured warning threshold or exhausts their available value. The date controls the expiry window. Balances reflect current invoice commitments and confirmations. Each row retains its currency.
+
+### Purchase-order alert assignments
+
+A commercial reviewer can assign engagements from the same contract to a released purchase order before its first use. Finance can filter the purchase-order risk register for orders missing assignments or a current owner with inbox access. Assignment revisions retain the reviewer and reason. New commitments retain their before and after balances for threshold and exhaustion review. Older commitments have no reconstructed balance evidence.
+
+WOS-CTR-002, WOS-COM-013 and WOS-INT-002 remain in progress. Automatic purchase-order notification delivery and retry evidence remain pending. During an application rollback, retain migrations 110 and 111 and their evidence.

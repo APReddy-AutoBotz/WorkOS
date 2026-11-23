@@ -1,3 +1,4 @@
+import {assignmentCommand as poRiskAssignments,orderAssignments} from './purchase-order-assignments.mjs';
 import {fixedFeeStatement,fixedFeeStatementCommand,fixedFeeStatementGrant,fixedFeeStatementQuery} from './fixed-fee-statement.mjs';
 import {fixedFeeProgress,progressCommand,progressGrant,progressQuery} from './fixed-fee-progress.mjs';
 import {elapsedPeriodQuery,reconcileElapsedPeriod} from './fixed-fee-elapsed-period.mjs';
@@ -22,7 +23,7 @@ import {retainerRegister,retainerIssueGrant,retainerIssueCommand} from './retain
 import {retainerStatement,statementGrant,statementCommand,statementQuery,reviewGrant,reviewCommand} from './retainer-statement.mjs';
 import {getRetainerConsumption} from './retainer-consumption.mjs';
 import {fixedFeeRegister,fixedFeeGrant,installmentCommand} from './fixed-fee-eligibility.mjs';
-import {purchaseOrderRelease,purchaseOrderBalance,purchaseOrderRisks,purchaseOrderRiskQuery,releaseSchema} from './purchase-order-release.mjs';
+import {purchaseOrderRelease,purchaseOrderBalance,purchaseOrderRisks,purchaseOrderRiskQuery,purchaseOrderRiskHistory,purchaseOrderHistoryQuery,releaseSchema} from './purchase-order-release.mjs';
 import {amendmentPreviewSchema,amendmentCommandSchema} from './amendment-contracts.mjs';
 import {getAmendmentWorkspace,previewAmendment,appendAmendment} from './amendment-service.mjs';
 import {commercialLifecycleLockKey,lockCommercialLifecycle} from './project-mutation.mjs';
@@ -70,7 +71,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if (error?.code==='FRN01') res.status(403).json({error:{code:'RISK_POLICY_DENIED',message:'Current scoped configuration authority is required.'}});
+      }else if (error?.code==='PRA01') res.status(403).json({error:{code:'PO_ASSIGNMENT_DENIED',message:'Current purchase order authority is required.'}});
+      else if (error?.code==='PRA02') res.status(409).json({error:{code:'PO_ASSIGNMENT_INVALID',message:'Review the assignment version and the engagements on this contract.'}});
+      else if (error?.code==='FRN01') res.status(403).json({error:{code:'RISK_POLICY_DENIED',message:'Current scoped configuration authority is required.'}});
       else if (['FRN02','FRN03'].includes(error?.code)) res.status(409).json({error:{code:'RISK_POLICY_UNAVAILABLE',message:'Review the current recipient relationships, policy version and effective date.'}});
       else if(valuationPeriodWrite && ['CTM04','40001'].includes(error?.code))res.status(409).json({error:{
         code:'FIXED_FEE_PERIOD_UNAVAILABLE',message:'Verify reporting-period coverage and financial locks before recording this value.'}});
@@ -205,6 +208,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/contracts',handle(createContractSchema,true,(client,req,data)=>createContract(client,req,data,audit)));
   router.post('/contracts/:id/versions',handle(appendContractSchema,true,(client,req,data)=>appendContractVersion(client,req,req.params.id,data,audit)));
   router.post('/engagements',handle(createEngagementSchema,true,(client,req,data)=>createEngagement(client,req,data,audit)));
+  router.get('/purchase-orders/:id/risk-assignments',handle(lifecycleQuerySchema,false,(c,r)=>orderAssignments(c,r)));
+  router.post('/purchase-orders/:id/risk-assignments',handle(poRiskAssignments,true,(c,r,i)=>orderAssignments(c,r,i,audit),'commercial.purchase_orders.release'));
+  router.get('/purchase-orders/:id/risk-history',handle(purchaseOrderHistoryQuery,false,purchaseOrderRiskHistory));
   router.get('/purchase-order-risks',handle(purchaseOrderRiskQuery,false,purchaseOrderRisks));
   router.get('/purchase-orders/:id/balance',handle(lifecycleQuerySchema,false,(client,req)=>purchaseOrderBalance(client,req)));
   router.get('/purchase-orders/:id/release',handle(lifecycleQuerySchema,false,(client,req)=>purchaseOrderRelease(client,req,null)));

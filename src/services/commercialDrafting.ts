@@ -823,14 +823,30 @@ export const commercialDraftingService = {
       if (periods.length!==expected.length || periods.some((p,i)=>p.startsOn!==expected[i].startsOn || p.endsOn!==expected[i].endsOn)) throw invalid();
       return periods;
     }),
-  purchaseOrderRisks(expiresBy:string,after:string|null,context:CommercialDraftingContext) {
+  purchaseOrderAssignments(order:PurchaseOrder,context:CommercialDraftingContext,command?:{expectedVersion:number;engagementIds:string[];reason:string}) {
+    if (!assertCommercialDraftingContext(context,true).canReleasePurchaseOrder) throw invalid();
+    return request(context,command?'POST':'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/risk-assignments',command,
+      value=>z.object({orderId:z.literal(order.id),version:z.number().int().nonnegative(),
+        assignments:z.array(z.object({engagementId:z.string().min(1),ownerAvailable:z.boolean()}).strict())}).strict().parse(value),true);
+  },
+  purchaseOrderRiskHistory(order:PurchaseOrder,after:string|null,context:CommercialDraftingContext) {
+    const current=assertCommercialDraftingContext(context,true);
+    if (!current.canReleasePurchaseOrder) throw invalid();
+    const movement=z.object({id:z.string().uuid(),recordedAt:z.string().datetime(),availableBefore:costDecimal,
+      availableAfter:costDecimal,warning:z.boolean(),exhausted:z.boolean()}).strict();
+    return request(context,'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/risk-history'+(after?'?after='+encodeURIComponent(after):''),undefined,
+      value=>z.object({orderId:z.literal(order.id),currency:z.literal(order.currency),threshold:costDecimal,expiredOn:z.string().date().nullable(),
+        priorCommitments:z.number().int().nonnegative(),movements:z.array(movement).max(50),nextAfter:z.string().uuid().nullable()}).strict().parse(value),true);
+  },
+  purchaseOrderRisks(expiresBy:string,after:string|null,context:CommercialDraftingContext,routing=false) {
     const current=assertCommercialDraftingContext(context,true);
     if (!current.canReleasePurchaseOrder) throw invalid();
     const query=new URLSearchParams({expiresBy});
     if (after) query.set('after',after);
+    if (routing) query.set('view','routing');
     const order=z.object({id:z.string().min(1),number:z.string().min(1),currency:z.string().regex(/^[A-Z]{3}$/),
       endsOn:z.string().date(),contractVersionId:z.string().min(1),committed:costDecimal,consumed:costDecimal,remaining:costDecimal,
-      warning:z.boolean(),expired:z.boolean(),exhausted:z.boolean(),expiresInWindow:z.boolean()}).strict();
+      assignedCount:z.number().int().nonnegative().optional(),unavailableOwners:z.number().int().nonnegative().optional(),warning:z.boolean(),expired:z.boolean(),exhausted:z.boolean(),expiresInWindow:z.boolean()}).strict();
     return request(context,'GET','/purchase-order-risks?'+query,undefined,value=>{
       const result=z.object({asOf:z.string().date(),expiresBy:z.literal(expiresBy),orders:z.array(order).max(50),nextAfter:z.string().nullable()}).strict().parse(value);
       if(result.nextAfter!==null && (result.orders.length!==50 || result.nextAfter!==result.orders[49].id)) throw invalid();

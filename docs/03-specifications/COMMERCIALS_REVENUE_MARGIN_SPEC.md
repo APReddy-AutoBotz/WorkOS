@@ -377,3 +377,9 @@ A fixed-fee risk notice policy versions the engagement-specific commercial manag
 ### Released purchase-order risk register
 
 WOS-CTR-002 and WOS-COM-013 require dated order visibility and exact consumption warnings. The register uses the same scoped release authority and database balance calculation as individual order inspection. Expiry is evaluated on the UTC business date. The order remains in force on its inclusive end date. Availability and threshold warnings are independent of expiry. The caller selects the expiry horizon and can page through every matching order. Inspection is read-only.
+
+### Purchase-order alert assignments
+
+A commercial reviewer can assign engagements from the same contract to a released purchase order before its first use. Finance can filter the purchase-order risk register for orders missing assignments or a current owner with inbox access. Assignment revisions retain the reviewer and reason. New commitments retain their before and after balances for threshold and exhaustion review. Older commitments have no reconstructed balance evidence.
+
+WOS-CTR-002, WOS-COM-013 and WOS-INT-002 remain in progress. Automatic purchase-order notification delivery and retry evidence remain pending. During an application rollback, retain migrations 110 and 111 and their evidence.

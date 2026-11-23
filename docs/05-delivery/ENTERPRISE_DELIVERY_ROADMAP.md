@@ -273,3 +273,9 @@ Finance can inspect dated warning states for effort and labor-cost budgets. The 
 ### Purchase-order risk review
 
 Finance can inspect released purchase orders across the selected legal entity for expiry, exhausted availability and the configured utilization threshold. The register reads current committed and gross consumed values. Proactive purchase-order notifications remain open, including recipient resolution for contract-level orders shared across engagements.
+
+### Purchase-order alert assignments
+
+A commercial reviewer can assign engagements from the same contract to a released purchase order before its first use. Finance can filter the purchase-order risk register for orders missing assignments or a current owner with inbox access. Assignment revisions retain the reviewer and reason. New commitments retain their before and after balances for threshold and exhaustion review. Older commitments have no reconstructed balance evidence.
+
+WOS-CTR-002, WOS-COM-013 and WOS-INT-002 remain in progress. Automatic purchase-order notification delivery and retry evidence remain pending. During an application rollback, retain migrations 110 and 111 and their evidence.
