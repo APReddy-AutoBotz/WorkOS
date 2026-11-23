@@ -54,6 +54,13 @@ export async function verifyRiskDelivery({pool,request,engagement,identities,tod
   await processFixedFeeWarnings(pool);
   assert.equal(await count('fixed_fee_risk_events'),2);
   assert.equal(await count('fixed_fee_risk_inbox'),6);
+  const attempts=await pool.query(`select attempt,failure,count(*)::int n from fixed_fee_risk_delivery_attempts
+    group by attempt,failure order by attempt`);
+  const recovered=await request(statusPath);
+  assert.deepEqual(recovered.body.events[0].history.map(h=>[h.attempt,h.failure]),[[3,null],[2,'DELIVERY_UNAVAILABLE'],[1,'RECIPIENTS_UNAVAILABLE']]);
+  assert.deepEqual(attempts.rows,[{attempt:1,failure:'RECIPIENTS_UNAVAILABLE',n:2},
+    {attempt:2,failure:'DELIVERY_UNAVAILABLE',n:2},{attempt:3,failure:null,n:2}]);
+  await assert.rejects(pool.query('delete from fixed_fee_risk_delivery_attempts where attempt=1'));
   for (const [user,reason] of [[reader,'engagement_owner'],[second,'commercial_manager'],[requester,'finance_billing_owner']]) {
     const {rows,owner}=await inbox(user);
     assert.deepEqual(rows.map(n=>n.metric).sort(),['effort','laborCost']);

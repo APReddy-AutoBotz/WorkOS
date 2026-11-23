@@ -46,11 +46,14 @@ export function FixedFeeNoticePolicy({context,engagement,today}:{context:Commerc
     {delivery && <div aria-label="Warning delivery status">
       {delivery.scan?.scanFailure && <p>Budget evaluation needs a retry.</p>}
       {delivery.events.length===0 && <p>No recorded budget alerts.</p>}
-      {delivery.events.map(row=><p key={row.metric+row.sourceAmendmentId}>
+      {delivery.events.map(row=><div key={row.metric+row.sourceAmendmentId}><p>
         {row.metric==='effort'?'Delivery hours':'Labor cost'} · {row.through} · {row.deliveredAt?'Delivered '+row.deliveredAt:
           row.failure==='RECIPIENTS_UNAVAILABLE'?'Check recipient access':row.failure==='POLICY_UNAVAILABLE'?'Configure a notice policy':
           row.failure?'Delivery needs a retry':'Pending'}{row.nextAttempt && ' · Next attempt '+row.nextAttempt}
-      </p>)}
+      </p>{row.history.length>0 && <details><summary>Recent delivery attempts ({row.attempts} total)</summary>
+        <ol>{row.history.map(h=><li key={h.attempt}>Attempt {h.attempt} · {h.at} · {h.failure===null?'Delivered':
+          h.failure==='POLICY_UNAVAILABLE'?'Policy unavailable':h.failure==='RECIPIENTS_UNAVAILABLE'?'Recipients unavailable':'Delivery unavailable'}</li>)}</ol>
+      </details>}</div>)}
     </div>}
     {policy!==undefined && <form key={policy?.id??'new'} onSubmit={save}><fieldset disabled={busy}>
       <legend>{policy?'Notice policy version '+policy.version+' · Effective '+policy.effectiveFrom:'Configure budget warning recipients'}</legend>

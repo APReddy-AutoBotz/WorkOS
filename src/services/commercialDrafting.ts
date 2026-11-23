@@ -444,7 +444,9 @@ export const commercialDraftingService = {
   riskDeliveryStatus(eng:string,context:CommercialDraftingContext) {
     if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
     const scan=z.object({scanDate:z.string().date(),scanFailure:z.literal('EVALUATION_UNAVAILABLE').nullable()}).strict();
-    const event=z.object({metric:z.enum(['effort','laborCost']),through:z.string().date(),sourceAmendmentId:z.string(),
+    const history=z.object({attempt:z.number().int().positive(),at:z.string().datetime({offset:true}),
+      failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable()}).strict();
+    const event=z.object({history:z.array(history).max(5),metric:z.enum(['effort','laborCost']),through:z.string().date(),sourceAmendmentId:z.string(),
       attempts:z.number().int().nonnegative(),failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable(),
       deliveredAt:z.string().datetime().nullable(),nextAttempt:z.string().datetime().nullable()}).strict();
     return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk-deliveries',undefined,
