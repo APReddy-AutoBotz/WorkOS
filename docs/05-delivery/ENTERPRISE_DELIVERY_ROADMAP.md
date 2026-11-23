@@ -248,7 +248,7 @@ Fixed-fee hours and labor-cost estimates at completion now retain reviewed versi
 
 The fixed-fee forecast supports a reviewed total revenue outlook. The elapsed-time comparison uses reconciled daily records.
 
-Fixed-fee forecasts show the expected margin after labor cost for each retained version. Other cost categories and actual and remaining margin remain open.
+Fixed-fee forecasts show the expected margin after labor cost for each retained version. Other cost categories remain open.
 
 Fixed-fee forecast review shows exact overrun or headroom for hours and labor cost against the budgets retained with each version. Buyer-configured thresholds and alert routing remain open.
 
@@ -258,4 +258,6 @@ Fixed-fee elapsed-time policy adoption and daily valuation use approved amendmen
 
 Finance users can reconcile fixed-fee elapsed values over a selected period and inspect each daily version. Progress-based valuation and immutable period close remain open.
 
-Fixed-fee forecasts now compare expected total revenue with reconciled elapsed-time value through the forecast date. Remaining work includes progress-based valuation, actual and remaining margin reporting, and immutable period close.
+Fixed-fee forecasts now compare expected total revenue with reconciled elapsed-time value through the forecast date. Remaining work includes progress-based valuation and immutable period close.
+
+Authorized finance users can compare actual, remaining and projected fixed-fee margin after labor cost. A separate opt-in grant controls calculated margin visibility. Other costs, effort-based valuation and signed-off period close remain open.

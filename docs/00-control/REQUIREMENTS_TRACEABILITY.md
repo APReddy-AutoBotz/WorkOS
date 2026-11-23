@@ -761,3 +761,5 @@ WOS-COM-007 / WOS-COM-011 / WOS-COM-014 — Migration 101, governed fixed-fee am
 WOS-COM-011 / WOS-RPT-003 / WOS-NFR-DAT-007 — The fixed-fee period API and finance view reconcile dated evidence and expose the matched total only with complete applicable coverage. The PostgreSQL/API/browser journey covers missing and inapplicable days, a hold and reactivation, replacement versions, range limits and revoked access.
 
 WOS-COM-011 / WOS-COM-012 / WOS-RPT-003 — The fixed-fee forecast compares a versioned expected total with current reconciled elapsed-time earned revenue through its work date. The PostgreSQL/API/browser journey covers missing evidence, a zero outlook, fractional remaining value, an absent outlook, lifecycle changes and replacement versions.
+
+WOS-COM-007 / WOS-COM-012 / WOS-COM-015 / WOS-RPT-003 — Migration 102 adds opt-in fixed-fee margin access. The forecast PostgreSQL/API/browser journey covers actual and remaining labor margin, stale forecast evidence, negative remaining revenue and withdrawal of margin authority while revenue reporting remains available.
