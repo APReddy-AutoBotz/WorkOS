@@ -1,3 +1,4 @@
+import {withLockedFeeDate,assertFeePeriodConflict} from './fixed-fee-period-authority.mjs';
 import assert from 'node:assert/strict';
 import {policyRevenue} from '../../server/modules/commercial-drafting/fixed-fee-earned-revenue.mjs';
 import {randomUUID} from 'node:crypto';
@@ -78,6 +79,11 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     const progress=exposure.getByRole('region',{name:'Fixed-fee delivery progress'});
     await progress.getByRole('button',{name:'Inspect approved delivery progress'}).click();
     await progress.getByText('Cumulative effort value: GBP 60').waitFor();
+    await withLockedFeeDate({pool,request,post,date:today,check:async()=>{
+      await progress.getByRole('button',{name:'Retain progress value'}).click();
+      await progress.getByText(/Check weekly coverage and financial locks/).waitFor();
+    }});
+    await progress.getByRole('button',{name:'Inspect approved delivery progress'}).click();
     await progress.getByRole('button',{name:'Retain progress value'}).click();
     await progress.getByText('Retained progress version 1 · GBP 60 · 4.5 verified hours').waitFor();
     const forecast=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
@@ -110,6 +116,11 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   assert.deepEqual([(await live()).revenue.status,(await live()).revenue.earnedAmount],['stale',null]);
   assert.equal((await request(path,{method:'POST',body:cmd})).status,409);
   const replacement={...cmd,expectedVersion:1,expectedToken:changed.token};
+  await withLockedFeeDate({pool,request,post,date:today,check:async()=>{
+    assertFeePeriodConflict(await request(path,{method:'POST',body:replacement}));
+    assert.equal((await get(1)).saved.id,results[0].saved.id);
+    assert.equal((await get()).latestVersion,1);
+  }});
   const [second,replay]=await Promise.all([post(path,replacement),post(path,replacement)]);
   assert.equal(second.saved.version,2);
   const {scheduled,...currentRevenue}=(await live()).revenue;
@@ -126,6 +137,10 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   assert.equal((await request(transitionPath,{method:'POST',body:approve})).status,503);
   assert.equal((await live()).revenue.scheduled.approvalId,null);
   await pool.query('drop trigger reject_transition_audit on audit_logs');
+  await withLockedFeeDate({pool,request,post,date:end,check:async()=>{
+    assertFeePeriodConflict(await request(transitionPath,{method:'POST',body:approve}));
+    assert.equal((await live()).revenue.scheduled.approvalId,null);
+  }});
   const responses=await Promise.all([post(transitionPath,approve),post(transitionPath,approve)]);
   assert.deepEqual(responses[0],responses[1]);
   assert.equal((await request(transitionPath,{method:'POST',body:{...approve,reason:'Different decision'}})).status,409);
@@ -139,6 +154,13 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     await client.query(`create schema transition_test_clock;
       create function transition_test_clock.now() returns timestamptz language sql stable as $$select pg_catalog.now()+interval '40 days'$$;
       set local search_path=transition_test_clock,public,pg_catalog`);
+    // The accounting clock is beyond term end. The fixture has a gap in weekly
+    // coverage after day seven even though the first service day is open.
+    await client.query('savepoint before_period_check');
+    await assert.rejects(client.query(`insert into commercial_fixed_fee_transition_approvals
+      select $1,organization_id,legal_entity_id,engagement_id,policy_id,snapshot_id,reason,actor_id,active_role,operation_id,created_at
+      from commercial_fixed_fee_transition_approvals where id=$2`,[randomUUID(),responses[0].approvalId]),{code:'CTM04'});
+    await client.query('rollback to before_period_check');
     const {organizationId,legalEntityId}=commercialFixture;
     const req={params:{id:engagement.id},user:{sub:identities.manager.id,activeRole:'Admin'},organizationScope:{organizationId,legalEntityId},
       headers:{'x-organization-id':organizationId,'x-legal-entity-id':legalEntityId}};

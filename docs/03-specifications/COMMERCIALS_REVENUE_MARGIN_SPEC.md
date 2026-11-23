@@ -351,3 +351,7 @@ Under an effective effort profile, forecast revenue and labor margin use only th
 ### Effort-to-elapsed policy decision
 
 Carry forward the verified cumulative effort value at the end of the day before the switch. Spread only the residual approved engagement allocation over the remaining inclusive service dates. Use the approved elapsed precision and round cumulative amounts half up. For example, a closing value of 60 against an allocation of 70 over 30 remaining days yields a first-day cumulative value of 60.33 and a final value of 70. A changed closing fingerprint, unresolved work, or incompatible allocation withholds the proposal. Finance approval pins the engagement amendment and closing snapshot with a reason and audit event. Use the resulting schedule for forecast earned value only while those sources still match. A new closing version requires new approval. A later amendment or service interruption withholds the comparison. Whole-allocation daily elapsed entries cease at the switch.
+
+### Financial period authority for fixed-fee management values
+
+Apply the entity reporting calendar to the daily service date or cumulative work-through date. A residual transition affects its switch date through the end of its service term. Require continuous permitted weekly coverage from the switch through the review day, or for the switch day when scheduled. Honor any existing financial or final lock on the remaining schedule. Future weeks may be configured later. Retained history and identical replays remain available after a lock.

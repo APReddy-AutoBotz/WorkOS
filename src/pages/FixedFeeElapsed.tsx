@@ -1,6 +1,6 @@
 import {FixedFeeElapsedPeriod} from './FixedFeeElapsedPeriod';
 import {useState} from 'react';
-import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
+import {fixedFeeWriteMessage,commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
 export function FixedFeeElapsed({context,engagement,serviceDay}:{context:CommercialDraftingContext;engagement:string;serviceDay:string}) {
   const [data,setData]=useState<Awaited<ReturnType<typeof commercialDraftingService.fixedFeeElapsed>>|null>(null);
@@ -12,8 +12,8 @@ export function FixedFeeElapsed({context,engagement,serviceDay}:{context:Commerc
       const command=retain && data?.report ? {policyVersion:data.report.policyVersion,lifecycleId:data.report.lifecycleId,parentLifecycleId:data.report.parentLifecycleId,expectedVersion:data.latestVersion}:undefined;
       const result=await commercialDraftingService.fixedFeeElapsed(engagement,serviceDay,context,{version,command});
       if (isCommercialDraftingContextCurrent(context)) setData(result);
-    } catch {
-      if (isCommercialDraftingContextCurrent(context)) {setData(null);setMessage('The elapsed-time valuation could not be verified. Inspect the service day again.');}
+    } catch (error) {
+      if (isCommercialDraftingContextCurrent(context)) {setData(null);setMessage(fixedFeeWriteMessage(error,'The elapsed-time valuation could not be verified. Inspect the service day again.'));}
     } finally {setBusy(false);}
   }
   return <section aria-label="Fixed-fee operational earned-management value"><fieldset disabled={busy}>

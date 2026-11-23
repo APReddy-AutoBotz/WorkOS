@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
+import {fixedFeeWriteMessage,commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
 export function FixedFeeProgress({context,engagement,through}:{context:CommercialDraftingContext;engagement:string;through:string}) {
   const [data,setData]=useState<Awaited<ReturnType<typeof commercialDraftingService.fixedFeeProgress>>|null>(null);
@@ -10,8 +10,8 @@ export function FixedFeeProgress({context,engagement,through}:{context:Commercia
       const command=retain && data?.token?{expectedToken:data.token,expectedVersion:data.latestVersion}:undefined;
       const result=await commercialDraftingService.fixedFeeProgress(engagement,through,context,{version,command});
       if (isCommercialDraftingContextCurrent(context)) setData(result);
-    } catch {
-      if (isCommercialDraftingContextCurrent(context)) {setData(null);setMessage('Inspect the current policy and approved delivery evidence again.');}
+    } catch (error) {
+      if (isCommercialDraftingContextCurrent(context)) {setData(null);setMessage(fixedFeeWriteMessage(error,'Inspect the current policy and approved delivery evidence again.'));}
     } finally {setBusy(false);}
   }
   const r=data?.report;

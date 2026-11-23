@@ -773,3 +773,7 @@ WOS-COM-011 / WOS-COM-012 / WOS-RPT-003 — The financial forecast selects the a
 ### Fixed-fee transition proposal
 
 WOS-COM-011, WOS-COM-012 and WOS-RPT-003. The fixed-fee effort PostgreSQL and browser journey verifies the scheduled residual projection and its retained closing source, scoped approval, retry behavior, source drift, final-day reconciliation and exclusion of the whole-allocation daily method. Migration 104 adds the append-only acceptance record.
+
+### Fixed-fee valuation period authority
+
+WOS-APR-007, WOS-COM-011 and WOS-NFR-DAT-006. Migration 105 and the fixed-fee PostgreSQL/browser journeys cover reporting-period checks on daily, cumulative and transition writes, retained history, and audited reopening.

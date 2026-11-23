@@ -151,6 +151,12 @@ export const assertCommercialDraftingContext = (context: CommercialDraftingConte
   return context;
 };
 
+export function fixedFeeWriteMessage(error:unknown,fallback:string) {
+  return error instanceof ApiClientError && error.code==='FIXED_FEE_PERIOD_UNAVAILABLE'
+    ? 'Check weekly coverage and financial locks in Reporting periods, then inspect the value again.'
+    : fallback;
+}
+
 const invalid = () => new ApiClientError('Commercial drafting response could not be confirmed.', {status: 502});
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid();
