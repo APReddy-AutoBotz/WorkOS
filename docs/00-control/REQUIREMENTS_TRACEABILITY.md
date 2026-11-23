@@ -793,3 +793,9 @@ The commercial amendments React/API/PostgreSQL journey verifies a project expens
 ### Fixed-fee effort and labor-cost risk warnings
 
 WOS-COM-007 and WOS-RPT-004. The commercial amendment browser and fixed-fee PostgreSQL journeys cover opt-in configuration, disabled and missing settings, authorization, exact threshold equality, incomplete evidence and future amendments.
+
+### Purchase-order alert assignments
+
+A commercial reviewer can assign engagements from the same contract to a released purchase order before its first use. Finance can filter the purchase-order risk register for orders missing assignments or a current owner with inbox access. Assignment revisions retain the reviewer and reason. New commitments retain their before and after balances for threshold and exhaustion review. Older commitments have no reconstructed balance evidence.
+
+WOS-CTR-002, WOS-COM-013 and WOS-INT-002 remain in progress. Automatic purchase-order notification delivery and retry evidence remain pending. During an application rollback, retain migrations 110 and 111 and their evidence.

@@ -1162,6 +1162,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           const riskRegister=ok(await request('/purchase-order-risks?expiresBy='+fx.today,{identity:ids.requester}));
           assert.deepEqual(riskRegister.orders.map(row=>[row.number,row.warning,row.exhausted,row.expiresInWindow,Number(row.remaining)]),
             [['SYN-PO-100',true,false,false,20]]);
+          const history=ok(await request('/purchase-orders/'+riskRegister.orders[0].id+'/risk-history',{identity:ids.requester}));
+          assert.deepEqual(history.movements.map(m=>[Number(m.availableBefore),Number(m.availableAfter),m.warning,m.exhausted]),[[100,20,true,false]]);
+          assert.equal(history.priorCommitments,0);
           const initial=ok(await assignPo('SYN-PO-100'));
           assert.equal(initial.replayed,true);
           assert.equal((await assignPo('SYN-PO-79')).status,409);

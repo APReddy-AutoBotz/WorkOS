@@ -184,6 +184,42 @@ const verifyCommercialDrafting = async reversalScenario => {
     assert.deepEqual(riskPage.body.orders.map(row=>[row.id,row.warning,row.exhausted,row.expired,row.expiresInWindow]),
       [[po.result.id,false,false,false,true]]);
     assert.deepEqual((await apiRequest(riskPath+'&after='+po.result.id,{identity:identities.reader})).body.orders,[]);
+    // The credit recovery scenario intentionally stops at migration 095.
+    if (reversalScenario==='stale reviewer') {
+      const assignmentPath='/purchase-orders/'+po.result.id+'/risk-assignments';
+      const assign=body=>apiRequest(assignmentPath,{method:'POST',identity:identities.reader,body});
+      const desired={expectedVersion:0,engagementIds:[engagement.result.id],reason:'Route this unused order to its delivery owner'};
+      const missing=await apiRequest(riskPath+'&view=routing',{identity:identities.reader});
+      assert.equal(missing.status,200,JSON.stringify(missing.body));
+      assert(missing.body.orders.some(row=>row.id===po.result.id));
+      assert.equal((await apiRequest(assignmentPath,{identity:identities.denied})).status,403);
+      assert.equal((await assign({...desired,engagementIds:['outside-this-contract']})).status,409);
+      assert.equal((await assign({...desired,engagementIds:[engagement.result.id,engagement.result.id]})).status,400);
+      await reviewer.page.getByRole('button',{name:'Review alert assignments'}).click();
+      await reviewer.page.getByText('No engagements assigned for alerts.').waitFor();
+      const assignmentPanel=reviewer.page.getByRole('group',{name:'Purchase-order alert assignments'});
+      await assignmentPanel.getByRole('checkbox').first().check();
+      await assignmentPanel.getByLabel('Assignment reason').fill(desired.reason);
+      await assignmentPanel.getByRole('button',{name:'Save alert assignments'}).click();
+      await assignmentPanel.getByText('Assignment version 1').waitFor();
+      const assignmentReplay=await assign(desired);
+      assert.equal(assignmentReplay.status,201,JSON.stringify(assignmentReplay.body));
+      assert.deepEqual(assignmentReplay.body.assignments.map(a=>a.engagementId),desired.engagementIds);
+      const probe=await pool.connect();
+      try {
+        await probe.query('begin');
+        await probe.query('update users set employee_record_id=null where id=$1',[identities.manager.id]);
+        const owners=await probe.query('select engagement_id,user_id from po_risk_engagement_owners($1,$2,$3)',
+          [scope.organizationId,scope.legalEntityId,po.result.id]);
+        assert.deepEqual(owners.rows,[{engagement_id:engagement.result.id,user_id:null}]);
+      } finally {
+        await probe.query('rollback');
+        probe.release();
+      }
+      assert.equal((await assign({...desired,engagementIds:[]})).status,409);
+      assert.equal((await assign({...desired,expectedVersion:1,engagementIds:[]})).body.version,2);
+      assert.equal((await pool.query('select count(*)::int n from po_risk_engagement_assignments where purchase_order_id=$1',[po.result.id])).rows[0].n,2);
+    }
     const receipt=await apiRequest(releasePath);
     assert.equal(receipt.body.release.actorId,identities.reader.id);
     assert.deepEqual((await postRelease(identities.reader)).body,receipt.body);

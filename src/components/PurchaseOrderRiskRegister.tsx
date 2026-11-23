@@ -6,6 +6,7 @@ type Register=Awaited<ReturnType<typeof commercialDraftingService.purchaseOrderR
 export function PurchaseOrderRiskRegister({context,today}:{context:CommercialDraftingContext;today:string}) {
   const [expiresBy,setExpiresBy]=useState(today);
   const [result,setResult]=useState<Register|null>(null);
+  const [routing,setRouting]=useState(false);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const pending=useRef(false);
@@ -16,7 +17,7 @@ export function PurchaseOrderRiskRegister({context,today}:{context:CommercialDra
     setBusy(true);setError('');
     if (!after) setResult(null);
     try {
-      const page=await commercialDraftingService.purchaseOrderRisks(expiresBy,after,context);
+      const page=await commercialDraftingService.purchaseOrderRisks(routing?today:expiresBy,after,context,routing);
       if (!isCommercialDraftingContextCurrent(context)) return;
       if (after && result?.asOf!==page.asOf) {
         setResult(null);
@@ -30,17 +31,20 @@ export function PurchaseOrderRiskRegister({context,today}:{context:CommercialDra
   }
   return <fieldset disabled={busy}>
     <legend>Released purchase-order risks</legend>
-    <label>Include orders expiring through <input type="date" min={today} value={expiresBy} onChange={e=>{
+    <label><input type="checkbox" checked={routing} onChange={e=>{setRouting(e.target.checked);setResult(null);setError('');}}/> Show orders missing alert assignments or owners</label>
+    <label>Include orders expiring through <input type="date" disabled={routing} min={today} value={expiresBy} onChange={e=>{
       setExpiresBy(e.target.value);setResult(null);setError('');
     }}/></label>
-    <button type="button" disabled={!expiresBy || expiresBy<today} onClick={()=>void load(null)}>Check purchase-order risks</button>
+    <button type="button" disabled={!routing && (!expiresBy || expiresBy<today)} onClick={()=>void load(null)}>Check purchase-order risks</button>
     {error && <p role="alert">{error}</p>}
     {result && <div>
       <p>Balances as of {result.asOf} UTC</p>
-      {!result.orders.length && <p>No released orders meet the expiry or balance warning criteria.</p>}
+      {!result.orders.length && <p>{routing?'Every released order has assigned engagements with available owners.':'No released orders meet the expiry or balance warning criteria.'}</p>}
       <ul>{result.orders.map(order=><li key={order.id}><strong>{order.number}</strong>
         <p>{[order.expired?'Expired':order.expiresInWindow?'Expires in selected window':null,
           order.exhausted?'Exhausted':null,order.warning?'Warning threshold reached':null].filter(Boolean).join(' · ')}</p>
+        {order.assignedCount===0 && <p>No engagements assigned for alerts</p>}
+        {Boolean(order.unavailableOwners) && <p>Assigned engagements with an unavailable owner: {order.unavailableOwners}</p>}
         <p>Ends {order.endsOn} · {order.currency} · Committed {order.committed} · Gross consumed {order.consumed} · Available {order.remaining}</p>
       </li>)}</ul>
       {result.nextAfter && <button type="button" onClick={()=>void load(result.nextAfter)}>Load more at-risk orders</button>}
