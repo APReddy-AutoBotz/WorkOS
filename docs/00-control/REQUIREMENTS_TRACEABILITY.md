@@ -772,4 +772,4 @@ WOS-COM-011 / WOS-COM-012 / WOS-RPT-003 — The financial forecast selects the a
 
 ### Fixed-fee transition proposal
 
-WOS-COM-011, WOS-COM-012 and WOS-RPT-003. The fixed-fee effort PostgreSQL and browser journey verifies the scheduled residual projection and its retained closing source.
+WOS-COM-011, WOS-COM-012 and WOS-RPT-003. The fixed-fee effort PostgreSQL and browser journey verifies the scheduled residual projection and its retained closing source, scoped approval, retry behavior, source drift, final-day reconciliation and exclusion of the whole-allocation daily method. Migration 104 adds the append-only acceptance record.

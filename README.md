@@ -257,7 +257,7 @@ To reconcile fixed-fee elapsed-time values, select the final service day, enter 
 
 In the fixed-fee completion forecast, inspect a work-through date to see reconciled operational earned-management revenue for the engagement through that date. Remaining revenue is the selected forecast version’s expected total less that earned amount. A negative balance means earned value exceeds the forecast. Missing or stale daily evidence withholds the balance.
 
-Grant **View fixed-fee margins** to finance users who need actual, remaining and forecast margin after labor cost. Actual margin uses reconciled elapsed-time revenue and complete labor costs through the review date. Remaining margin uses the selected forecast’s remaining revenue and labor cost when its reviewed evidence is current. Percentages require positive revenue.
+Grant **View fixed-fee margins** to finance users who need actual, remaining and forecast margin after labor cost. Actual margin uses reconciled revenue under the effective fixed-fee policy and complete labor costs through the review date. Remaining margin uses the selected forecast’s remaining revenue and labor cost when its reviewed evidence is current. Percentages require positive revenue.
 
 For effort-based fixed-fee engagements, select **Approved delivery hours** and the currency precision in the engagement amendment. Set a positive hours budget. In **Inspect approved delivery progress**, finance users can see billable and non-billable verified hours and the cumulative earned-management amount. Recording a version requires the separate progress recording permission.
 
@@ -265,4 +265,4 @@ The fixed-fee forecast follows the approved effort profile on its work-through d
 
 ### Fixed-fee policy changes
 
-On the closing effort day, finance can preview a scheduled switch to elapsed time. The forecast shows the verified closing value, the remaining allocation, and the proposed first-day total.
+On the closing effort day, finance can preview a scheduled switch to elapsed time. The forecast shows the verified closing value, the remaining allocation, and the proposed first-day total. A finance user with transition approval permission can sign off the schedule with a reason. The forecast uses the approved cumulative amount while the closing evidence, policy and service remain valid.

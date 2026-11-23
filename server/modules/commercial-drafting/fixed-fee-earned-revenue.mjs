@@ -22,6 +22,22 @@ async function transitionPreview(client,terms,closing) {
     closingAmount:closing.earnedAmount,residual:values.residual,amount:values.amount,startsOn:terms.startsOn,endsOn:terms.endsOn}};
 }
 
+async function transitionTerms(client,args) {
+  const {rows:[terms]}=await client.query(`select policy id,closing_date::text as "closingDate",first_day::text as "startsOn",
+    last_day::text as "endsOn",allocation::text,digits,currency,last_day-first_day+1 days,greatest(1,$4::date-first_day+1) elapsed
+    from fixed_fee_transition_terms($1,$2,$3,$4::date)`,args);
+  return terms;
+}
+
+async function reviewedTransition(client,terms,closing,args) {
+  const result=await transitionPreview(client,terms,closing);
+  if (!result.preview) return result;
+  const {rows:[approval]}=await client.query(`select id from commercial_fixed_fee_transition_approvals
+    where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and policy_id=$4 and snapshot_id=$5`,
+    [...args.slice(0,3),terms.id,closing.latest.id]);
+  return {preview:{...result.preview,approvalId:approval?.id??null}};
+}
+
 export async function policyRevenue(client,req,scope,args,currency,expectedRevenue) {
   const {rows:[history]}=await client.query(`select (array_agg(active order by sequence desc))[1] current,bool_or(active) previous
     from (select sequence,coalesce(after_value->'terms'->>'effortPolicy','disabled')<>'disabled' active
@@ -31,34 +47,22 @@ export async function policyRevenue(client,req,scope,args,currency,expectedReven
     const {status,latest,earnedAmount}=await closingEvidence(client,req,scope,args[3],currency);
     let scheduled;
     if (earnedAmount!==null) {
-      const {rows:[terms]}=await client.query(`select id,effective_on::text as "startsOn",ends_on::text as "endsOn",
-        $4::date::text as "closingDate",trim_scale(budget)::text allocation,(after_value->'terms'->>'elapsedTimePolicy')::int digits,
-        ends_on-effective_on+1 days,1 elapsed from commercial_amendments
-        where organization_id=$1 and legal_entity_id=$2 and entity_type='Engagement' and entity_id=$3
-        and effective_on=$4::date+1 and $4::date=(now() at time zone 'UTC')::date
-        and effective_on between starts_on and ends_on and after_value->'terms'->>'elapsedTimePolicy' in ('0','1','2','3','4')`,args);
-      if (terms) scheduled=(await transitionPreview(client,terms,{latest,earnedAmount})).preview;
+      const terms=await transitionTerms(client,args);
+      if (terms) scheduled=(await reviewedTransition(client,terms,{latest,earnedAmount},args)).preview;
     }
     return {profile:'effort',...(scheduled?{scheduled}:{}),status,version:latest?.version??null,snapshotId:latest?.id??null,earnedAmount,
       remainingRevenue:earnedAmount!==null && expectedRevenue!=null?decimalDifference(expectedRevenue,earnedAmount):null};
   }
   if (history.previous) {
     const result={profile:'transition',earnedAmount:null,remainingRevenue:null};
-    const {rows:[terms]}=await client.query(`with history as (
-      select a.*,lag(coalesce(after_value->'terms'->>'effortPolicy','disabled')) over(order by sequence) prior_effort
-      from commercial_amendments a where organization_id=$1 and legal_entity_id=$2 and entity_type='Engagement'
-        and entity_id=$3 and effective_on<=$4::date
-    ) select id,effective_on::text as "startsOn",(effective_on-1)::text as "closingDate",ends_on::text as "endsOn",
-        trim_scale(budget)::text allocation,(after_value->'terms'->>'elapsedTimePolicy')::int digits,
-        (ends_on-effective_on+1) days,($4::date-effective_on+1) elapsed
-      from (select * from history order by sequence desc limit 1) current_terms
-      where prior_effort in ('0','1','2','3','4') and after_value->'terms'->>'elapsedTimePolicy' in ('0','1','2','3','4')
-        and starts_on<=effective_on and $4::date<=ends_on and $4::date<=(now() at time zone 'UTC')::date
-        and fixed_fee_elapsed_report($1,$2,$3,$4::date) is not null`,args);
+    const terms=await transitionTerms(client,args);
     if (!terms) return result;
     const closing=await closingEvidence(client,req,scope,terms.closingDate,currency);
     if (closing.earnedAmount===null) return {...result,closingStatus:closing.status};
-    return {...result,...await transitionPreview(client,terms,closing)};
+    const reviewed=await reviewedTransition(client,terms,closing,args);
+    if (!reviewed.preview?.approvalId) return {...result,...reviewed};
+    const earnedAmount=reviewed.preview.amount;
+    return {...result,...reviewed,earnedAmount,remainingRevenue:expectedRevenue!=null?decimalDifference(expectedRevenue,earnedAmount):null};
   }
   return {profile:'elapsed',...await earnedRevenue(client,args,currency,expectedRevenue)};
 }
@@ -92,7 +96,9 @@ export async function earnedRevenue(client,args,currency,expectedRevenue) {
       trim_scale(sum((report->>'amount')::numeric))::text amount from evidence
   )
   select days as "applicableDays",days-present as "missingDays",stale as "staleDays",
-    case when days>0 and days=present and stale=0 then amount end as "earnedAmount" from eligible cross join totals`,[...args,currency]);
+    case when days>0 and days=present and stale=0 and not exists(select from commercial_amendments
+      where organization_id=$1 and legal_entity_id=$2 and entity_type='Engagement' and entity_id=$3 and effective_on<=$4::date
+        and after_value->'terms'->>'effortPolicy' in ('0','1','2','3','4')) then amount end as "earnedAmount" from eligible cross join totals`,[...args,currency]);
   return {...coverage,remainingRevenue:coverage.earnedAmount!==null && expectedRevenue!=null
     ? decimalDifference(expectedRevenue,coverage.earnedAmount) : null};
 }
