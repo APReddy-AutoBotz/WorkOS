@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-OPS-001. The Dockerfile and Compose deployment use digest-pinned upstream inputs. The container input test verifies build/runtime sharing and PostgreSQL parity with CI. Initial digests were observed in [main validation](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45273167876).
+
 WOS-RPT-004 and WOS-INT-002. The commercial amendment PostgreSQL/browser journey adopts a signed managed-service margin threshold and verifies its approved history. Mandatory notice delivery remains open.
 
 WOS-OPS-008 and WOS-NFR-RELSE-002. CI exports the tested image by immutable image ID, compares the OCI source label with the checkout, inventories installed runtime npm and OS packages, verifies SHA-256 checksums and retains the bundle for download.

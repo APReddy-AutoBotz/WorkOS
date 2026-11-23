@@ -1,5 +1,9 @@
 # WorkOS Release and Operations Runbook
 
+## Updating deployment image pins
+
+The Dockerfile selects one Node/Alpine image index for both build and runtime. The Compose database and CI service select the same PostgreSQL image index. Record the official multi-platform digest and supported buyer architectures when refreshing a pin. Apply a PostgreSQL digest update to both files in one PR and retain the successful migration, restore, startup and container checks. For a major PostgreSQL upgrade, follow a separate data conversion and recovery plan. Reverting a Git pin alone does not downgrade an existing database.
+
 ## Verifying the tested container
 
 Download the `tested-image-<commit>-<attempt>` artifact from a successful WorkOS CI run and unpack it in an empty directory. For buyer handover select the accepted main or release commit. A pull request build identifies the tested merge revision, which can differ from the branch head. Compare `source-commit.txt` with the selected revision.

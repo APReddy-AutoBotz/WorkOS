@@ -1,5 +1,9 @@
 # WorkOS implementation status
 
+## Deployment reproducibility
+
+The application build and runtime share one pinned Node image index. The buyer PostgreSQL image pin matches the CI service. The initial pins come from the [tested main deployment inputs](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45273167876). Release acceptance still requires selecting a candidate and verifying it on buyer infrastructure.
+
 ## Managed-service margin policy
 
 The governed engagement amendment workflow supports an optional standing threshold, dated adoption and explicit disablement. The [margin portfolio](https://github.com/APReddy-AutoBotz/WorkOS/pull/349) remains available for ad hoc comparisons. Historical alert evaluation and mandatory delivery are open.

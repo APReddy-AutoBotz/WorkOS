@@ -4,7 +4,7 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 Managed-service reporting supports a read-only comparison of a retained monthly margin percentage with a user-entered threshold (WOS-RPT-004). Finance can also page through the latest visible engagement margins for a month, including engagements with no retained version. An unavailable percentage stays unavailable. A buyer can adopt a standing managed-service margin threshold through a governed engagement amendment. Automated margin alerts remain pending.
 
-CI retains the tested production image, its checksums and runtime package inventories for seven days. [Container verification and handover](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#verifying-the-tested-container)
+The application build and runtime share an immutable Node image. CI and buyer Compose use the same pinned PostgreSQL image. CI retains the tested production image, its checksums and runtime package inventories for seven days. [Container verification and handover](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#verifying-the-tested-container)
 
 For verified delivery status, remaining launch work and buyer acceptance gates, see the [implementation status](docs/00-control/IMPLEMENTATION_STATUS.md).
 

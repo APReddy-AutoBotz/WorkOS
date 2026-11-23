@@ -1,4 +1,6 @@
-FROM node:22-alpine AS build
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS base
+
+FROM base AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -15,7 +17,7 @@ ENV VITE_APP_MODE=${VITE_APP_MODE}
 ENV VITE_ALLOW_TEST_FALLBACK=${VITE_ALLOW_TEST_FALLBACK}
 RUN npm run build
 
-FROM node:22-alpine AS runtime
+FROM base AS runtime
 
 ARG APP_VERSION=0.0.0
 ENV NODE_ENV=production \
