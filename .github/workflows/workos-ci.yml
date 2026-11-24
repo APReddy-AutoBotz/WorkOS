@@ -227,7 +227,11 @@ jobs:
         run: npm run test:resource-demand-postgres
 
       - name: Install Chromium for synthetic browser checks
-        run: npx playwright install --with-deps chromium
+        run: |
+          npx --no-install playwright install chromium
+          if ! node --input-type=module -e "import {chromium} from 'playwright'; const browser = await chromium.launch(); await browser.close()"; then
+            npx --no-install playwright install-deps chromium
+          fi
 
       - name: Verify acknowledged settings save and load recovery
         run: npm run test:settings-save-outcomes-browser
