@@ -118,6 +118,11 @@ const validProfile = { name:'Synthetic Organization',legalName:'Synthetic Organi
   supportContact:'support@example.test',defaultLocale:'en-US',defaultTimeZone:'America/New_York',baseCurrency:'USD',
   fiscalYearStart:'04-01',defaultWeekStart:1,effectiveFrom:'2026-01-01' };
 assert.equal(validateOrganizationProfile(validProfile).success,true,'the complete bounded organization profile must validate');
+assert(validateOrganizationProfile({...validProfile,branding:{logoUrl:'/brand/logo.svg',primaryAccent:'#334455'}}).success);
+for (const branding of [{logoUrl:'//example.invalid/logo.svg'},{faviconUrl:'/../internal'},
+  {primaryAccent:'#ffffff'},{privateField:'hidden'}]) {
+  assert.equal(validateOrganizationProfile({...validProfile,branding}).success,false);
+}
 for (const invalid of [
   {defaultLocale:'not_a_locale'}, {defaultTimeZone:'Mars/Olympus'}, {baseCurrency:'usd'}, {fiscalYearStart:'02-31'},
   {defaultWeekStart:7}, {supportContact:'not a contact'},

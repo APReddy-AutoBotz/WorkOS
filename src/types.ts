@@ -177,7 +177,9 @@ export interface OrganizationSetupReadiness {
   authority: 'persisted-server-state';
 }
 
+export type OrganizationBranding = Partial<Record<'logoUrl'|'compactMarkUrl'|'faviconUrl'|'primaryAccent'|'secondaryAccent'|'emailBrand'|'reportBrand',string>>;
 export interface OrganizationProfile {
+  branding?: OrganizationBranding;
   organizationId: string;
   code: string;
   name: string;

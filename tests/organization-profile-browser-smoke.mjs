@@ -34,7 +34,7 @@ const profile = (overrides = {}) => ({
 });
 const raw = value => ({
   organization_id: value.organizationId, organization_code: value.code, organization_name: value.name,
-  legal_name: value.legalName, product_display_name: value.productDisplayName, support_contact: value.supportContact,
+  legal_name: value.legalName, branding:value.branding, product_display_name: value.productDisplayName, support_contact: value.supportContact,
   default_locale: value.defaultLocale, default_time_zone: value.defaultTimeZone, base_currency: value.baseCurrency,
   fiscal_year_start: value.fiscalYearStart, default_week_start: value.defaultWeekStart, profile_effective_from: `${value.effectiveFrom}T00:00:00.000Z`,
 });
@@ -188,6 +188,9 @@ try {
     baseCurrency: 'GBP', fiscalYearStart: '04-01', defaultWeekStart: 0,
   });
   await edit(changed);
+  changed.branding = {primaryAccent:'#334455'};
+  await page.getByLabel('Primary accent', {exact:true}).fill(changed.branding.primaryAccent);
+  assert.equal(await page.getByLabel('Brand preview').evaluate(el => el.style.borderColor),'rgb(51, 68, 85)');
   await save().focus();
   await page.keyboard.press('Enter');
   const firstSave = await pending('save');

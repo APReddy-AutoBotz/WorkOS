@@ -56,7 +56,7 @@ if (!process.env.WORKOS_PROFILE_DATE_CHILD) {
         defaultTimeZone: 'UTC',baseCurrency: 'USD',fiscalYearStart: '01-01',defaultWeekStart: 1,effectiveFrom: today};
       await database.query(`insert into organization_profile_versions(organization_id,name,legal_name,product_display_name,support_contact,
         default_locale,default_time_zone,base_currency,fiscal_year_start,default_week_start,effective_from,created_by)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'synthetic-date-actor')`, Object.values(profile));
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,null)`, Object.values(profile));
       const pool = {
         query: (sql, values) => sql.includes('from user_organization_scopes s')
           ? Promise.resolve({rows: [{organization_id: 'profile-date-org',legal_entity_id: 'profile-date-legal'}]})
@@ -73,23 +73,38 @@ if (!process.env.WORKOS_PROFILE_DATE_CHILD) {
       server = app.listen(0, '127.0.0.1');
       await new Promise((resolve,reject) => {server.once('listening',resolve);server.once('error',reject);});
       const endpoint = `http://127.0.0.1:${server.address().port}/api/organization-setup/profile`;
+      // Exercise the real upgrade against the already populated, connection-local profile table.
+      await database.query(readFileSync(new URL('../server/migrations/118_wos02_organization_branding.sql',import.meta.url),'utf8'));
+      process.env.PUBLIC_BRANDING_ORGANIZATION_ID = profile.organizationId;
+      const loginBrand = () => fetch(endpoint.replace('/profile','/login-brand')).then(response => response.json());
+      assert.deepEqual(await loginBrand(),{},'an untouched backfilled profile retains deployment branding');
       const send = value => fetch(endpoint, {method: 'PUT',headers: {'Content-Type': 'application/json'},body: JSON.stringify(value)});
       let response = await fetch(endpoint);
       assert.equal(response.status,200);
-      assert.equal((await response.json()).profile_effective_from,today,'GET returns the actual calendar date in every process timezone');
-      response = await send({...profile,name: 'Synthetic same-day edit'});
+      const upgraded = await response.json();
+      assert.equal(upgraded.branding,null);
+      assert.equal(upgraded.product_display_name,profile.productDisplayName);
+      assert.equal(upgraded.profile_effective_from,today,'GET returns the actual calendar date in every process timezone');
+      const branding = {logoUrl:'/brand/example.svg',primaryAccent:'#334455'};
+      response = await send({...profile,name: 'Synthetic same-day edit',branding});
       assert.equal(response.status,200,'same-date update must not accidentally close a prior-day profile');
       const saved = await response.json();
       assert.equal(saved.profile_effective_from,today);
       assert.equal(saved.profile_effective_to,null);
       assert.equal(audits.length,1);
+      assert.equal(audits[0].oldValue.branding,null);
+      assert.deepEqual(audits[0].newValue.branding,branding);
+      assert.deepEqual(await loginBrand(),{productName:profile.productDisplayName,logoUrl:branding.logoUrl,
+        faviconUrl:null,primaryAccent:branding.primaryAccent,secondaryAccent:null});
       assert.equal(audits[0].oldValue.effective_from,today,'latest locked profile audit preserves the calendar date');
       response = await send({...profile,effectiveFrom: earlier});
       assert.equal(response.status,409,'earlier date remains a stable no-write conflict');
       assert.equal(audits.length,1);
       response = await send({...profile,name: 'Synthetic scheduled name',effectiveFrom: future});
       assert.equal(response.status,200);
-      assert.equal((await response.json()).profile_effective_from,future,'scheduled response date is not shifted');
+      const scheduled = await response.json();
+      assert.equal(scheduled.profile_effective_from,future,'scheduled response date is not shifted');
+      assert.deepEqual(scheduled.branding,branding,'an older caller omitting branding preserves the saved values');
       response = await fetch(endpoint);
       const current = await response.json();
       assert.equal(current.profile_effective_from,today);

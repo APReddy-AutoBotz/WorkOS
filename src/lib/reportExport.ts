@@ -88,5 +88,7 @@ export const downloadReportExport = async (id: string) => {
     }));
   }
 
-  return downloadAuditedCsv(option.fileName, rows, option.title, 'Success', expectedScope);
+  const brand = productConfig.reportBrand.replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '');
+  const fileName = brand ? brand + '-' + option.fileName : option.fileName;
+  return downloadAuditedCsv(fileName, rows, option.title, 'Success', expectedScope);
 };

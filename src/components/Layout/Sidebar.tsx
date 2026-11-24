@@ -150,7 +150,7 @@ export const Sidebar = () => {
       <div className="flex items-center p-4 border-b border-sidebar-border h-16 shrink-0">
         {isCollapsed ? (
           <div className="w-9 h-9 rounded-lg bg-white flex items-center justify-center shrink-0 shadow-lg shadow-black/10">
-            <img src={productConfig.logoUrl} alt={productConfig.productName} className="w-7 h-7 object-contain" />
+            <img src={productConfig.compactMarkUrl} alt={productConfig.productName} className="w-7 h-7 object-contain" />
           </div>
         ) : (
           <div className="h-11 w-full rounded-xl bg-white px-3 py-2 flex items-center shadow-lg shadow-black/10">

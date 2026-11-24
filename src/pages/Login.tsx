@@ -7,7 +7,7 @@ import { LogIn, Users, Shield, Briefcase, Globe, Info, UserCheck, LockKeyhole, D
 import { DataStorage, STORAGE_KEYS } from '../services/storage';
 import { NoticeBanner } from '../components/ui/NoticeBanner';
 import { isDemoFallbackAllowed } from '../services/apiClient';
-import { productConfig } from '../config/productConfig';
+import { applyRuntimeBrand, productConfig } from '../config/productConfig';
 
 const roles: { role: UserRole; icon: any; color: string; desc: string }[] = [
   { role: 'Admin', icon: Shield, color: 'text-purple-600 bg-purple-50', desc: 'Full system control, settings, and high-level audits.' },
@@ -29,6 +29,18 @@ export const Login = () => {
   const [loginError, setLoginError] = useState('');
   const logoutUnconfirmed = new URLSearchParams(useLocation().search).get('logout') === 'unconfirmed';
   const [entraEnabled, setEntraEnabled] = useState(false);
+  const [,refreshBrand] = useState(0);
+  React.useLayoutEffect(() => {
+    let active = true;
+    applyRuntimeBrand();
+    refreshBrand(v => v+1);
+    void fetch('/api/organization-setup/login-brand',{credentials:'omit'})
+      .then(response => response.ok ? response.json() : null)
+      .then(brand => {
+        if (active && brand) { applyRuntimeBrand(brand); refreshBrand(v => v+1); }
+      }).catch(() => {});
+    return () => { active = false; };
+  },[]);
   const showDemoShortcuts = isDemoFallbackAllowed();
 
   useEffect(() => {

@@ -52,13 +52,13 @@ const pending = async (kind, after = 0) => {
 };
 const settle = (request, result, status) => page.evaluate(({id, result, status}) => window.terminologyConfigurationHarness.settle(id, result, status), {id: request.id, result, status});
 let fixtureToken;
-const headers = (request, organizationId = 'org-a', legalEntityId = 'legal-a', token = fixtureToken) => {
+const headers = (request, organizationId = 'org-a', legalEntityId = 'legal-a', url = '/api/organization-setup/terminology') => {
   assert.deepEqual(request.headers, {
-    authorization: `Bearer ${token}`, 'content-type': 'application/json',
+    authorization: `Bearer ${fixtureToken}`, 'content-type': 'application/json',
     'x-organization-id': organizationId, 'x-legal-entity-id': legalEntityId,
   }, `${request.kind} retains only real JSON/authentication/captured-scope headers`);
   assert.equal(request.credentials, 'include');
-  assert.equal(request.url, '/api/organization-setup/terminology');
+  assert.equal(request.url, url);
   assert.equal(request.method, request.kind === 'save' ? 'POST' : 'GET');
 };
 const health = async (after = 0) => {
@@ -70,12 +70,14 @@ const health = async (after = 0) => {
   await settle(request, {database: 'connected'});
   return request;
 };
-const reader = async (after = 0, organizationId = 'org-a', legalEntityId = 'legal-a') => {
+const reader = async (after = 0, organizationId = 'org-a', legalEntityId = 'legal-a', url) => {
   const request = await pending('terminology', after);
-  headers(request, organizationId, legalEntityId);
+  headers(request, organizationId, legalEntityId, url);
   assert.equal(request.body, null);
   return request;
 };
+const runtimeReader = (after, organizationId, legalEntityId) =>
+  reader(after, organizationId, legalEntityId, '/api/organization-setup/terminology?includeBrand=1');
 const expectConfiguration = async expected => {
   await page.waitForFunction(value => document.getElementById('term-employee-singular')?.value === value, expected.terms.employee.singular);
   for (const key of keys) {
@@ -164,7 +166,7 @@ const bootRuntime = async (value = configuration()) => {
   // The editor's health-gated read and wrapper's direct runtime read are real,
   // concurrent production requests. Settle runtime first to force its remount.
   const initialHealth = await pending('health');
-  const initialRuntime = await reader();
+  const initialRuntime = await runtimeReader();
   const before = await runtimeState();
   await settle(initialRuntime, raw(value));
   await finishRuntimeRemount(initialRuntime.id, value, before.mounts);
@@ -497,7 +499,7 @@ try {
     headers(request);
     assert.deepEqual(request.body, proposed);
     await settle(request, raw(proposed));
-    const refresh = await reader(request.id);
+    const refresh = await runtimeReader(request.id);
     assert.equal((await runtimeState()).scopeEvents, beforeRuntimeSave.scopeEvents + 1, 'real successful POST dispatches one existing runtime event');
     assert.deepEqual(await runtimeSnapshot(), runtimeSubset(original), 'POST does not apply its own labels before runtime GET');
     const currentValue = scheduledSave ? original : proposed;
@@ -525,7 +527,7 @@ try {
   const originalScopePost = await pending('save');
   const beforeScopeRuntime = await runtimeState();
   await page.evaluate(() => window.terminologyConfigurationHarness.scope('org-b', 'legal-b'));
-  const replacementRuntime = await reader(originalScopePost.id, 'org-b', 'legal-b');
+  const replacementRuntime = await runtimeReader(originalScopePost.id, 'org-b', 'legal-b');
   await settle(replacementRuntime, raw(valueB));
   await finishRuntimeRemount(replacementRuntime.id, valueB, beforeScopeRuntime.mounts, {organizationId: 'org-b', legalEntityId: 'legal-b'});
   await expectRuntime(valueB);
@@ -569,7 +571,7 @@ try {
   await bootRuntime(original);
   const beforeRevokedRuntime = await lastId();
   await page.evaluate(() => window.terminologyConfigurationHarness.event('workos:organization-scope-changed'));
-  const identityOwnedRuntime = await reader(beforeRevokedRuntime);
+  const identityOwnedRuntime = await runtimeReader(beforeRevokedRuntime);
   const beforeIdentityMounts = await runtimeState();
   await page.evaluate(() => window.terminologyConfigurationHarness.token('synthetic-terminology-token-b', null));
   await settle(identityOwnedRuntime, raw(configuration('Synthetic Wrong Token Runtime')));

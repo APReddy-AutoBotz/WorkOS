@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import { applyPersistedTerminology } from './productConfig';
+import { applyPersistedTerminology, applyRuntimeBrand } from './productConfig';
 import { api, getOrganizationScope, getToken } from '../services/apiClient';
 import { authService } from '../services/authService';
 import { getEffectivePermissions } from '../services/permissions';
 
-type TerminologyResponse = { terms?: Record<string, unknown> };
+type TerminologyResponse = { terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
 const runtimeContext = () => {
   const user = authService.getCurrentUser();
   return JSON.stringify([user?.id, user?.employeeId, user?.role, user?.permissionRole,
@@ -21,20 +21,22 @@ export const loadRuntimeTerminology = async (
   const scope = getOrganizationScope();
   const owned = () => isCurrent() && owner === runtimeContext();
   if (!authenticated) {
-    if (owned()) applyPersistedTerminology({});
+    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); }
     return owned();
   }
   if (!getOrganizationScope()) {
-    if (owned()) applyPersistedTerminology({});
+    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); }
     return owned();
   }
   try {
-    const result = await (fetchTerms ? fetchTerms() : api.getWithScope<TerminologyResponse>('/api/organization-setup/terminology', scope));
+    const result = await (fetchTerms ? fetchTerms() : api.getWithScope<TerminologyResponse>('/api/organization-setup/terminology?includeBrand=1', scope));
     if (!owned()) return false;
     applyPersistedTerminology(result.terms || {});
+    applyRuntimeBrand(result.brand);
   } catch {
     if (!owned()) return false;
     applyPersistedTerminology({});
+    applyRuntimeBrand();
   }
   return true;
 };
