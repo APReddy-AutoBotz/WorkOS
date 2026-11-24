@@ -1,10 +1,34 @@
 # WorkOS implementation status
 
+## Utilization evidence
+
+Forecast pressure and project allocation indicators now use the same dated eligible workforce and project population. A checkpoint without capacity cannot generate a hiring assessment.
+
+The compatibility forecast uses its verified report dates across its chart, roll-off window and audited export, including when the browser clock differs from the source.
+
+Reviewers can inspect which eligible workers have no timesheet in the selected period. Changing review status preserves this roster measure and the coverage denominator.
+
+The compatibility actual utilization report now displays missing approval or capacity explicitly in its table, summary and global export. The actual and planned KPI cards display measured values without fixed trend indicators. Governed effective-capacity reports use their existing approved-work sources.
+
+## Deployment reproducibility
+
+The application build and runtime share one pinned Node image index. The buyer PostgreSQL image pin matches the CI service. The initial pins come from the [tested main deployment inputs](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45273167876). Release acceptance still requires selecting a candidate and verifying it on buyer infrastructure.
+
+## Managed-service margin policy
+
+The governed engagement amendment workflow supports an optional standing threshold, dated adoption and explicit disablement. The [margin portfolio](https://github.com/APReddy-AutoBotz/WorkOS/pull/349) remains available for ad hoc comparisons. Historical alert evaluation and mandatory delivery are open.
+
+## Commercial reporting checkpoint on 24 November 2026
+
+On main at `1f45ddd49a56df67296b1f12130804135f167262`, finance can compare an individual retained managed-service monthly margin with an entered threshold. [Reporting PR](https://github.com/APReddy-AutoBotz/WorkOS/pull/348) and [validation run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45250489157).
+
+The portfolio view extends this evidence across engagements. Automated margin notifications, fixed-fee actual expenses and buyer release acceptance remain open. The retainer risk register and alert delivery have successful candidate checks and await integration in [PR 346](https://github.com/APReddy-AutoBotz/WorkOS/pull/346) and [PR 347](https://github.com/APReddy-AutoBotz/WorkOS/pull/347).
+
 ## Delivery status on 24 November 2026
 
 Purchase-order assignments and mandatory in-app risk notices reached main at `93f4e52617fe1e07d1920ad7627bdfc4f09ad5b5`. Both PRs passed application, migration, browser, container and full-history secret checks. The finance register includes unused released orders and records an opening observation for older at-risk orders. [Assignment verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45229294703) · [Delivery verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45232820190)
 
-The next retainer work covers pooled capacity reporting and version-specific owner assignments. Portfolio margin alerts, non-labor actual costs, release-candidate operational evidence and buyer acceptance remain open.
+The retainer register and mandatory in-app notices cover pooled capacity risks. Recipients follow explicit version assignments and current engagement ownership. Finance can identify versions with missing assignments. Portfolio margin alerts, non-labor actual costs, release-candidate operational evidence and buyer acceptance remain open.
 
 ## Delivery status on 23 November 2026
 

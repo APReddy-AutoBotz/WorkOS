@@ -1,6 +1,20 @@
 # Enterprise delivery and integration roadmap
 
+The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.
+
+Forecast checkpoints and roll-offs use the UTC source date returned by the report. The chart labels individual checkpoint dates and the audited CSV includes the source and horizon end dates.
+
+The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage. The missing-worker list uses the scoped eligible roster and all timesheets in the selected period. Weekly submission coverage counts each eligible worker once, independently of the review filter.
+
 Updated 2026-11-24. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
+
+Managed-service reporting supports a read-only comparison of a retained monthly margin percentage with a user-entered threshold (WOS-RPT-004). Finance can also page through the latest visible engagement margins for a month, including engagements with no retained version. An unavailable percentage stays unavailable. A buyer can adopt a standing managed-service margin threshold through a governed engagement amendment. Automated margin alerts remain pending.
+
+## Release evidence
+
+WOS-OPS-001 pins the Node and PostgreSQL image indexes verified in CI. Refreshing either input requires a reviewed digest update and a successful release build.
+
+WOS-OPS-008 links the tested container to its source revision, portable archive, checksums and runtime software inventory. Buyer custody, release tag, signing decisions and Gate D acceptance remain open.
 
 ## Delivery priorities
 

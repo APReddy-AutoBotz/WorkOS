@@ -1,5 +1,52 @@
 # WorkOS Release and Operations Runbook
 
+## Interpreting forecast allocation pressure
+
+For each checkpoint, count the eligible workers and multiply by 100 to obtain capacity in allocation percentage points. Compare this with active allocations for those workers on active or proposed projects in term that day. The project indicator counts in-term projects below 100 allocated points at the final checkpoint. Diagnosing an actual staffing shortage requires the project's demand evidence. A zero eligible roster leaves pressure unavailable. Reverting the reporting change requires no migration.
+
+## Reconciling a forecast period
+
+Use the source and horizon end dates displayed on the compatibility forecast or retained in the CSV. The existing UTC month-overflow rule applies each offset to the original source date. For example, one and two months from 31 January 2026 give 3 March and 31 March. The exact checkpoint labels distinguish those observations. Refresh the report if its period could not be confirmed. Reverting this presentation change requires no data migration.
+
+## Checking missing utilization logs
+
+Select the reporting month, then open **Review workers without logs**. Each listed worker is eligible in the scoped report roster and has no timesheet of any status in that period. For a displayed week, coverage counts distinct eligible workers with a non-draft log divided by the eligible roster. Historical results use the compatibility report roster. A reporting period with a different historical workforce requires dated workforce evidence. Reverting this presentation change requires no data migration.
+
+## Interpreting compatibility actual utilization
+
+For an approved timesheet, compare billable hours with the configured expected weekly hours. A measured zero is valid. For an unavailable result, check approval status and weekly capacity before using the value in a comparison. The global CSV preserves the same distinction. Weekly reconciliation requires a comparable plan for every approved worker before displaying a gap. Use the governed report when effective available capacity is required. Reverting the presentation change requires no data migration.
+
+## Updating deployment image pins
+
+The Dockerfile selects one Node/Alpine image index for both build and runtime. The Compose database and CI service select the same PostgreSQL image index. Record the official multi-platform digest and supported buyer architectures when refreshing a pin. Apply a PostgreSQL digest update to both files in one PR and retain the successful migration, restore, startup and container checks. For a major PostgreSQL upgrade, follow a separate data conversion and recovery plan. Reverting a Git pin alone does not downgrade an existing database.
+
+## Verifying the tested container
+
+Download the `tested-image-<commit>-<attempt>` artifact from a successful WorkOS CI run and unpack it in an empty directory. For buyer handover select the accepted main or release commit. A pull request build identifies the tested merge revision, which can differ from the branch head. Compare `source-commit.txt` with the selected revision.
+
+On a host with Docker and GNU coreutils, run the following commands in the extracted directory. Stop if any verification fails.
+
+```bash
+set -e
+sha256sum --check SHA256SUMS
+docker load --input image.tar.gz
+image_id=$(cat image-id.txt)
+test "$(docker image inspect --format '{{.Id}}' "$image_id")" = "$image_id"
+test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id")" = "$(cat source-commit.txt)"
+```
+
+The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
+
+## Maintaining a standing margin threshold
+
+In Commercial Amendments select the managed-service engagement and a newer contract version adopted by its parent. Enter the threshold, effective date, reason and approval reference. Review the before and after terms, confirm, and verify the saved version in protected history. Clear an existing threshold to disable it through a subsequent amendment. Roll back the setting with a later effective amendment so the prior approval remains auditable. No schema migration is required.
+
+## Reviewing managed-service margins
+
+In Commercial Drafting, open the engagement list and select the portfolio month and threshold. Review all pages. A missing retained version requires the authorized reviewer to inspect and retain the individual engagement month. A missing percentage requires checking its revenue denominator and source coverage. After correcting evidence, retain a new version and rerun the report. Verify the report with the buyer's intended financial role and legal entity. A change in role or worker visibility can remove engagements from the result.
+
+This read-only report adds no migration. Reverting its application release preserves the individual engagement snapshots.
+
 ## WOS03 integration verification
 
 Run `node scripts/scan-bootstrap.mjs --self-test` as a required gate. It scans the candidate and checks adversarial fixtures; passing dependency audit alone does not satisfy it. Test credentials must remain ephemeral or explicitly approved placeholders. Keep the validation runner on Ubuntu24.04 while using the current Playwright lock; Ubuntu26.04 browser installation failed before tests in run43557067008. Changing the runner or browser version requires fresh browser acceptance.
