@@ -2,6 +2,21 @@
 
 The [launch acceptance checkpoint](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint) lists the weight of each open workstream and the evidence still required for release.
 
+## Launch work by accountable role
+
+Reviewed against commercial main `774f6f53351b8e8976b67c63d13cd6c9e616af6d` on 24 November. Each row names the evidence to take to the existing programme issue. These are release priorities. Each issue retains its complete acceptance criteria.
+
+| Issue | Evidence to reuse | Next action and exit condition | Accountable role |
+| --- | --- | --- | --- |
+| [WOS-01 #3](https://github.com/APReddy-AutoBotz/WorkOS/issues/3) | Corrected baseline, controller reauthorization and merged bootstrap #16 | Match the pinned source, manifest/checksums, clean-runtime scan and exact-head review to the open checklist. Identify any missing receipt before repeating an import check. | Engineering release lead |
+| [WOS-03 #5](https://github.com/APReddy-AutoBotz/WorkOS/issues/5) | API modules, migration runner, container and hosted validation on main | Map the API, audit and upgrade-path criteria to their merged checks. Measure the progress-document CI change in #358 when it reaches main. | Platform engineering |
+| [WOS-04 #6](https://github.com/APReddy-AutoBotz/WorkOS/issues/6) | Governed engagement and assignment versions, daily/weekly capture, approved-work reconciliation | Reconcile the required work modes and engagement models with existing role journeys. Carry forward uncovered scenarios that affect a required user action. | Product engineering |
+| [WOS-05 #7](https://github.com/APReddy-AutoBotz/WorkOS/issues/7) | Staged decisions, delegated approval, financial lock and audited reopen | Verify which source types enforce delegation scope, locking, and terminal decisions across supported entry points. Fix specific gaps and reference the existing negatives for covered paths. | Approval workflow owner |
+| [WOS-06 #8](https://github.com/APReddy-AutoBotz/WorkOS/issues/8) | Existing signed fixed-fee statements, approved expense budgets, retained billing and correction records | Reconcile independently evidenced non-labor actuals into fixed-fee margin. Trace provider and CSV paths through control totals, corrections and period locks. Submit independent PR-012 engineering evidence to the product owner for Gate C. | Commercial engineering and finance owner |
+| [WOS-07 #9](https://github.com/APReddy-AutoBotz/WorkOS/issues/9) | Standing managed-service thresholds, retained monthly margins, mandatory PO and retainer in-app delivery | Deliver governed monthly margin breach notices with historical terms, recipient scope and retry evidence. Verify outstanding reporting and adapter criteria against the existing contracts. | Reporting and integration engineering |
+| [WOS-08 #10](https://github.com/APReddy-AutoBotz/WorkOS/issues/10) | Security acceptance ledger, production identity checks, Standard profile and PostgreSQL restore rehearsal | Reconcile outstanding findings against the selected candidate. Record environment-specific recovery timings, provider configuration and alert ownership with the buyer. | Security and operations leads |
+| [WOS-09 #11](https://github.com/APReddy-AutoBotz/WorkOS/issues/11) | Checksummed image archive and buyer handover checklist | Prepare identity, data reconciliation and role-UAT owners while development proceeds. Record the candidate digest, environment results and buyer decision for Gate D. | Release lead and buyer owner |
+
 The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.
 
 Forecast checkpoints and roll-offs use the UTC source date returned by the report. The chart labels individual checkpoint dates and the audited CSV includes the source and horizon end dates.
