@@ -141,6 +141,7 @@ const expected = [
   '114_wos07_managed_margin_thresholds',
   '115_wos07_engagement_margin_notice_policy',
   '116_wos07_month_end_margin_breaches',
+  '117_wos06_invoice_provider_delivery',
 ];
 
 export function expectedMigrationsFrom(first) {
