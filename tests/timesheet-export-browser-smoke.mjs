@@ -187,6 +187,28 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
      assert.equal(empty.status,200);
      assert.deepEqual(empty.body,[]);
      await pool.query('update employees set reporting_manager_id=$1 where id=$2',[leadWorker,f.ownerId]);
+     // A reporting-line change after preview invalidates only the affected decision.
+     const secondWorker = 'synthetic-second-direct-report';
+     await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id,reporting_manager_id)
+       values($1,$1,'Second direct report','second-report@example.test','Consultant','Delivery','US','director-commercial','Active',$2,$3,$4)`,
+       [secondWorker,f.organizationId,f.legalEntityId,leadWorker]);
+     const second = await request('/api/timesheets',{method:'POST',body:{employee_id:secondWorker,week_ending:today,status:'Submitted',
+       entries:[{work_type:'Client Misc Task',client_name:'Synthetic client',work_date:today,hours:1,remark:'Synthetic second report',billable:false}]}});
+     assert.equal(second.status,200,JSON.stringify(second.body));
+     await teamPage.reload();
+     await teamPage.getByRole('button',{name:'Bulk Approve',exact:true}).click();
+     const selection = teamPage.getByRole('region',{name:'Bulk approval preview'});
+     await selection.getByText('Approve 2 submitted timesheets from the selected filters?').waitFor();
+     await pool.query('update employees set reporting_manager_id=null where id=$1',[f.ownerId]);
+     const denied = teamPage.waitForResponse(r => new URL(r.url()).pathname===decisionPath && r.request().method()==='PATCH');
+     await selection.getByRole('button',{name:'Confirm bulk approval'}).click();
+     assert.equal((await denied).status(),403);
+     await teamPage.getByText('Bulk review complete. 1 of 2 timesheets currently approved.').waitFor();
+     await teamPage.getByText('View individual outcomes').click();
+     await teamPage.getByText('Timesheet outside current view · Unavailable · Approval denied').waitFor();
+     assert.deepEqual((await pool.query('select id,status from timesheets where id=any($1::uuid[]) order by status',
+       [[saved.body.id,second.body.id]])).rows,[{id:second.body.id,status:'Approved'},{id:saved.body.id,status:'Submitted'}]);
+     await pool.query('update employees set reporting_manager_id=$1 where id=$2',[leadWorker,f.ownerId]);
      await pool.query("update role_permissions set enabled=false where role_name='TeamLead' and permission_key='timesheets.approve'");
      assert.equal((await request(historyPath,{identity:lead})).status,403);
    } finally { await leadContext.close(); }
