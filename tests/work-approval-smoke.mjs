@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { validWorkApprovalPolicy, approvalState, approvalRecipients, approvalEventIdentity, renderApprovalTemplate } from '../shared/work-approval.mjs';
 const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'], stages = ids.map(userId => ({ userId, role: 'Admin' })), templates = ['approval.action_required', 'approval.rejected_or_correction_required', 'approval.completed'].map(key => ({ key, subject: 'Work {{sourceRef}}', body: '{{workerCode}} {{stageNumber}} {{decisionReason}}' })), definition = { entityType: 'Timesheet', workerIds: ['synthetic-worker'], stages, locale: 'en-GB', templates, completionInApp: true };
 assert(validWorkApprovalPolicy(definition));
+for (const stageDueMinutes of [0, 1.5, '90', null, 2147483648])
+    assert.equal(validWorkApprovalPolicy({...definition, stageDueMinutes}), false);
 assert(validWorkApprovalPolicy({ ...definition, workerIds: [] }), 'explicit empty future selection retires adoption without changing existing instances');
 for (const patch of [{ stages: [] }, { stages: [{ ...stages[0], userId: 'caller' }] }, { workerIds: ['b', 'a'] }, { workerIds: ['a', 'a'] }, { locale: '' }, { templates: [...templates.slice(0, 2), templates[0]] }, { templates: templates.map((t, i) => i ? t : { ...t, body: '{{email}}' }) }, { completionInApp: undefined }, { entityType: 'InvoiceBatch' }, { recipients: ids }])
     assert(!validWorkApprovalPolicy({ ...definition, ...patch }));

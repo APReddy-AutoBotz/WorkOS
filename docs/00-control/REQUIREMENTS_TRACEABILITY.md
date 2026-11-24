@@ -828,3 +828,7 @@ WOS-OPS-007 covers the progress-document CI path in `.github/workflows/workos-ci
 
 
 WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment and migration 115 for managed-service recipient-policy authority. The existing service margin API journey exercises policy authorization, current recipients, replay and immutable history. Migration 116 retains month-end breaches and enforces the complete recipient set on dispatch. The existing service-effort acceptance exercises failed delivery, concurrent replay, current-scope denial and recipient acknowledgement through the inbox.
+
+### Governed work approval deadlines
+
+WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Approval reminder and escalation delivery remain open.
