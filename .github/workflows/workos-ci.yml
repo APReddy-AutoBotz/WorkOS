@@ -390,6 +390,7 @@ jobs:
           node tests/invoice-export-notification-config-api-smoke.mjs
           node tests/invoice-export-notification-journey-browser-smoke.mjs
           node tests/invoice-export-notification-journey-postgres-smoke.mjs
+          node tests/invoice-export-notification-journey-postgres-smoke.mjs --provider
           node tests/invoice-export-notification-postgres-smoke.mjs
           node tests/invoice-export-notification-ui-browser-smoke.mjs
           node tests/invoice-export-notification-upgrade-postgres-smoke.mjs
