@@ -1,5 +1,18 @@
 # WorkOS implementation status
 
+## Launch acceptance checkpoint
+
+On 24 November 2026, two of the ten programme tracking issues were closed as completed. WOS-00 carries 8% and WOS-02 carries 10%. Together they account for **18% of the programme weight**. The remaining **82% belongs to open workstreams**, including engineering already merged into the product. This measures formal workstream closure. Estimating the engineering effort remaining requires a breakdown of the outstanding work inside each open stream. [Programme weights](PROGRAM_CHARTER.md#10-weighted-programme-plan) · [Blueprint acceptance](https://github.com/APReddy-AutoBotz/WorkOS/issues/2) · [Organization and setup](https://github.com/APReddy-AutoBotz/WorkOS/issues/4)
+
+| Open workstreams | Weight | What remains to verify for launch |
+|---|---:|---|
+| Source and branding, platform | 20% | Reconcile source, branding and platform acceptance records with the merged implementation. |
+| Work capture, approvals | 24% | Close the outstanding capture, approval and period-policy criteria across roles. |
+| Commercial, reporting and integrations | 26% | Reconcile commercial controls and totals, complete outstanding risk reporting and delivery, and obtain Gate C acceptance. |
+| Security and operations, buyer handover | 12% | Dispose of outstanding findings, verify the selected release and recovery on buyer infrastructure, complete role UAT and record Gate D. |
+
+The buyer handover template contains 44 unchecked items across eight areas. Record buyer decisions against a named release and artifact before declaring handover complete. [Release criteria](../04-quality/RELEASE_ACCEPTANCE_CRITERIA.md) · [Buyer checklist](../05-delivery/BUYER_HANDOVER_CHECKLIST.md)
+
 ## Utilization evidence
 
 Forecast pressure and project allocation indicators now use the same dated eligible workforce and project population. A checkpoint without capacity cannot generate a hiring assessment.

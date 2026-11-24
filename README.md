@@ -12,7 +12,7 @@ Forecast checkpoints and roll-offs use the UTC source date returned by the repor
 
 The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage. The missing-worker list uses the scoped eligible roster and all timesheets in the selected period. Weekly submission coverage counts each eligible worker once, independently of the review filter.
 
-For verified delivery status, remaining launch work and buyer acceptance gates, see the [implementation status](docs/00-control/IMPLEMENTATION_STATUS.md).
+For verified delivery status, remaining launch work and buyer acceptance gates, see the [weighted programme checkpoint](docs/00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint).
 
 > **Naming note:** WorkOS is the temporary product working name. Runtime branding and buyer terminology must remain configuration-driven.
 
