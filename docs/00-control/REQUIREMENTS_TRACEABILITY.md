@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-RPT-002 and WOS-RPT-006. The compatibility forecast reader validates the report horizon and source date. The forecast browser journey checks complete checkpoint dates, UTC roll-off boundaries and dated export rows with a different local clock.
+
 WOS-RPT-002 and WOS-RPT-005. The actual utilization browser journey verifies missing-worker drilldown, paging, status-filter independence and weekly coverage restricted to distinct eligible workers.
 
 WOS-RPT-002 and WOS-RPT-006. The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage. The actual utilization browser journey verifies both rendered and exported results.

@@ -1,5 +1,9 @@
 # WorkOS Release and Operations Runbook
 
+## Reconciling a forecast period
+
+Use the source and horizon end dates displayed on the compatibility forecast or retained in the CSV. The existing UTC month-overflow rule applies each offset to the original source date. For example, one and two months from 31 January 2026 give 3 March and 31 March. The exact checkpoint labels distinguish those observations. Refresh the report if its period could not be confirmed. Reverting this presentation change requires no data migration.
+
 ## Checking missing utilization logs
 
 Select the reporting month, then open **Review workers without logs**. Each listed worker is eligible in the scoped report roster and has no timesheet of any status in that period. For a displayed week, coverage counts distinct eligible workers with a non-draft log divided by the eligible roster. Historical results use the compatibility report roster. A reporting period with a different historical workforce requires dated workforce evidence. Reverting this presentation change requires no data migration.
