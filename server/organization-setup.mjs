@@ -93,7 +93,25 @@ const isSupportContact = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || ((
   try { return new URL(value).protocol === 'https:'; } catch { return false; }
 })();
 const currency = z.string().trim().regex(/^[A-Z]{3}$/);
+const assetPath = z.string().trim().max(512).regex(/^\/(?!\/)[a-zA-Z0-9_./-]+\.(?:svg|png|jpe?g|webp|gif|ico)$/i)
+  .refine(value => !value.split('/').some(part => part === '.' || part === '..'));
+// Both accent roles appear beside white text or backgrounds in the workspace.
+const brandColor = z.string().regex(/^#[\da-fA-F]{6}$/).refine(hex => {
+  const channels = [1,3,5].map(start => {
+    const value = parseInt(hex.slice(start,start+2),16)/255;
+    return value <= 0.04045 ? value/12.92 : ((value+0.055)/1.055)**2.4;
+  });
+  const luminance = 0.2126*channels[0]+0.7152*channels[1]+0.0722*channels[2];
+  return 1.05/(luminance+0.05) >= 4.5;
+},'Use an accent with at least 4.5:1 contrast against white.');
+const brandingSchema = z.object({
+  logoUrl:assetPath.optional(), compactMarkUrl:assetPath.optional(), faviconUrl:assetPath.optional(),
+  primaryAccent:brandColor.optional(), secondaryAccent:brandColor.optional(),
+  emailBrand:z.string().trim().min(1).max(150).optional(),
+  reportBrand:z.string().trim().min(1).max(150).optional(),
+}).strict();
 const organizationProfileSchema = z.object({
+  branding:brandingSchema.optional(),
   name:z.string().trim().min(1).max(150), legalName:z.string().trim().min(1).max(200),
   productDisplayName:z.string().trim().min(1).max(150), supportContact:z.string().trim().min(3).max(254).refine(isSupportContact),
   defaultLocale:z.string().trim().min(2).max(35).refine(isLocale), defaultTimeZone:z.string().trim().min(1).max(80).refine(isTimeZone),
@@ -112,7 +130,7 @@ const legalEntitySchema = z.object({
 export const validateOrganizationProfile = input => organizationProfileSchema.safeParse(input);
 export const validateLegalEntity = input => legalEntitySchema.safeParse(input);
 const profileSelect = `select o.id organization_id,o.code organization_code,p.name organization_name,
-  p.legal_name,p.product_display_name,p.support_contact,p.default_locale,p.default_time_zone,p.base_currency,
+  p.legal_name,p.product_display_name,p.branding,p.support_contact,p.default_locale,p.default_time_zone,p.base_currency,
   p.fiscal_year_start,p.default_week_start,p.effective_from::text profile_effective_from,p.effective_to::text profile_effective_to
   from organizations o join organization_profile_versions p on p.organization_id=o.id`;
 const legalSelect = `select le.id,le.organization_id,le.code,p.legal_name name,p.country_code,p.status,le.effective_from,p.authority_effective_to effective_to,
@@ -131,6 +149,18 @@ export const registerOrganizationSetupRoutes = ({
   mountPaths = ['/api/organization-setup'],
 }) => {
   const router = Router();
+  router.get('/login-brand', asyncHandler(async (_req,res) => {
+    res.set('Cache-Control','no-store');
+    const organizationId=process.env.PUBLIC_BRANDING_ORGANIZATION_ID;
+    if (!organizationId) return res.json({});
+    const {rows}=await pool.query(`select product_display_name as "productName",
+      branding->>'logoUrl' as "logoUrl",branding->>'faviconUrl' as "faviconUrl",
+      branding->>'primaryAccent' as "primaryAccent",branding->>'secondaryAccent' as "secondaryAccent"
+      from organization_profile_versions where organization_id=$1 and (now() at time zone 'UTC')::date
+      between effective_from and coalesce(effective_to,'infinity'::date) order by effective_from desc limit 1`,
+      [organizationId]);
+    return res.json(rows[0] ?? {});
+  }));
   router.use(requireDatabase, requireAuth, asyncHandler(async (req, res, next) => {
     try {
       const asOf=z.string().date().safeParse(req.query.asOf === undefined ? new Date().toISOString().slice(0,10) : req.query.asOf);
@@ -181,10 +211,12 @@ export const registerOrganizationSetupRoutes = ({
       if(latest&&parsed.data.effectiveFrom>dateOnly(latest.effective_from)&&latest.effective_to==null)
         await client.query('update organization_profile_versions set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
       const values=[req.organizationScope.organizationId,parsed.data.name,parsed.data.legalName,parsed.data.productDisplayName,parsed.data.supportContact,
-        parsed.data.defaultLocale,parsed.data.defaultTimeZone,parsed.data.baseCurrency,parsed.data.fiscalYearStart,parsed.data.defaultWeekStart,parsed.data.effectiveFrom,req.user.sub];
+        parsed.data.defaultLocale,parsed.data.defaultTimeZone,parsed.data.baseCurrency,parsed.data.fiscalYearStart,parsed.data.defaultWeekStart,parsed.data.effectiveFrom,req.user.sub,
+        JSON.stringify(parsed.data.branding ?? latest?.branding ?? {})];
       const result=await client.query(`insert into organization_profile_versions(organization_id,name,legal_name,product_display_name,support_contact,
-        default_locale,default_time_zone,base_currency,fiscal_year_start,default_week_start,effective_from,created_by)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) on conflict(organization_id,effective_from) do update set
+        default_locale,default_time_zone,base_currency,fiscal_year_start,default_week_start,effective_from,created_by,branding)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) on conflict(organization_id,effective_from) do update set
+        branding=excluded.branding,
         name=excluded.name,legal_name=excluded.legal_name,product_display_name=excluded.product_display_name,support_contact=excluded.support_contact,
         default_locale=excluded.default_locale,default_time_zone=excluded.default_time_zone,base_currency=excluded.base_currency,
         fiscal_year_start=excluded.fiscal_year_start,default_week_start=excluded.default_week_start returning *`,values);
@@ -504,7 +536,15 @@ export const registerOrganizationSetupRoutes = ({
   router.get('/terminology', asyncHandler(async (req,res) => {
     const asOf=req.setupAsOf;
     const result=await pool.query(`select terms,effective_from::text effective_from,effective_to::text effective_to from terminology_versions t where t.organization_id=$1 and ${asOfPredicate('t','$2')} order by t.effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
-    const row=result.rows[0];res.json(row?{...row,terms:normalizeTerminologyTerms(row.terms)}:{terms:{}});
+    const row=result.rows[0];
+    const termsResponse=row?{...row,terms:normalizeTerminologyTerms(row.terms)}:{terms:{}};
+    if(req.query.includeBrand !== '1') return res.json(termsResponse);
+    const brand=await pool.query(`select name as "organizationName",product_display_name as "productName",branding
+      from organization_profile_versions p where organization_id=$1 and ${asOfPredicate('p','$2')}
+      order by effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
+    const profile=brand.rows[0];
+    res.json({...termsResponse,...(profile ? {brand:{...brandingSchema.parse(profile.branding),
+      productName:profile.productName,organizationName:profile.organizationName}} : {})});
   }));
   router.post('/terminology',requirePermission('settings.manage'),asyncHandler(async(req,res)=>{
     const parsed=validateTerminology(req.body);if(!parsed.success)return res.status(400).json({error:parsed.error.flatten(),code:'TERMINOLOGY_INVALID'});
