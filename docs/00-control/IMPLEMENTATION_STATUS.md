@@ -13,6 +13,8 @@ For planning, a rough range is **55-75% delivered**, or **25-45% remaining**. Th
 | Commercial, reporting and integrations | 26% | Reconcile commercial controls and totals, complete outstanding risk reporting and delivery, and obtain Gate C acceptance. |
 | Security and operations, buyer handover | 12% | Dispose of outstanding findings, verify the selected release and recovery on buyer infrastructure, complete role UAT and record Gate D. |
 
+The product owner confirmed on 24 November 2026 that the pilot buyer is awaiting assignment. The first delivery milestone is an engineering release candidate with a named revision, artifact digest and completed product-owned evidence. Buyer-specific configuration, UAT and Gate D sign-off follow assignment.
+
 The buyer handover template contains 44 unchecked items across eight areas. Record buyer decisions against a named release and artifact before declaring handover complete. [Release criteria](../04-quality/RELEASE_ACCEPTANCE_CRITERIA.md) · [Buyer checklist](../05-delivery/BUYER_HANDOVER_CHECKLIST.md)
 
 ## Utilization evidence
