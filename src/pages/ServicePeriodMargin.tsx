@@ -2,11 +2,12 @@ import {useState} from 'react';
 import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
 export function ServicePeriodMargin({context,engagement,today}:{context:CommercialDraftingContext;engagement:string;today:string}) {
+  const [threshold,setThreshold]=useState('');
   const [month,setMonth]=useState(today.slice(0,7));
   const [state,setState]=useState<Awaited<ReturnType<typeof commercialDraftingService.serviceMargin>>|null>(null);
   const [message,setMessage]=useState('');
   const [pending,setPending]=useState(false);
-  const inspect=async(options:{version?:number;expectedToken?:string}={})=>{
+  const inspect=async(options:{version?:number;expectedToken?:string;thresholdPercent?:string}={})=>{
     setPending(true);setMessage('');setState(null);
     try {
       const result=await commercialDraftingService.serviceMargin(engagement,month+'-01',context,options);
@@ -28,6 +29,14 @@ export function ServicePeriodMargin({context,engagement,today}:{context:Commerci
         <p>Approved hours {state.hours} · Verified entries {state.verified} of {state.entries} · Pending receipts {state.pending} · Missing costs {state.missing} · Unreconciled receipts {state.unresolved}</p>
         {state.version===null && context.canRetainServiceMargin && (state.entries+state.receipts+state.billingEvents)>0 &&
           <button type="button" onClick={()=>void inspect({expectedToken:state.token})}>Retain month</button>}
+        {state.version!==null && <div>
+          <label>Comparison threshold (%)<input value={threshold} onChange={event=>setThreshold(event.target.value)} /></label>
+          <button type="button" disabled={!/^-?(?:0|[1-9]\d{0,11})(?:\.\d{1,2})?$/.test(threshold)}
+            onClick={()=>void inspect({version:state.version!,thresholdPercent:threshold})}>Compare retained margin</button>
+          {state.comparison && state.comparison.thresholdPercent===threshold && <p role="status">
+            {state.comparison.status==='Unavailable'?'Margin percentage unavailable':state.comparison.status==='Below'?'Below threshold':'At or above threshold'} · {threshold}%
+          </p>}
+        </div>}
         {(state.version??state.latestVersion+1)>1 && <button type="button" onClick={()=>void inspect({version:(state.version??state.latestVersion+1)-1})}>Previous retained version</button>}
       </>}
     </fieldset>

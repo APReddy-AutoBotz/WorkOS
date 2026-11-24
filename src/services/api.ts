@@ -2701,8 +2701,8 @@ const buildLocalUtilizationReport = async (mode: UtilizationReportMode, months =
     adminService.getSettings(),
   ]);
   const sourceDate = todayIso();
-  const targetDate = new Date(`${sourceDate}T00:00:00`);
-  if (mode === 'forecast') targetDate.setMonth(targetDate.getMonth() + months);
+  const targetDate = new Date(`${sourceDate}T00:00:00Z`);
+  if (mode === 'forecast') targetDate.setUTCMonth(targetDate.getUTCMonth() + months);
   const asOfDate = targetDate.toISOString().slice(0, 10);
   const includeProposed = mode === 'forecast';
   const rows = getUtilizationEligibleEmployees(employees, allocations, projects, asOfDate, includeProposed).map(employee => ({

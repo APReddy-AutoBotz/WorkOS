@@ -4,11 +4,11 @@ const baseUrl = process.env.WORKOS_BROWSER_BASE_URL || 'http://127.0.0.1:4177';
 const browser = await chromium.launch({headless: true,
   ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {}),
 });
-const page = await browser.newPage({viewport: {width: 1100, height: 900}, acceptDownloads: true, timezoneId: 'UTC'});
+const page = await browser.newPage({viewport: {width: 1100, height: 900}, acceptDownloads: true, timezoneId: 'America/Los_Angeles'});
 page.setDefaultTimeout(10000);
 // Freeze Date, not timers/rAF: chart animation and asynchronous UI still run.
 // Native setMonth is deliberately retained: Jan31 +1/+2/+3 = Mar3/Mar31/May1.
-await page.clock.setFixedTime(new Date('2026-01-31T12:34:56.000Z'));
+await page.clock.setFixedTime(new Date('2026-02-14T12:34:56.000Z'));
 const pageErrors = [], unexpectedApi = [], unexpectedRemote = [], downloads = [];
 let deliberateExports = 0;
 let measurementProbeReported = false;
@@ -93,6 +93,8 @@ const allocations = tag => [
   allocation(tag, 'roll-second', 'inactive', 'completed', 12, '2026-01-01', '2026-02-01'),
   allocation(tag, 'roll-fourth', 'excluded', 'completed', 14, '2026-01-01', '2026-02-03'),
 ];
+const dates=['2026-01-31','2026-03-03','2026-03-31','2026-05-01'];
+const forecastPeriod=horizon=>({mode:'forecast',sourceDate:dates[0],asOfDate:dates[horizon],forecastMonths:horizon});
 const bundle = (tag = 'baseline', horizon = 3, options = {}) => {
   const people = employees(tag);
   return {
@@ -100,9 +102,7 @@ const bundle = (tag = 'baseline', horizon = 3, options = {}) => {
     projects: options.empty ? [] : projects(tag),
     allocations: options.empty ? [] : allocations(tag),
     settings: {...settings, ...options.settings},
-    // Deliberately unrelated metadata: the unchanged browser checkpoints are
-    // based on local today, not on report metadata or new query parameters.
-    forecast: {mode: 'forecast', asOfDate: '2024-04-26', sourceDate: '2024-04-26', horizonMonths: horizon, rows: options.empty ? [] : [
+    forecast: {...forecastPeriod(horizon), rows: options.empty ? [] : [
       {...people[0], plannedUtilization: 80}, {...people[1], plannedUtilization: ({1: 33.3, 2: 44.4, 3: 0})[horizon]},
       {...people[3], plannedUtilization: 0}, {...people[4], plannedUtilization: 75},
       {...people[5], plannedUtilization: 110}, {...people[6], plannedUtilization: 110.1},
@@ -155,15 +155,15 @@ const expectNoNewEffects = async (before, reason) => {
   assert.deepEqual(await effects(), before, reason);
 };
 const expectNoMeasurements = async () => {
-  for (const title of ['Projected Avg. Util.', 'Capacity Gaps', 'Overload Risk', 'Future Bench', 'Demand Pressure', 'Active Horizon',
+  for (const title of ['Projected Avg. Util.', 'Projects below 100% allocation', 'Overload Risk', 'Future Bench', 'Demand Pressure', 'Active Horizon',
     'Capacity vs Demand Horizon', 'Horizon Risk Analysis', 'Resource Forecast Ledger', 'Hiring Trigger', 'Future Bench Pool']) {
     assert.equal(await page.getByText(title, {exact: true}).count(), 0, 'nonready reads hide all report figures and conclusions');
   }
   assert.equal(await table().count(), 0);
   assert.equal(await page.locator('.recharts-surface').count(), 0);
-  for (const text of [sectionEmptyText, filteredEmptyText, 'No demand', 'No roll-offs inside this horizon',
-    'No future bench cases in this horizon', 'No immediate hiring trigger detected from committed allocation dates.',
-    'Committed demand remains within active capacity for the selected horizon.', '0', '0%']) {
+  for (const text of [sectionEmptyText, filteredEmptyText, 'Capacity unavailable', 'No roll-offs inside this horizon',
+    'No future bench cases in this horizon', 'Measured allocation pressure is within the 90% review threshold.',
+    'Allocated demand is within capacity at the measured checkpoints.', '0', '0%']) {
     const {matches, probes} = await page.getByText(text, {exact: true}).evaluateAll((elements, numeric) => {
       const matches = [], probes = [];
       for (const element of elements) {
@@ -188,7 +188,7 @@ const verifyNoMeasurementsGuard = async () => {
   // Prove the narrow probe exception does not weaken numeric/conclusion checks,
   // including hidden app content and unrelated offscreen body instrumentation.
   for (const [text, parent, hidden, id] of [['0', 'root', false], ['0%', 'root', false], ['0', 'root', true],
-    ['No demand', 'root', false], ['0', 'body', true], ['0', 'root', true, 'recharts_measurement_span'],
+    ['Capacity unavailable', 'root', false], ['0', 'body', true], ['0', 'root', true, 'recharts_measurement_span'],
     ['0', 'body', false, 'recharts_measurement_span']]) {
     await page.evaluate(({text, parent, hidden, id}) => {
       const sentinel = document.createElement('span');
@@ -294,8 +294,8 @@ const expectEmpty = async () => {
   assert.equal(await csvButton().isEnabled(), true);
 };
 const expectKpis = async horizon => {
-  const values = [['Projected Avg. Util.', ({1: '53.2%', 2: '57.7%', 3: '52.8%'})[horizon]], ['Capacity Gaps', horizon === 1 ? '4' : '5'],
-    ['Overload Risk', '2'], ['Future Bench', horizon === 3 ? '3' : '2'], ['Demand Pressure', 'Moderate'], ['Active Horizon', `${horizon} ${horizon === 1 ? 'Month' : 'Months'}`]];
+  const values = [['Projected Avg. Util.', ({1: '53.2%', 2: '57.7%', 3: '52.8%'})[horizon]], ['Projects below 100% allocation', ({1:'2',2:'4',3:'3'})[horizon]],
+    ['Overload Risk', '2'], ['Future Bench', horizon === 3 ? '3' : '2'], ['Demand Pressure', 'Within threshold'], ['Active Horizon', `${horizon} ${horizon === 1 ? 'Month' : 'Months'}`]];
   for (const [title, value] of values) assert.equal(await kpi(title).getByText(value, {exact: true}).count(), 1, `unchanged ${title}`);
 };
 const captureExports = label => page.evaluate(label => {
@@ -324,7 +324,7 @@ const expectedCsv = (tag, horizon = 3, chosen = golden) => {
       currentPlannedUtilization: person.plannedUtilization, averageFutureLoad: row.average[horizon],
       peakForecastLoad: Math.max(...row.loads.slice(0, horizon + 1)), horizonLoad: row.horizon[horizon], status: row.status,
       ...Object.fromEntries(checkpoints.slice(0, horizon + 1).map((point, index) => [point, row.loads[index]])),
-      horizon: `${horizon} ${horizon === 1 ? 'Month' : 'Months'}`};
+      horizon: `${horizon} ${horizon === 1 ? 'Month' : 'Months'}`,sourceDate:dates[0],horizonDate:dates[horizon]};
   }));
 };
 const expectExport = async (name, tag, horizon = 3, chosen = golden, expectedContent) => {
@@ -355,7 +355,7 @@ const expectExport = async (name, tag, horizon = 3, chosen = golden, expectedCon
 const expectChart = async horizon => {
   const root = chart();
   const selector = '.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-value';
-  const labels = ['Jan 2026', 'Mar 2026', 'Mar 2026', 'May 2026'].slice(0, horizon + 1);
+  const labels = dates.slice(0, horizon + 1);
   await root.locator(mainChartSvg).waitFor();
   const handle = await root.elementHandle();
   try {
@@ -366,7 +366,7 @@ const expectChart = async horizon => {
     assert.deepEqual(await root.locator(selector).evaluateAll(ticks => ticks.map(tick => {
       const lines = [...tick.querySelectorAll('tspan')];
       return lines.length ? lines.map(line => line.textContent).join(' ') : tick.textContent;
-    })), labels, 'chart keeps native month overflow, inclusive endpoints and repeated March checkpoint labels');
+    })), labels, 'chart keeps native month overflow, inclusive endpoints and distinct dated March checkpoints');
     // Recharts rectangle height ratios prove the actual plotted values, using
     // capacity as scale. Wait out animation before asserting exact ratios.
     const expected = [800, 900, 900, 900].slice(0, horizon + 1);
@@ -404,9 +404,9 @@ try {
   await expectSuccess('baseline');
   await expectKpis(3);
   await expectChart(3);
-  await page.getByText('66% in Jan 2026', {exact: true}).waitFor();
-  await page.getByText('Committed demand remains within active capacity for the selected horizon.', {exact: true}).waitFor();
-  await page.getByText('No immediate hiring trigger detected from committed allocation dates.', {exact: true}).waitFor();
+  await page.getByText('65.6% in 2026-01-31', {exact: true}).waitFor();
+  await page.getByText('Allocated demand is within capacity at the measured checkpoints.', {exact: true}).waitFor();
+  await page.getByText('Measured allocation pressure is within the 90% review threshold.', {exact: true}).waitFor();
   const rolloffs = riskGroup('Upcoming Roll-offs (3 Months)');
   const rollNames = ['director', 'inactive', 'admin', 'excluded', 'hr'].map(suffix => `Synthetic baseline-${suffix}`);
   await page.waitForFunction(names => {
@@ -551,24 +551,25 @@ try {
   const bench = await refresh(lastId(omitted));
   const benchPeople = [10, 70, 30, 60, 20, 50, 40].map((load, index) => employee('bench', String(index), load));
   await settle(bench, {employees: benchPeople, projects: [], allocations: [], settings,
-    forecast: {rows: benchPeople.map(person => ({...person, plannedUtilization: 0}))}});
+    forecast: {...forecastPeriod(3),rows: benchPeople.map(person => ({...person, plannedUtilization: 0}))}});
   await expectReady();
   await page.waitForFunction(() => document.querySelectorAll('table tbody tr a').length === 7);
   assert.deepEqual(await riskGroup('Future Bench Watch').getByRole('link').locator('p:first-child').allTextContents(),
     [1, 3, 5, 6, 2].map(index => `Synthetic bench-${index}`), 'bench watch uses descending current planned load and top five');
   assert.equal(await kpi('Future Bench').getByText('7', {exact: true}).count(), 1);
+  await page.getByText('0% in 2026-01-31',{exact:true}).waitFor();
   await page.getByRole('status').getByText('No roll-offs inside this horizon', {exact: true}).waitFor();
   assert.equal(await chart().locator(mainChartSvg).count(), 1, 'successful zero demand keeps its real chart');
 
   const pressure = await refresh(lastId(bench));
   const pressurePerson = employee('pressure', 'only', 125);
   await settle(pressure, {employees: [pressurePerson], projects: [project('pressure', 'steady')], settings,
-    allocations: [allocation('pressure', 'steady', 'only', 'steady', 125)], forecast: {rows: [{...pressurePerson, plannedUtilization: 125}]}});
+    allocations: [allocation('pressure', 'steady', 'only', 'steady', 125)], forecast: {...forecastPeriod(3),rows: [{...pressurePerson, plannedUtilization: 125}]}});
   await expectReady();
-  await page.getByText('125% in Jan 2026', {exact: true}).waitFor();
-  await page.getByText('Demand exceeds active capacity by 0 FTE at the peak point.', {exact: true}).waitFor();
+  await page.getByText('125% in 2026-01-31', {exact: true}).waitFor();
+  await page.getByText('Allocations exceed capacity by 25 allocation percentage points at this checkpoint.', {exact: true}).waitFor();
   await page.getByText('Peak demand reaches 125% of active capacity; review hiring or project start dates.', {exact: true}).waitFor();
-  assert.equal(await kpi('Demand Pressure').getByText('High', {exact: true}).count(), 1);
+  assert.equal(await kpi('Demand Pressure').getByText('Above threshold', {exact: true}).count(), 1);
   await page.getByRole('status').getByText('No future bench cases in this horizon', {exact: true}).waitFor();
 
   // Resource-ledger empty does not suppress independent active-allocation
@@ -577,6 +578,9 @@ try {
   const sectionData = bundle('section-empty');
   sectionData.employees = sectionData.employees.slice(10);
   await settle(sectionEmpty, sectionData);
+  await page.getByText('Capacity unavailable',{exact:true}).waitFor();
+  await page.getByText('No staffing signal is available without eligible capacity.',{exact:true}).waitFor();
+  assert.equal(await kpi('Demand Pressure').getByText('Unavailable',{exact:true}).count(),1);
   await expectReady();
   await table().getByRole('status').getByText(sectionEmptyText, {exact: true}).waitFor();
   assert.equal(await page.getByText(emptyText, {exact: true}).count(), 0);
@@ -590,14 +594,14 @@ try {
   const boundaryPerson = employee('boundary', 'excluded', 0, {utilizationEligible: false});
   const boundaryData = {employees: [boundaryPerson], projects: [project('boundary', 'completed', 'Completed')], settings,
     allocations: ['2026-01-30', '2026-01-31', '2026-03-03', '2026-03-04', '2026-05-01', '2026-05-02'].map((date, index) =>
-      allocation('boundary', String(index), 'excluded', 'completed', index + 1, '2026-01-01', date)), forecast: {rows: []}};
+      allocation('boundary', String(index), 'excluded', 'completed', index + 1, '2026-01-01', date)), forecast: {...forecastPeriod(3),rows: []}};
   await settle(boundary, boundaryData);
   await expectReady();
   await table().getByRole('status').getByText(sectionEmptyText, {exact: true}).waitFor();
   assert.deepEqual(await riskGroup('Upcoming Roll-offs (3 Months)').locator('span').allTextContents(), ['31 Jan', '03 Mar', '04 Mar', '01 May']);
   await button('1 Month').click();
   const boundaryOne = await pending(lastId(boundary), 1);
-  await settle(boundaryOne, boundaryData);
+  await settle(boundaryOne, {...boundaryData,forecast:{...forecastPeriod(1),rows:[]}});
   await expectReady();
   await page.waitForFunction(() => [...document.querySelectorAll('h6')].some(h => h.textContent === 'Upcoming Roll-offs (1 Month)'));
   assert.deepEqual(await riskGroup('Upcoming Roll-offs (1 Month)').locator('span').allTextContents(), ['31 Jan', '03 Mar']);

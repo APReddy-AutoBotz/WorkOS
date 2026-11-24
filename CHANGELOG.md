@@ -4,6 +4,22 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+- Corrected forecast pressure and project allocation indicators for out-of-term projects and missing capacity.
+
+- Anchored forecast charts, roll-off dates and exports to the report source date.
+
+- Added a scoped missing-worker drilldown and corrected weekly submission coverage under status filters.
+
+- Corrected actual utilization displays and CSVs when approval or capacity evidence is missing.
+
+- Pinned the tested Node and PostgreSQL image indexes for reproducible container inputs.
+
+- Managed-service engagements can adopt an effective-dated standing margin threshold through the commercial amendment workflow.
+
+- CI retains the tested container with its source revision, image ID, checksums and runtime inventories for buyer verification.
+
+- Finance can compare retained managed-service margins across engagements for a selected month and distinguish missing evidence from margins below an entered threshold.
+
 ### Added
 
 - WOS-00 programme charter, authoritative requirements and architecture baseline.

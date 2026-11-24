@@ -80,6 +80,6 @@ const assignmentMigration = await readFile(new URL('../server/migrations/044_wos
 assert.match(assignmentMigration, /policy_version='assignment-work-date\/1'/);
 console.log('Capture policy decimal, effective-date, increment, comment, scope, all-header daily/Weekly aggregate, replacement, staged preview, neutral and locked-period vectors passed.');
 const dockerfile=await readFile(new URL('../Dockerfile',import.meta.url),'utf8');
-const [buildStage,runtimeStage]=dockerfile.split('FROM node:22-alpine AS runtime');
+const [buildStage,runtimeStage]=dockerfile.split('FROM base AS runtime');
 assert.match(buildStage,/COPY shared \.\/shared[\s\S]*RUN npm run build/,'frontend container stage includes the shared decimal module');
 assert.match(runtimeStage,/COPY server \.\/server[\s\S]*COPY shared \.\/shared[\s\S]*CMD/,'runtime stage includes the shared module used by work policy');

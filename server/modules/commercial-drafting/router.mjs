@@ -10,7 +10,7 @@ import {fixedFeeRiskDeliveryStatus,fixedFeeRiskPolicy,riskConfigureGrant,riskPol
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 import {fixedFeeCosts,fixedCostCommand,fixedCostGrant} from './fixed-fee-cost.mjs';
 import {effortMonth,fixedFeeEffort} from './fixed-fee-effort.mjs';
-import {marginQuery,marginCommand,marginRecordGrant,servicePeriodMargin} from './service-period-margin.mjs';
+import {portfolioMargins,portfolioQuery,marginQuery,marginCommand,marginRecordGrant,servicePeriodMargin} from './service-period-margin.mjs';
 import {reconcileServiceEffort} from './service-effort-reconciliation.mjs';
 import {effortCostCommand,effortCostGrant,serviceEffortCost} from './service-effort-cost.mjs';
 import {reviewCommand as serviceReviewCommand,reviewGrant as serviceReviewGrant,reviewServiceUnits} from './service-unit-review.mjs';
@@ -179,6 +179,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   const fixedCostPath='/engagements/:id/fixed-fee-costs';
   router.get(fixedCostPath,handle(effortMonth,false,(c,r,i)=>fixedFeeCosts(c,r,i,buildEmployeeScopeWhere)));
   router.post(fixedCostPath,handle(fixedCostCommand,true,(c,r,i)=>fixedFeeCosts(c,r,i,buildEmployeeScopeWhere,audit),fixedCostGrant));
+  router.get('/service-margin-portfolio',handle(portfolioQuery,false,(c,r,q)=>portfolioMargins(c,r,q,buildEmployeeScopeWhere)));
   const marginPath='/engagements/:id/service-period-margin';
   router.get(marginPath,handle(marginQuery,false,(c,r,input)=>servicePeriodMargin(c,r,input,buildEmployeeScopeWhere)));
   router.post(marginPath,handle(marginCommand,true,(c,r,input)=>servicePeriodMargin(c,r,input,buildEmployeeScopeWhere,audit),marginRecordGrant,true));
