@@ -35,7 +35,7 @@ test "$(docker image inspect --format '{{.Id}}' "$image_id")" = "$image_id"
 test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id")" = "$(cat source-commit.txt)"
 ```
 
-The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
+The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. The checksummed npm-third-party-notices.json preserves installed npm notice files, including vendored notices and root README licence sections. Review any packagesWithoutRootNotice entries and separately reconcile frontend assets, base-image components and source-distribution terms before buyer handover. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
 
 ## Maintaining a standing margin threshold
 
