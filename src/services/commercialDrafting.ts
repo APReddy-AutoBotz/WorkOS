@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigureRetainerRisk?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigureRetainerRisk?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canConfigureMarginRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -118,6 +118,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
       ['employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
     canConfigureRetainerRisk:permissions.includes('commercial.retainer_risk.configure'),
     canConfigurePoRiskNotices:permissions.includes('commercial.po_risk.configure'),
+    canConfigureMarginRiskNotices:permissions.includes('commercial.service_margin_risk.configure'),
     canConfigureRiskNotices:permissions.includes('commercial.fixed_fee_risk.configure'),
     canSignFixedFeeStatement:permissions.includes('commercial.fixed_fee_statement.sign'),
     canApproveFixedFeeTransition:permissions.includes('commercial.fixed_fee_transition.approve'),
@@ -501,12 +502,13 @@ export const commercialDraftingService = {
   riskNoticePolicy(eng:string,context:CommercialDraftingContext,command?:{
     expectedVersion:number;effectiveFrom:string;locale:string;title:string;body:string;reason:string;
     manager:{userId:string;role:string};finance:{userId:string;role:string}
-  }) {
-    if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
+  },model:'fixed_fee'|'managed_service'='fixed_fee') {
+    const current=assertCommercialDraftingContext(context);
+    if (!(model==='managed_service'?current.canConfigureMarginRiskNotices:current.canConfigureRiskNotices)) throw invalid();
     const recipient=z.object({userId:z.string().uuid(),role:z.string().min(1)}).strict();
     const policy=z.object({id:z.string().uuid(),version:z.number().int().positive(),effectiveFrom:z.string().date(),
       manager:recipient,finance:recipient,locale:z.string(),title:z.string(),body:z.string()}).strict();
-    return request(context,command?'POST':'GET',serviceEngPath(eng)+'/fixed-fee-risk-notice-policy',command,
+    return request(context,command?'POST':'GET',serviceEngPath(eng)+(model==='managed_service'?'/service-margin-risk-notice-policy':'/fixed-fee-risk-notice-policy'),command,
       value=>z.object({engagementId:z.literal(eng),latest:policy.nullable()}).strict().parse(value),false);
   },
   fixedFeeStatement(eng:string,through:string,frequency:'Weekly'|'Monthly'|'Fiscal',context:CommercialDraftingContext,

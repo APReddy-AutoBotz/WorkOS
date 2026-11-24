@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import {commercialFixture} from './commercial-drafting-test.mjs';
 
-export async function verifyRiskNoticePolicy({pool,request,identities,engagement,today}) {
-  const path='/engagements/'+engagement.id+'/fixed-fee-risk-notice-policy';
-  const grant='commercial.fixed_fee_risk.configure';
+export async function verifyRiskNoticePolicy({pool,request,identities,engagement,today,model='fixed_fee'}) {
+  const path='/engagements/'+engagement.id+(model==='fixed_fee'?'/fixed-fee-risk-notice-policy':'/service-margin-risk-notice-policy');
+  const grant=model==='fixed_fee'?'commercial.fixed_fee_risk.configure':'commercial.service_margin_risk.configure';
   const named={userId:identities.reader.id,role:'Employee'};
   const command={expectedVersion:0,effectiveFrom:today,manager:named,finance:named,locale:'en',
     title:'Review the engagement warning',body:'A budget threshold needs review.',reason:'Synthetic buyer routing decision'};
@@ -23,8 +23,8 @@ export async function verifyRiskNoticePolicy({pool,request,identities,engagement
   assert.equal((await post({...command,body:'A different instruction.'})).status,409);
   assert.equal((await request(path,{identity:identities.reader})).status,403);
   const recipients=async()=> (await pool.query(
-    'select * from fixed_fee_risk_recipients($1,$2,$3,$4,$5,$4,$5) order by reason',
-    [commercialFixture.organizationId,commercialFixture.legalEntityId,engagement.id,named.userId,named.role])).rows;
+    'select * from engagement_risk_recipients($6,$1,$2,$3,$4,$5,$4,$5) order by reason',
+    [commercialFixture.organizationId,commercialFixture.legalEntityId,engagement.id,named.userId,named.role,model])).rows;
   assert.deepEqual(await recipients(),['commercial_manager','engagement_owner','finance_billing_owner'].map(reason=>({user_id:named.userId,reason})));
   await pool.query('update user_organization_scopes set active=false where user_id=$1 and legal_entity_id=$2',[named.userId,commercialFixture.legalEntityId]);
   assert.deepEqual(await recipients(),[]);

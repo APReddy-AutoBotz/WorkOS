@@ -821,3 +821,5 @@ WOS-COM-009 and WOS-RPT-004. The commercial drafting PostgreSQL/browser journey 
 ### Retainer risk delivery evidence
 
 WOS-COM-009, WOS-RPT-004, WOS-INT-002 and WOS-INT-005. Migration 113 retains explicit assignments, observed quantities, notice policies, attempts and acknowledgements. The retainer PostgreSQL journey verifies concurrent overconsumption detection. The commercial browser journey exercises expiry before first use, a shared version, duplicate roles, missing assignments, retry and access revocation.
+
+WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment and migration 115 for managed-service recipient-policy authority. The existing service margin API journey exercises policy authorization, current recipients, replay and immutable history. Mandatory breach delivery requires its own retained event and complete receipt evidence.

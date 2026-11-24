@@ -1,7 +1,9 @@
+import {verifyRiskNoticePolicy} from './fixed-fee-risk-policy-journey.mjs';
 import assert from 'node:assert/strict';
 import {adoptHourlyRate} from './adopt-hourly-rate.mjs';
 
 export async function verifyServiceMargin({pool,request,post,capture,review,receipt,accepted,base,identities,today,end,engagement,workerId}) {
+  await verifyRiskNoticePolicy({pool,request,identities,engagement,today,model:'managed_service'});
   const path='/engagements/'+engagement.id+'/service-period-margin';
   const monthStart=today.slice(0,7)+'-01',query=path+'?monthStart='+monthStart;
   const read=async(suffix='')=>{const r=await request(query+suffix);assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};

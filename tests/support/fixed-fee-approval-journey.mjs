@@ -1,3 +1,4 @@
+import {expectedMigrationsFrom} from './expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {verifyFixedFeeExport} from './fixed-fee-export-journey.mjs';
 import {runMigrations} from '../../server/migrate.mjs';
@@ -85,7 +86,7 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
           join invoice_draft_occupancies o on o.line_id=l.id where a.id=$1`,[delivery.a.id])).rows;
         const before=await evidence();
         assert.equal(before.length,1);
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['098_wos06_fixed_fee_credit_corrections','099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies','108_wos06_fixed_fee_risk_delivery','109_wos06_risk_delivery_attempt_history','110_wos06_po_commitment_balance_evidence','111_wos06_po_risk_engagement_assignments','112_wos06_purchase_order_risk_events','113_wos06_retainer_risk_routing']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('098_wos06_fixed_fee_credit_corrections'));
         assert.deepEqual(await evidence(),before);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
         return {...delivery,batchId:batch.id,lineId:line.line.id,policyId:policy.id};
