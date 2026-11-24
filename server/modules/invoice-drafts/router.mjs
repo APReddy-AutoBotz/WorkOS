@@ -5,7 +5,7 @@ import {
   reconciliationCsv,
   portfolioReconciliationCsv,
 } from './reconciliation-csv.mjs';
-import { readFixedFeeBillingBalances } from './fixed-fee-balances.mjs';
+import { readFixedFeeBillingBalances, readFixedFeeBillingControls } from './fixed-fee-balances.mjs';
 import { readBillingReconciliation, readPortfolioReconciliation } from './reconciliation.mjs';
 import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { Router } from 'express';
@@ -428,11 +428,11 @@ export const createInvoiceDraftRouter = (o) => {
     return { ...value, reportToken: reconciliationToken(reportScope(r), value) };
   };
   router.get('/reconciliation/fixed-fee', handle(false, async (c,r) => {
-    const {engagementId} = parse(z.object({engagementId:id}).strict(),r.query);
+    const {engagementId,controls} = parse(z.object({engagementId:id,controls:z.literal('1').optional()}).strict(),r.query);
     await authorize(c,r,'view',['commercial.invoice_export.view','commercial.fixed_fee_eligibility.issue']);
     const balances = await readFixedFeeBillingBalances(c,scope(r),engagementId);
     if (!balances) throw fail(404,'BILLING_REPORT_SOURCE','Scoped fixed-fee engagement unavailable.');
-    return {...await envelope(c,r), engagementId, balances};
+    return {...await envelope(c,r), engagementId, balances, ...(controls ? {controls:await readFixedFeeBillingControls(c,scope(r),engagementId)} : {})};
   }));
   const portfolioFilters = {
     start: z.string().date(),

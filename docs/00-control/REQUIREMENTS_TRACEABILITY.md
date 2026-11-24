@@ -836,3 +836,7 @@ WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute dead
 ### Scoped bulk timesheet approval
 
 WOS-APR-008. The timesheet bulk action requires a configured approval role and the existing approval permission. The timesheet export and approval browser journey changes one reporting relationship after a Team Lead previews two rows, then verifies the HTTP denial and both stored outcomes.
+
+### Fixed-fee engagement billing controls
+
+WOS-RPT-007 and WOS-INV-008. Fixed-fee engagement reconciliation compares pinned installments and approved line reversals with eligibility events, register items, current occupancy, invoice lines, exports and confirmations. The commercial drafting browser journey follows a charge and credit through those states.
