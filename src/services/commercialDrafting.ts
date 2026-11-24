@@ -446,15 +446,16 @@ export const commercialDraftingService = {
       return data;
     },false);
   },
-  riskDeliveryStatus(eng:string,context:CommercialDraftingContext) {
-    if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
+  riskDeliveryStatus(eng:string,context:CommercialDraftingContext,model:'fixed_fee'|'managed_service'='fixed_fee') {
+    const monthly=model==='managed_service',current=assertCommercialDraftingContext(context);
+    if (!(monthly?current.canConfigureMarginRiskNotices:current.canConfigureRiskNotices)) throw invalid();
     const scan=z.object({scanDate:z.string().date(),scanFailure:z.literal('EVALUATION_UNAVAILABLE').nullable()}).strict();
     const history=z.object({attempt:z.number().int().positive(),at:z.string().datetime({offset:true}),
       failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable()}).strict();
-    const event=z.object({history:z.array(history).max(5),metric:z.enum(['effort','laborCost']),through:z.string().date(),sourceAmendmentId:z.string(),
+    const event=z.object({history:z.array(history).max(5),metric:monthly?z.literal('margin'):z.enum(['effort','laborCost']),...(monthly?{marginVersionId:z.string().uuid()}:{}),through:z.string().date(),sourceAmendmentId:z.string(),
       attempts:z.number().int().nonnegative(),failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable(),
       deliveredAt:z.string().datetime().nullable(),nextAttempt:z.string().datetime().nullable()}).strict();
-    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk-deliveries',undefined,
+    return request(context,'GET',serviceEngPath(eng)+(monthly?'/service-margin-risk-deliveries':'/fixed-fee-risk-deliveries'),undefined,
       value=>z.object({engagementId:z.literal(eng),scan:scan.nullable(),events:z.array(event).max(20)}).strict().parse(value),false);
   },
   retainerDeliveryStatus(versionId:string,context:CommercialDraftingContext) {
@@ -687,9 +688,10 @@ export const commercialDraftingService = {
         status:z.enum(['Unretained','Unavailable','Below','AtOrAbove'])}).strict()).max(50)
     }).strict().parse(value),false);
   },
-  serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string;thresholdPercent?:string}={}) {
+  serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string;thresholdPercent?:string;monthEnd?:boolean}={}) {
     if (!assertCommercialDraftingContext(context).canViewServiceMargin || (options.expectedToken && !context.canRetainServiceMargin)) throw invalid();
     const query=new URLSearchParams({monthStart});
+    if (options.monthEnd) query.set('monthEnd','true');
     if (options.version) query.set('version',String(options.version));
     if (options.thresholdPercent!==undefined) query.set('thresholdPercent',options.thresholdPercent);
     const path=serviceEngPath(eng)+'/service-period-margin';
@@ -700,7 +702,7 @@ export const commercialDraftingService = {
           !/^[A-Z]{3}$/.test(text(p.currency)) || !/^[0-9a-f]{64}$/.test(text(r.token))) throw invalid();
         const exact=(v:unknown)=>{const s=text(v);if (!/^-?(0|[1-9]\d*)(\.\d+)?$/.test(s)) throw invalid();return s;};
         return {version:r.version===null?null:integer(r.version,1),latestVersion:integer(r.latestVersion),token:text(r.token),
-          monthEndAssessment:options.version===undefined?null:z.object({
+          monthEndAssessment:!options.monthEnd?null:z.object({
             monthEnd:z.string().date(),thresholdPercent:z.string().nullable(),
             status:z.enum(['Open','Inactive','Unavailable','Below','AtOrAbove'])
           }).strict().parse(r.monthEndAssessment),

@@ -43,7 +43,7 @@ export async function verifyServiceMargin({pool,request,post,capture,review,rece
     ['4.5',3,'100','55.5552','44.4448','44.44']);
   const [a,b]=await Promise.all([retain(preview.token),retain(preview.token)]);
   assert.equal(a.version,2);assert.deepEqual(a,b);
-  const retained=await read('&version=1');
+  const retained=await read('&version=1&monthEnd=true');
   assert.deepEqual(retained.report,v1.report);
   assert.equal(retained.monthEndAssessment.status,'Open');
   assert.equal(retained.monthEndAssessment.thresholdPercent,null);

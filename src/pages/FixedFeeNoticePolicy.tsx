@@ -21,7 +21,7 @@ export function EngagementNoticePolicy({context,engagement,today,model='fixed_fe
   async function inspectDelivery() {
     setBusy(true);setMessage('');setDelivery(null);
     try {
-      const result=await commercialDraftingService.riskDeliveryStatus(engagement,context);
+      const result=await commercialDraftingService.riskDeliveryStatus(engagement,context,model);
       if (isCommercialDraftingContextCurrent(context)) setDelivery(result);
     } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not load warning delivery status.');}
     finally {setBusy(false);}
@@ -44,12 +44,12 @@ export function EngagementNoticePolicy({context,engagement,today,model='fixed_fe
   }
   return <section aria-label={recipients}>
     <button type="button" disabled={busy} onClick={()=>void read()}>{model==='fixed_fee'?'Review budget warning recipients':'Review monthly margin alert recipients'}</button>
-    {model==='fixed_fee' && <button type="button" disabled={busy} onClick={()=>void inspectDelivery()}>Check warning deliveries</button>}
+    <button type="button" disabled={busy} onClick={()=>void inspectDelivery()}>Check warning deliveries</button>
     {delivery && <div aria-label="Warning delivery status">
       {delivery.scan?.scanFailure && <p>Budget evaluation needs a retry.</p>}
-      {delivery.events.length===0 && <p>No recorded budget alerts.</p>}
-      {delivery.events.map(row=><div key={row.metric+row.sourceAmendmentId}><p>
-        {row.metric==='effort'?'Delivery hours':'Labor cost'} · {row.through} · {row.deliveredAt?'Delivered '+row.deliveredAt:
+      {delivery.events.length===0 && <p>No recorded alerts.</p>}
+      {delivery.events.map(row=><div key={row.marginVersionId??row.metric+row.sourceAmendmentId}><p>
+        {row.metric==='margin'?'Monthly margin':row.metric==='effort'?'Delivery hours':'Labor cost'} · {row.through} · {row.deliveredAt?'Delivered '+row.deliveredAt:
           row.failure==='RECIPIENTS_UNAVAILABLE'?'Check recipient access':row.failure==='POLICY_UNAVAILABLE'?'Configure a notice policy':
           row.failure?'Delivery needs a retry':'Pending'}{row.nextAttempt && ' · Next attempt '+row.nextAttempt}
       </p>{row.history.length>0 && <details><summary>Recent delivery attempts ({row.attempts} total)</summary>

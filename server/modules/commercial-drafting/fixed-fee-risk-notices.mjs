@@ -64,15 +64,20 @@ async function requireRiskConfigurationScope(client,req,model='fixed_fee') {
   return scope;
 }
 
-export async function fixedFeeRiskDeliveryStatus(client,req) {
-  const scope=await requireRiskConfigurationScope(client,req);
-  const {rows:[scan]}=await client.query(`select through_date::text as "scanDate",failure as "scanFailure"
+export async function engagementRiskDeliveryStatus(client,req,model='fixed_fee') {
+  const scope=await requireRiskConfigurationScope(client,req,model);
+  const monthly=model==='managed_service';
+  const source=monthly?'service_margin_risk':'fixed_fee_risk';
+  const fields=monthly?`'margin' as metric,(e.month_start+interval '1 month' - interval '1 day')::date::text as "through",
+    e.amendment_id as "sourceAmendmentId",e.id as "marginVersionId"`:
+    `e.metric,e.through_date::text as "through",e.source_id as "sourceAmendmentId"`;
+  const {rows:[scan]}=monthly?{rows:[]}:await client.query(`select through_date::text as "scanDate",failure as "scanFailure"
     from fixed_fee_risk_scans where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3`,scope);
-  const {rows:events}=await client.query(`select e.metric,e.through_date::text as "through",e.source_id as "sourceAmendmentId",
+  const {rows:events}=await client.query(`select ${fields},
     d.attempts,d.failure,d.delivered_at as "deliveredAt",case when d.delivered_at is null then d.next_attempt end as "nextAttempt",
     (select coalesce(jsonb_agg(jsonb_build_object('attempt',h.attempt,'at',h.attempted_at,'failure',h.failure) order by h.attempt desc),'[]'::jsonb)
-       from (select attempt,attempted_at,failure from fixed_fee_risk_delivery_attempts where event_id=e.id order by attempt desc limit 5) h) history
-    from fixed_fee_risk_events e join fixed_fee_risk_dispatch d on d.event_id=e.id
-    where e.organization_id=$1 and e.legal_entity_id=$2 and e.engagement_id=$3 order by e.created_at desc,e.id limit 20`,scope);
+       from (select attempt,attempted_at,failure from ${source}_delivery_attempts where event_id=e.id order by attempt desc limit 5) h) history
+    from ${source}_events e join ${source}_dispatch d on d.event_id=e.id
+    where e.organization_id=$1 and e.legal_entity_id=$2 and e.engagement_id=$3 order by ${monthly?'e.observed_at':'e.created_at'} desc,e.id limit 20`,scope);
   return {engagementId:req.params.id,scan:scan??null,events};
 }

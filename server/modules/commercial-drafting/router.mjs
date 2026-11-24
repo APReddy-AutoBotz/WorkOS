@@ -6,7 +6,7 @@ import {fixedFeeElapsed,elapsedGrant,elapsedQuery,elapsedCommand} from './fixed-
 import {approveFixedFeeTransition,transitionCommand,transitionGrant} from './fixed-fee-transition.mjs';
 import {fixedFeeForecast,forecastCommand,forecastQuery,forecastGrant} from './fixed-fee-forecast.mjs';
 import {purchaseOrderDeliveryStatus,purchaseOrderRiskPolicy,poRiskConfigureGrant} from './purchase-order-risk-policy.mjs';
-import {fixedFeeRiskDeliveryStatus,engagementRiskPolicy,marginRiskConfigureGrant,riskConfigureGrant,riskPolicyCommand} from './fixed-fee-risk-notices.mjs';
+import {engagementRiskDeliveryStatus,engagementRiskPolicy,marginRiskConfigureGrant,riskConfigureGrant,riskPolicyCommand} from './fixed-fee-risk-notices.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 import {fixedFeeCosts,fixedCostCommand,fixedCostGrant} from './fixed-fee-cost.mjs';
 import {effortMonth,fixedFeeEffort} from './fixed-fee-effort.mjs';
@@ -160,10 +160,11 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.get('/engagements/:id/service-unit-evidence/:evidenceId/reconciliation',handle(workspaceQuerySchema,false,(c,r)=>reconcileServiceEffort(c,r,buildEmployeeScopeWhere)));
   router.get('/engagements/:id/fixed-fee-effort',handle(effortMonth,false,(c,r,input)=>fixedFeeEffort(c,r,input,buildEmployeeScopeWhere)));
   const riskPolicyPath='/engagements/:id/fixed-fee-risk-notice-policy';
-  router.get('/engagements/:id/fixed-fee-risk-deliveries',handle(workspaceQuerySchema,false,(c,r)=>fixedFeeRiskDeliveryStatus(c,r)));
+  router.get('/engagements/:id/fixed-fee-risk-deliveries',handle(workspaceQuerySchema,false,(c,r)=>engagementRiskDeliveryStatus(c,r)));
   router.get(riskPolicyPath,handle(workspaceQuerySchema,false,(c,r)=>engagementRiskPolicy(c,r)));
   router.post(riskPolicyPath,handle(riskPolicyCommand,true,(c,r,i)=>engagementRiskPolicy(c,r,i,audit),riskConfigureGrant));
   const marginPolicyPath='/engagements/:id/service-margin-risk-notice-policy';
+  router.get('/engagements/:id/service-margin-risk-deliveries',handle(workspaceQuerySchema,false,(c,r)=>engagementRiskDeliveryStatus(c,r,'managed_service')));
   router.get(marginPolicyPath,handle(workspaceQuerySchema,false,(c,r)=>engagementRiskPolicy(c,r,undefined,undefined,'managed_service')));
   router.post(marginPolicyPath,handle(riskPolicyCommand,true,(c,r,i)=>engagementRiskPolicy(c,r,i,audit,'managed_service'),marginRiskConfigureGrant));
   router.get('/engagements/:id/fixed-fee-risk',handle(riskQuery,false,(c,r,i)=>fixedFeeRisk(c,r,i,buildEmployeeScopeWhere)));
