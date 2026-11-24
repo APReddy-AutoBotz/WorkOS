@@ -256,7 +256,12 @@ export const CommercialDraftingWorkspace = () => {
   const draftEngagements=[...invoiceEngagements,...(workspace?.engagements.filter(e=>(e.model==='managed_service' && state.context?.canIssueServiceUnits) || (e.model==='fixed_fee' && state.context?.canIssueInstallment) || (e.model==='retainer' && hasRatePermission('commercial.retainer_eligibility.issue')))??[])];
   const periodOnlyEngagements=(workspace?.engagements??[]).filter(e=>e.model==='managed_service' && state.context?.canIssuePeriods && !state.context?.canIssueServiceUnits);
   const deliveryChoices=[...draftEngagements,...periodOnlyEngagements].map(e=>({id:e.id,label:e.name}));
-  const installmentChoices = draftEngagements.filter(e=>e.model==='fixed_fee').map(e=>({id:e.id,label:e.name,fixedFee:true}));
+  const installmentChoices = draftEngagements.filter(e=>e.model==='fixed_fee').map(e=>({id:e.id,label:e.name,source:'fixed-fee' as const}));
+  const retainerChoices=draftEngagements.filter(e=>e.model==='retainer').map(e=>({id:e.id,label:e.name,source:'retainer' as const}));
+  const serviceChoices=(workspace?.engagements ?? []).filter(e=>e.model==='managed_service').flatMap(e=>[
+    ...(state.context?.canIssueServiceUnits?[{id:e.id,selectionId:'units/'+e.id,label:e.name+' (units)',source:'service-units' as const}]:[]),
+    ...(state.context?.canIssuePeriods?[{id:e.id,selectionId:'periods/'+e.id,label:e.name+' (periods)',source:'service-periods' as const}]:[]),
+  ]);
   const invoiceChoices = invoiceEngagements.map(e => ({ id: e.id, label: e.name }));
   const draft = workspace && state.context?.canManage ? state.draft : undefined;
   const detail = workspace ? state.detail : undefined;
@@ -296,7 +301,7 @@ export const CommercialDraftingWorkspace = () => {
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceNoticeConfiguration choices={deliveryChoices}/>
       <InvoiceBillingConfirmation choices={deliveryChoices}/>
-      <BillingReconciliation choices={[...invoiceChoices,...installmentChoices]}/>
+      <BillingReconciliation choices={[...invoiceChoices,...installmentChoices,...retainerChoices,...serviceChoices]}/>
       <MilestoneBillingWorkspace choices={workspace.engagements.filter(x=>x.model==='milestone').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceActionNotice choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceCsvWorkspace choices={deliveryChoices}/>

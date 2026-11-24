@@ -825,3 +825,7 @@ WOS-COM-009, WOS-RPT-004, WOS-INT-002 and WOS-INT-005. Migration 113 retains exp
 ### Fixed-fee engagement billing controls
 
 WOS-RPT-007 and WOS-INV-008. Fixed-fee engagement reconciliation compares pinned installments and approved line reversals with eligibility events, register items, current occupancy, invoice lines, exports and confirmations. The commercial drafting browser journey follows a charge and credit through those states.
+
+### Retainer and managed-service billing reconciliation
+
+WOS-RPT-007 and WOS-INV-008. The commercial drafting journey follows registered retainer periods, managed-service periods and managed-service units alongside their full-line credits. The engagement report compares pinned source amounts, current and released lines, exports and confirmations using the source's existing billing permission.

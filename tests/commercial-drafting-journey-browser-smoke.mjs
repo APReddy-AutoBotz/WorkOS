@@ -721,22 +721,30 @@ const verifyCommercialDrafting = async reversalScenario => {
     };
     const verifyCorrection=async({exported,engagementId,ownerKey,batchId,lineId,policyId,original,sourceType,amount,act,reviewerKey,secondKey})=>{
       const {a,receipt,attest,attestationRequest,csv,sendExport,csvDesk,csvBrowser,exportCmd}=exported;
-      const installmentReport='/api/v1/invoice-drafts/reconciliation/fixed-fee?engagementId='+engagementId;
-      const checkInstallmentBalance=async status=>{
-        if (sourceType!=='FIXED_FEE_INSTALLMENT') return;
-        const result=await apiRequest(installmentReport,{identity:finance});
+      const [reportPath,label,option]={
+        FIXED_FEE_INSTALLMENT:['fixed-fee','Fixed-fee',engagementId],
+        RETAINER_PERIOD:['retainer','Retainer',engagementId],
+        MANAGED_SERVICE_PERIOD:['service-periods','Managed-service period','periods/'+engagementId],
+        MANAGED_SERVICE_UNIT:['service-units','Managed-service unit','units/'+engagementId],
+      }[sourceType];
+      const countKey=sourceType==='FIXED_FEE_INSTALLMENT'?'installments':'charges';
+      const chargeReport='/api/v1/invoice-drafts/reconciliation/'+reportPath+'?engagementId='+engagementId;
+      const checkChargeBalance=async status=>{
+        const result=await apiRequest(chargeReport,{identity:finance});
         assert.equal(result.status,200,JSON.stringify(result.body));
-        const charge={currency:a.currency,status:'Confirmed',installments:1,credits:0,gross:amount,adjustments:'0',net:amount};
-        const credit={currency:a.currency,status,installments:0,credits:1,gross:'0',adjustments:'-'+amount,net:'-'+amount};
+        const charge={currency:a.currency,status:'Confirmed',[countKey]:1,credits:0,gross:amount,adjustments:'0',net:amount};
+        const credit={currency:a.currency,status,[countKey]:0,credits:1,gross:'0',adjustments:'-'+amount,net:'-'+amount};
         const expected=status==='Confirmed'?[{...charge,credits:1,adjustments:'-'+amount,net:'0'}]:status?[credit,charge]:[charge];
         assert.deepEqual(result.body.balances,expected);
-        const details=await apiRequest(installmentReport+'&controls=1',{identity:finance});
+        const details=await apiRequest(chargeReport+'&controls=1',{identity:finance});
         assert.equal(details.status,200,JSON.stringify(details.body));
         assert.deepEqual(details.body.balances,expected);
-        const boundaries=['Source','Eligibility event','Register item','Current occupancy','Current line','Exported line','Confirmed line'];
-        const activeControls=boundaries.map((boundary,index)=>{
-          const includesCredit=Boolean(status) && (index<3 || index<5 && status!=='Available'
-            || index===5 && ['Exported','Confirmed'].includes(status) || status==='Confirmed');
+        const boundaries=['Source','Eligibility event','Register item','Current occupancy','Current line','Batch membership','Exported line','Confirmed line'];
+        const activeControls=boundaries.map(boundary=>{
+          const includesCredit=status==='Confirmed' || Boolean(status) && (
+            ['Source','Eligibility event','Register item'].includes(boundary)
+            || ['Current occupancy','Current line','Batch membership'].includes(boundary) && status!=='Available'
+            || boundary==='Exported line' && status==='Exported');
           const count=includesCredit ? 2 : 1;
           return {currency:a.currency,boundary,expected:count,observed:count,amount:includesCredit ? '0' : amount,exceptions:0};
         });
@@ -744,7 +752,7 @@ const verifyCommercialDrafting = async reversalScenario => {
           currency:a.currency,boundary:'Released historical line',expected:1,observed:1,amount,exceptions:0,
         }]);
       };
-      await checkInstallmentBalance(null);
+      await checkChargeBalance(null);
       const reversalPath=csv+'/batches/'+batchId+'/lines/'+lineId+'/reversal-request';
       const reverse=(path,body)=>apiRequest(reversalPath+path,{method:'POST',identity:finance,body});
       const requestBody={expectedOwnerKey:ownerKey,artifactId:a.id,sha256:a.sha256,inspectedState:'Billed/Confirmed',reason:'Reverse duplicate downstream charge'};
@@ -757,9 +765,9 @@ const verifyCommercialDrafting = async reversalScenario => {
         finally {if (fixed) await pool.query('update role_permissions set enabled=true where role_name=$1 and permission_key=$2',[employee.role,grant]);}
       };
       await assertSourceAccessDenied(reversalPath);
-      if (sourceType==='FIXED_FEE_INSTALLMENT') {
-        await assertSourceAccessDenied(installmentReport);
-        await assertSourceAccessDenied(installmentReport+'&controls=1');
+      {
+        await assertSourceAccessDenied(chargeReport);
+        await assertSourceAccessDenied(chargeReport+'&controls=1');
       }
       await csvDesk.getByLabel('Invoice export engagement').selectOption(engagementId);
       await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
@@ -857,12 +865,12 @@ const verifyCommercialDrafting = async reversalScenario => {
         assert.equal(replayedCredit.replayed,true);
         const credit=replayedCredit.receipt;
         assert.equal(credit.amount,'-'+amount);
-        await checkInstallmentBalance('Available');
+        await checkChargeBalance('Available');
         const reservePath=csv+'/batches/'+batchId+'/correction-drafts';
         const reserveBody={expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),reason:'Reserve the service-period credit',itemIds:[credit.itemId]};
         const reserve=()=>apiRequest(reservePath,{method:'POST',identity:finance,body:reserveBody});
         const reserved=ok(await reserve()).receipt;
-        await checkInstallmentBalance('Reserved');
+        await checkChargeBalance('Reserved');
         assert.equal(reserved.total,credit.amount);
         assert.equal(ok(await reserve(),200).receipt.batchId,reserved.batchId);
         const proof=ok(await apiRequest(reservePath+'/'+reserved.batchId,{identity:finance}),200);
@@ -893,23 +901,23 @@ const verifyCommercialDrafting = async reversalScenario => {
         const creditArtifact=(await acceptedCredit.json()).artifact;
         await csvDesk.getByRole('region',{name:'Verified invoice CSV'}).waitFor();
         assert.equal(creditArtifact.total,credit.amount);
-        await checkInstallmentBalance('Exported');
+        await checkChargeBalance('Exported');
         const creditConfirmation=ok(await attest({...attestationRequest,requestId:crypto.randomUUID(),batchId:reserved.batchId,artifactId:creditArtifact.id,
           artifactSha256:creditArtifact.sha256,total:credit.amount,reference:'Synthetic credit application',reason:'Matched applied service-period credit'})).confirmation;
         if (sourceType==='RETAINER_PERIOD') recoveryEvidence={finance, original:{artifact:a,confirmation:receipt,itemId:original.itemId},
           credit:{artifact:creditArtifact,confirmation:creditConfirmation,itemId:credit.itemId}};
         assert.equal(creditConfirmation.sourceType,'FULL_LINE_REVERSAL');
         assert.equal(creditConfirmation.total,credit.amount);
-        await checkInstallmentBalance('Confirmed');
-        if (sourceType==='FIXED_FEE_INSTALLMENT') {
+        await checkChargeBalance('Confirmed');
+        {
           await csvBrowser.page.reload();
           const report=csvBrowser.page.getByRole('region',{name:'Billing reconciliation'});
-          await report.getByLabel('Reconciliation engagement').selectOption(engagementId);
+          await report.getByLabel('Reconciliation engagement').selectOption(option);
           await report.getByRole('button',{name:'Load billing reconciliation'}).click();
-          const row=report.getByRole('region',{name:'Fixed-fee billing balances'}).getByRole('row').nth(1);
+          const row=report.getByRole('region',{name:label+' billing balances'}).getByRole('row').nth(1);
           await row.waitFor();
           assert.deepEqual(await row.getByRole('cell').allTextContents(),[a.currency,'Confirmed','1','1',amount,'-'+amount,'0']);
-          const controls=report.getByRole('table',{name:'Fixed-fee reconciliation controls by currency'});
+          const controls=report.getByRole('table',{name:label+' reconciliation controls by currency'});
           const confirmed=controls.getByRole('row').filter({hasText:'Confirmed line'});
           assert.deepEqual(await confirmed.getByRole('cell').allTextContents(),[a.currency,'Confirmed line','2','2','0','0']);
         }
