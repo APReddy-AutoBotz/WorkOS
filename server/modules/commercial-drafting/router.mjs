@@ -22,6 +22,7 @@ import {periodDecision,periodReviewGrant,servicePeriodReview} from './service-pe
 import {captureCommand,captureGrant,captureServiceUnits,evidenceQuery,serviceUnitHistory} from './service-unit-evidence.mjs';
 import {retainerRegister,retainerIssueGrant,retainerIssueCommand} from './retainer-eligibility.mjs';
 import {retainerStatement,statementGrant,statementCommand,statementQuery,reviewGrant,reviewCommand} from './retainer-statement.mjs';
+import {retainerRiskQuery,retainerRiskRegister} from './retainer-risk-register.mjs';
 import {getRetainerConsumption} from './retainer-consumption.mjs';
 import {fixedFeeRegister,fixedFeeGrant,installmentCommand} from './fixed-fee-eligibility.mjs';
 import {purchaseOrderRelease,purchaseOrderBalance,purchaseOrderRisks,purchaseOrderRiskQuery,purchaseOrderRiskHistory,purchaseOrderHistoryQuery,releaseSchema} from './purchase-order-release.mjs';
@@ -216,6 +217,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.get('/purchase-orders/:id/risk-assignments',handle(lifecycleQuerySchema,false,(c,r)=>orderAssignments(c,r)));
   router.post('/purchase-orders/:id/risk-assignments',handle(poRiskAssignments,true,(c,r,i)=>orderAssignments(c,r,i,audit),'commercial.purchase_orders.release'));
   router.get('/purchase-orders/:id/risk-history',handle(purchaseOrderHistoryQuery,false,purchaseOrderRiskHistory));
+  router.get('/retainer-capacity-risks',handle(retainerRiskQuery,false,(c,r,q)=>retainerRiskRegister(c,r,buildEmployeeScopeWhere,q)));
   router.get('/purchase-order-risks',handle(purchaseOrderRiskQuery,false,purchaseOrderRisks));
   router.get('/purchase-orders/:id/balance',handle(lifecycleQuerySchema,false,(client,req)=>purchaseOrderBalance(client,req)));
   router.get('/purchase-orders/:id/release',handle(lifecycleQuerySchema,false,(client,req)=>purchaseOrderRelease(client,req,null)));

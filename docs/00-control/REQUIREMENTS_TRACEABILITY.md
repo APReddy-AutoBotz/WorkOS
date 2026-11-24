@@ -813,3 +813,7 @@ WOS-COM-007 and WOS-RPT-004. The commercial amendment browser and fixed-fee Post
 ### Purchase-order alert assignments
 
 WOS-CTR-002 and WOS-COM-013 use migrations 110–112 for opening exposure, commitment balances and threshold evidence. WOS-INT-002 routes mandatory in-app notices through explicit engagement assignments and a versioned policy. WOS-INT-005 is supported by per-order delivery status and immutable attempts. The commercial drafting journey covers unused orders and conflicting assignments. The billing reconciliation journeys exercise two engagement owners, an overlapping named recipient, a current and a populated-upgrade order, retries, inbox acknowledgement and revoked access.
+
+### Retainer capacity risk register
+
+WOS-COM-009 and WOS-RPT-004. The commercial drafting PostgreSQL/browser journey checks activation, expired hours, scoped access and navigation. The register is read-only and adds no migration. Application rollback restores the prior commercial workspace.

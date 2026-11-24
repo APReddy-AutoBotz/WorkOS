@@ -386,6 +386,12 @@ const verifyCommercialDrafting = async reversalScenario => {
     const consumptionPath=`/contracts/${savedRetainer.result.id}/versions/${savedRetainer.result.versions[0].id}/retainer-consumption`;
     for (const key of ['employees.view','reports.view_utilization','commercial.rate_candidates.view','commercial.retainer_statements.prepare']) await pool.query(
       "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
+    const riskRegisterPath='/retainer-capacity-risks';
+    const preActivation=await apiRequest(riskRegisterPath);
+    assert.equal(preActivation.status,200,JSON.stringify(preActivation.body));
+    assert(!preActivation.body.findings.some(row=>row.contractId===savedRetainer.result.id));
+    assert.equal((await apiRequest(riskRegisterPath+'?organizationId=other')).status,400);
+    assert.equal((await apiRequest(riskRegisterPath,{headers:{'x-legal-entity-id':'other-synthetic-entity'}})).status,403);
     await button('Inspect approved retainer hours').click();
     await page.getByText('2020-01-01 through 2020-12-31 · 0 billable hours · 0 non-billable hours',{exact:true}).waitFor();
     await page.getByText(/0 remaining · 0 over capacity/).waitFor();
@@ -522,6 +528,16 @@ const verifyCommercialDrafting = async reversalScenario => {
       } catch(error) {await historyClient.query('rollback');throw error;} finally {historyClient.release();}
     };
     await openHistoricalTerms(savedRetainer.result.id,retainerVersion,[['Contract',savedRetainer.result.id],['Engagement',eng.body.id]]);
+    const capacityRisks=await apiRequest(riskRegisterPath);
+    assert.equal(capacityRisks.status,200,JSON.stringify(capacityRisks.body));
+    assert.deepEqual(capacityRisks.body.findings.filter(row=>row.versionId===retainerVersion),
+      [{contractId:savedRetainer.result.id,number:savedRetainer.result.number,versionId:retainerVersion,version:1,
+        kind:'expiry',startsOn:'2020-01-01',endsOn:'2020-12-31',hours:'40.125'}]);
+    const retainerRisksUi=page.getByRole('group',{name:'Retainer capacity risks'});
+    await retainerRisksUi.getByRole('button',{name:'Check governed retainer versions'}).click();
+    await retainerRisksUi.getByText(/40.125 unused hours expired/).waitFor();
+    const scoped=await apiRequest(riskRegisterPath,{identity:identities.reader});
+    assert.equal(scoped.status,403,JSON.stringify(scoped.body));
     const inspect=await apiRequest(registerPath,{identity:finance});
     assert.equal(inspect.status,200,JSON.stringify(inspect.body));assert.deepEqual(inspect.body.engagements,[{id:eng.body.id,name:eng.body.name}]);
     assert.equal((await issueRetainer({...retainerCommand,engagementId:engagement.result.id})).status,409);
