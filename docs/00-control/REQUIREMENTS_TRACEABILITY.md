@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-RPT-002. The forecast browser journey verifies dated project allocation counts at each horizon, percentage-point excess, measured zero demand and missing capacity.
+
 WOS-RPT-002 and WOS-RPT-006. The compatibility forecast reader validates the report horizon and source date. The forecast browser journey checks complete checkpoint dates, UTC roll-off boundaries and dated export rows with a different local clock.
 
 WOS-RPT-002 and WOS-RPT-005. The actual utilization browser journey verifies missing-worker drilldown, paging, status-filter independence and weekly coverage restricted to distinct eligible workers.

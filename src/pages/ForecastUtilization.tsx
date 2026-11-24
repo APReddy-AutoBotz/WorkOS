@@ -167,28 +167,25 @@ export const ForecastUtilization = () => {
 
   const supplyDemandData = useMemo(() => {
     if (employees.length === 0) return [];
-    const employeeById = new Map<string, Employee>(employees.map(employee => [employee.id, employee]));
-
     return forecastPoints.map(point => {
-      const eligibleEmployees = employees.filter(employee =>
+      const eligibleIds = new Set(employees.filter(employee =>
         isUtilizationEligibleEmployee(employee, allocations, projects, point.iso, true)
-      );
-      const capacity = eligibleEmployees.length * 100;
-      const demandPercent = allocations.filter(a => {
-        const project = projects.find(p => p.id === a.projectId);
-        const employee = employeeById.get(a.employeeId);
-        if (!project || (project.status !== 'Active' && project.status !== 'Proposed')) return false;
-        if (!employee || !isUtilizationEligibleEmployee(employee, allocations, projects, point.iso, true)) return false;
-        return a.status === 'Active' &&
-          isProjectAvailableForPlanning(project, point.iso, point.iso, true) &&
-          overlapsDateRange(a.startDate, a.endDate, point.iso, point.iso);
-      }).reduce((sum, a) => sum + a.percentage, 0);
-
+      ).map(employee => employee.id));
+      const available = projects.filter(project => isProjectAvailableForPlanning(project, point.iso, point.iso, true));
+      const projectLoads = new Map<string, number>(available.map(project => [project.id, 0] as const));
+      let demand = 0;
+      for (const allocation of allocations) {
+        const load = projectLoads.get(allocation.projectId);
+        if (load === undefined || !eligibleIds.has(allocation.employeeId) || allocation.status !== 'Active'
+          || !overlapsDateRange(allocation.startDate, allocation.endDate, point.iso, point.iso)) continue;
+        demand += allocation.percentage;
+        projectLoads.set(allocation.projectId, load + allocation.percentage);
+      }
+      const capacity = eligibleIds.size * 100;
       return {
-        period: point.period,
-        capacity,
-        demand: demandPercent,
-        pressure: capacity > 0 ? Math.round((demandPercent / capacity) * 100) : 0,
+        period: point.period, capacity, demand,
+        pressure: capacity > 0 ? demand / capacity * 100 : null,
+        projectsBelowFullAllocation: [...projectLoads.values()].filter(load => load < 100).length,
       };
     });
   }, [employees, allocations, projects, forecastPoints]);
@@ -235,34 +232,26 @@ export const ForecastUtilization = () => {
     });
   }, [forecastRows, searchQuery, deptFilter]);
 
+  const highPressureMonth = useMemo(() => supplyDemandData
+    .flatMap(point => point.pressure === null ? [] : [{ ...point, pressure: point.pressure }])
+    .sort((a,b) => b.pressure - a.pressure)[0], [supplyDemandData]);
+
   const kpis = useMemo<KPIData[]>(() => {
     if (!horizonDate || employees.length === 0) return [];
     const horizonForecasts = forecastRows.map(row => row.horizonLoad);
     const peakForecasts = forecastRows.map(row => row.peakLoad);
     const projectedAvg = forecastRows.length > 0 ? roundMetric(horizonForecasts.reduce((sum, value) => sum + value, 0) / forecastRows.length) : 0;
     const futureBench = horizonForecasts.filter(value => value === 0).length;
-    const highPressureMonth = [...supplyDemandData].sort((a, b) => b.pressure - a.pressure)[0];
-    const capacityGaps = projects.filter(project => {
-      if (project.status !== 'Active' && project.status !== 'Proposed') return false;
-      const projectLoad = allocations
-        .filter(a =>
-          a.projectId === project.id &&
-          a.status === 'Active' &&
-          isProjectAvailableForPlanning(project, horizonDate, horizonDate, true) &&
-          overlapsDateRange(a.startDate, a.endDate, horizonDate, horizonDate)
-        )
-        .reduce((sum, a) => sum + a.percentage, 0);
-      return projectLoad < 100;
-    }).length;
+    const horizonPoint = supplyDemandData.at(-1);
     return [
-      { title: 'Projected Avg. Util.', value: formatPercent(projectedAvg), icon: 'TrendingUp' },
-      { title: 'Capacity Gaps', value: capacityGaps, icon: 'Users' },
+      { title: 'Projected Avg. Util.', value: forecastRows.length ? formatPercent(projectedAvg) : 'Unavailable', icon: 'TrendingUp' },
+      { title: 'Projects below 100% allocation', value: horizonPoint?.capacity ? horizonPoint.projectsBelowFullAllocation : 'Unavailable', icon: 'Users' },
       { title: 'Overload Risk', value: peakForecasts.filter(value => value > settings.utilizationThresholdHigh).length, icon: 'AlertTriangle' },
       { title: 'Future Bench', value: futureBench, icon: 'Briefcase' },
-      { title: 'Demand Pressure', value: highPressureMonth?.pressure > 90 ? 'High' : 'Moderate', icon: 'Activity' },
+      { title: 'Demand Pressure', value: !highPressureMonth ? 'Unavailable' : highPressureMonth.pressure > 90 ? 'Above threshold' : 'Within threshold', icon: 'Activity' },
       { title: 'Active Horizon', value: horizon, icon: 'Calendar' }
     ];
-  }, [employees, horizon, allocations, projects, horizonDate, forecastRows, supplyDemandData, settings]);
+  }, [employees, horizon, horizonDate, forecastRows, supplyDemandData, settings, highPressureMonth]);
 
   const rollOffs = useMemo(() => {
     if (!sourceDate || !horizonDate) return [];
@@ -307,10 +296,6 @@ export const ForecastUtilization = () => {
       .slice(0, 5);
   }, [forecastRows]);
   const futureBenchCount = useMemo(() => forecastRows.filter(row => row.horizonLoad === 0).length, [forecastRows]);
-
-  const highPressureMonth = useMemo(() => {
-    return [...supplyDemandData].sort((a, b) => b.pressure - a.pressure)[0];
-  }, [supplyDemandData]);
 
   const handleExport = () => {
     if (!canExport || !mounted.current || result.generation !== requestVersion.current
@@ -388,16 +373,16 @@ export const ForecastUtilization = () => {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h3 className="text-sm font-bold text-heading">Capacity vs Demand Horizon</h3>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Allocation checkpoints from {sourceDate} through {horizonDate} (UTC)</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Allocation checkpoints from {sourceDate} through {horizonDate} (UTC). Each eligible worker contributes 100 allocation points. Project counts include active and proposed projects in term at the horizon end.</p>
             </div>
             <div className="flex items-center gap-4">
                <div className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-slate-dark"></div>
-                  <span className="text-[9px] font-bold uppercase text-gray-400">Fixed Capacity</span>
+                  <span className="text-[9px] font-bold uppercase text-gray-400">Eligible capacity</span>
                </div>
                <div className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
-                  <span className="text-[9px] font-bold uppercase text-gray-400">Committed Demand</span>
+                  <span className="text-[9px] font-bold uppercase text-gray-400">Allocated demand</span>
                </div>
             </div>
           </div>
@@ -448,12 +433,12 @@ export const ForecastUtilization = () => {
                   Peak Forecast Pressure
                 </h5>
                 <p className="text-xl font-bold text-heading">
-                  {highPressureMonth ? `${highPressureMonth.pressure}% in ${highPressureMonth.period}` : 'No demand'}
+                  {highPressureMonth ? `${formatPercent(highPressureMonth.pressure)} in ${highPressureMonth.period}` : 'Capacity unavailable'}
                 </p>
                 <p className="text-xs text-body/70 mt-2 font-medium">
-                  {highPressureMonth && highPressureMonth.demand > highPressureMonth.capacity
-                    ? `Demand exceeds active capacity by ${Math.round((highPressureMonth.demand - highPressureMonth.capacity) / 100)} FTE at the peak point.`
-                    : 'Committed demand remains within active capacity for the selected horizon.'}
+                  {!highPressureMonth ? 'Pressure requires eligible workforce capacity.' : highPressureMonth.demand > highPressureMonth.capacity
+                    ? `Allocations exceed capacity by ${roundMetric(highPressureMonth.demand - highPressureMonth.capacity, 4)} allocation percentage points at this checkpoint.`
+                    : 'Allocated demand is within capacity at the measured checkpoints.'}
                 </p>
              </div>
 
@@ -511,12 +496,12 @@ export const ForecastUtilization = () => {
                   <Zap size={16} />
                   <h4 className="text-[10px] font-bold text-heading uppercase tracking-widest">Hiring Trigger</h4>
                </div>
-               <AlertTriangle size={14} className={highPressureMonth?.pressure > 90 ? "text-danger" : "text-success"} />
+               <AlertTriangle size={14} className={!highPressureMonth ? "text-gray-400" : highPressureMonth.pressure > 90 ? "text-danger" : "text-success"} />
             </div>
             <p className="text-xs text-body font-medium">
-              {highPressureMonth?.pressure > 90
-                ? `Peak demand reaches ${highPressureMonth.pressure}% of active capacity; review hiring or project start dates.`
-                : 'No immediate hiring trigger detected from committed allocation dates.'}
+              {!highPressureMonth ? 'No staffing signal is available without eligible capacity.' : highPressureMonth.pressure > 90
+                ? `Peak demand reaches ${formatPercent(highPressureMonth.pressure)} of active capacity; review hiring or project start dates.`
+                : 'Measured allocation pressure is within the 90% review threshold.'}
             </p>
          </div>
 

@@ -155,15 +155,15 @@ const expectNoNewEffects = async (before, reason) => {
   assert.deepEqual(await effects(), before, reason);
 };
 const expectNoMeasurements = async () => {
-  for (const title of ['Projected Avg. Util.', 'Capacity Gaps', 'Overload Risk', 'Future Bench', 'Demand Pressure', 'Active Horizon',
+  for (const title of ['Projected Avg. Util.', 'Projects below 100% allocation', 'Overload Risk', 'Future Bench', 'Demand Pressure', 'Active Horizon',
     'Capacity vs Demand Horizon', 'Horizon Risk Analysis', 'Resource Forecast Ledger', 'Hiring Trigger', 'Future Bench Pool']) {
     assert.equal(await page.getByText(title, {exact: true}).count(), 0, 'nonready reads hide all report figures and conclusions');
   }
   assert.equal(await table().count(), 0);
   assert.equal(await page.locator('.recharts-surface').count(), 0);
-  for (const text of [sectionEmptyText, filteredEmptyText, 'No demand', 'No roll-offs inside this horizon',
-    'No future bench cases in this horizon', 'No immediate hiring trigger detected from committed allocation dates.',
-    'Committed demand remains within active capacity for the selected horizon.', '0', '0%']) {
+  for (const text of [sectionEmptyText, filteredEmptyText, 'Capacity unavailable', 'No roll-offs inside this horizon',
+    'No future bench cases in this horizon', 'Measured allocation pressure is within the 90% review threshold.',
+    'Allocated demand is within capacity at the measured checkpoints.', '0', '0%']) {
     const {matches, probes} = await page.getByText(text, {exact: true}).evaluateAll((elements, numeric) => {
       const matches = [], probes = [];
       for (const element of elements) {
@@ -188,7 +188,7 @@ const verifyNoMeasurementsGuard = async () => {
   // Prove the narrow probe exception does not weaken numeric/conclusion checks,
   // including hidden app content and unrelated offscreen body instrumentation.
   for (const [text, parent, hidden, id] of [['0', 'root', false], ['0%', 'root', false], ['0', 'root', true],
-    ['No demand', 'root', false], ['0', 'body', true], ['0', 'root', true, 'recharts_measurement_span'],
+    ['Capacity unavailable', 'root', false], ['0', 'body', true], ['0', 'root', true, 'recharts_measurement_span'],
     ['0', 'body', false, 'recharts_measurement_span']]) {
     await page.evaluate(({text, parent, hidden, id}) => {
       const sentinel = document.createElement('span');
@@ -294,8 +294,8 @@ const expectEmpty = async () => {
   assert.equal(await csvButton().isEnabled(), true);
 };
 const expectKpis = async horizon => {
-  const values = [['Projected Avg. Util.', ({1: '53.2%', 2: '57.7%', 3: '52.8%'})[horizon]], ['Capacity Gaps', horizon === 1 ? '4' : '5'],
-    ['Overload Risk', '2'], ['Future Bench', horizon === 3 ? '3' : '2'], ['Demand Pressure', 'Moderate'], ['Active Horizon', `${horizon} ${horizon === 1 ? 'Month' : 'Months'}`]];
+  const values = [['Projected Avg. Util.', ({1: '53.2%', 2: '57.7%', 3: '52.8%'})[horizon]], ['Projects below 100% allocation', ({1:'2',2:'4',3:'3'})[horizon]],
+    ['Overload Risk', '2'], ['Future Bench', horizon === 3 ? '3' : '2'], ['Demand Pressure', 'Within threshold'], ['Active Horizon', `${horizon} ${horizon === 1 ? 'Month' : 'Months'}`]];
   for (const [title, value] of values) assert.equal(await kpi(title).getByText(value, {exact: true}).count(), 1, `unchanged ${title}`);
 };
 const captureExports = label => page.evaluate(label => {
@@ -404,9 +404,9 @@ try {
   await expectSuccess('baseline');
   await expectKpis(3);
   await expectChart(3);
-  await page.getByText('66% in 2026-01-31', {exact: true}).waitFor();
-  await page.getByText('Committed demand remains within active capacity for the selected horizon.', {exact: true}).waitFor();
-  await page.getByText('No immediate hiring trigger detected from committed allocation dates.', {exact: true}).waitFor();
+  await page.getByText('65.6% in 2026-01-31', {exact: true}).waitFor();
+  await page.getByText('Allocated demand is within capacity at the measured checkpoints.', {exact: true}).waitFor();
+  await page.getByText('Measured allocation pressure is within the 90% review threshold.', {exact: true}).waitFor();
   const rolloffs = riskGroup('Upcoming Roll-offs (3 Months)');
   const rollNames = ['director', 'inactive', 'admin', 'excluded', 'hr'].map(suffix => `Synthetic baseline-${suffix}`);
   await page.waitForFunction(names => {
@@ -557,6 +557,7 @@ try {
   assert.deepEqual(await riskGroup('Future Bench Watch').getByRole('link').locator('p:first-child').allTextContents(),
     [1, 3, 5, 6, 2].map(index => `Synthetic bench-${index}`), 'bench watch uses descending current planned load and top five');
   assert.equal(await kpi('Future Bench').getByText('7', {exact: true}).count(), 1);
+  await page.getByText('0% in 2026-01-31',{exact:true}).waitFor();
   await page.getByRole('status').getByText('No roll-offs inside this horizon', {exact: true}).waitFor();
   assert.equal(await chart().locator(mainChartSvg).count(), 1, 'successful zero demand keeps its real chart');
 
@@ -566,9 +567,9 @@ try {
     allocations: [allocation('pressure', 'steady', 'only', 'steady', 125)], forecast: {...forecastPeriod(3),rows: [{...pressurePerson, plannedUtilization: 125}]}});
   await expectReady();
   await page.getByText('125% in 2026-01-31', {exact: true}).waitFor();
-  await page.getByText('Demand exceeds active capacity by 0 FTE at the peak point.', {exact: true}).waitFor();
+  await page.getByText('Allocations exceed capacity by 25 allocation percentage points at this checkpoint.', {exact: true}).waitFor();
   await page.getByText('Peak demand reaches 125% of active capacity; review hiring or project start dates.', {exact: true}).waitFor();
-  assert.equal(await kpi('Demand Pressure').getByText('High', {exact: true}).count(), 1);
+  assert.equal(await kpi('Demand Pressure').getByText('Above threshold', {exact: true}).count(), 1);
   await page.getByRole('status').getByText('No future bench cases in this horizon', {exact: true}).waitFor();
 
   // Resource-ledger empty does not suppress independent active-allocation
@@ -577,6 +578,9 @@ try {
   const sectionData = bundle('section-empty');
   sectionData.employees = sectionData.employees.slice(10);
   await settle(sectionEmpty, sectionData);
+  await page.getByText('Capacity unavailable',{exact:true}).waitFor();
+  await page.getByText('No staffing signal is available without eligible capacity.',{exact:true}).waitFor();
+  assert.equal(await kpi('Demand Pressure').getByText('Unavailable',{exact:true}).count(),1);
   await expectReady();
   await table().getByRole('status').getByText(sectionEmptyText, {exact: true}).waitFor();
   assert.equal(await page.getByText(emptyText, {exact: true}).count(), 0);

@@ -2,6 +2,8 @@
 
 ## Utilization evidence
 
+Forecast pressure and project allocation indicators now use the same dated eligible workforce and project population. A checkpoint without capacity cannot generate a hiring assessment.
+
 The compatibility forecast uses its verified report dates across its chart, roll-off window and audited export, including when the browser clock differs from the source.
 
 Reviewers can inspect which eligible workers have no timesheet in the selected period. Changing review status preserves this roster measure and the coverage denominator.
