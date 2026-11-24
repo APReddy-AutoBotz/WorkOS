@@ -832,3 +832,7 @@ WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment
 ### Governed work approval deadlines
 
 WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Approval reminder and escalation delivery remain open.
+
+### Scoped bulk timesheet approval
+
+WOS-APR-008. The timesheet bulk action requires a configured approval role and the existing approval permission. The timesheet export and approval browser journey changes one reporting relationship after a Team Lead previews two rows, then verifies the HTTP denial and both stored outcomes.

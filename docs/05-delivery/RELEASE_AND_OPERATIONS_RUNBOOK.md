@@ -916,3 +916,7 @@ To publish the effective product name, login logo, favicon and accents before au
 ### Governed work approval deadlines
 
 For governed timesheets, set the optional time allowed per stage in the approval policy editor. Each pending stage gets its own UTC deadline. Leaving the field blank keeps the stage untimed. Migration 119 accepts the optional field on work policies. Preserve the migration and retained policies during rollback. An older application cannot read a policy containing this field, so verify reader compatibility before reverting after adoption.
+
+### Scoped bulk timesheet approval
+
+Timesheet bulk approval uses the same scoped decision API as individual review. Admins, Country Directors, Project Managers and Team Leads with approval permission can preview submitted rows. If a reporting relationship changes before confirmation, inspect the per-item outcomes. A denied row that has left the reviewer’s scope appears without its worker name. Reload current records before retrying an unacknowledged decision.
