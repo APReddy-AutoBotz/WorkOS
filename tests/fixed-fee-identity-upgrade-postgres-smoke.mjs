@@ -1,3 +1,4 @@
+import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {runMigrations} from '../server/migrate.mjs';
@@ -43,7 +44,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const unapplied=await createAmendmentHierarchy(request,'SYN-OLD-UNISSUED',{
       contract:{value:'100',installments:[{dueOn:today,amount:'100'}]}});
     const before=(await pool.query('select to_jsonb(ev) ev from billing_eligibility_events ev order by id')).rows;
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['095_wos06_fixed_fee_installment_identities','096_wos06_fixed_fee_invoice_approval','097_wos06_fixed_fee_invoice_export','098_wos06_fixed_fee_credit_corrections','099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies','108_wos06_fixed_fee_risk_delivery','109_wos06_risk_delivery_attempt_history','110_wos06_po_commitment_balance_evidence','111_wos06_po_risk_engagement_assignments','112_wos06_purchase_order_risk_events','113_wos06_retainer_risk_routing']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('095_wos06_fixed_fee_installment_identities'));
     assert.deepEqual((await pool.query('select to_jsonb(ev) ev from billing_eligibility_events ev order by id')).rows,before);
     const proof=await pool.query('select event_id,origin,author_worker_id,reviewer_worker_id from fixed_fee_installment_identities');
     assert.deepEqual(proof.rows,[{event_id:verified,origin:'upgrade_continuity',author_worker_id:f.ownerId,reviewer_worker_id:'syn-fixed-review'}]);

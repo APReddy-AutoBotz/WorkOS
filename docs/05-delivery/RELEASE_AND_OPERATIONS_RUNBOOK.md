@@ -899,3 +899,10 @@ The API worker polls every 30 seconds and schedules each governed retainer versi
 PRs targeting main that only modify existing text in the changelog, implementation status, or enterprise delivery roadmap run a whitespace check and the full-history secret scan. Other PR changes, main pushes and manual runs select the application and deployment suite. Use a manual run to obtain full evidence for a release revision. Revert the workflow change to restore full application validation on every eligible progress PR.
 
 The full suite installs the lockfile-selected Chromium build and attempts a headless launch on the pinned Ubuntu runner. A failed launch triggers Playwright's OS dependency installer before the role journeys run.
+
+
+## Configure managed-service margin notices
+
+Assign the managed-service margin notice configuration permission to the authorized commercial operator. In the managed-service engagement workspace, open the monthly margin alert recipients, select the effective date, named commercial manager and finance owner with their held roles, and save the buyer template and change reason. The engagement owner comes from the engagement record. Check membership and scope if the configuration is refused. Reverting the application leaves saved policy revisions and the historical month-end assessment available to a compatible version.
+
+After UTC month-end, the worker evaluates the last version retained during the month and subsequent revisions against the closing threshold. An uninterrupted breach produces one event. A verified recovery followed by a new breach produces another. Use **Check warning deliveries** to inspect the reporting date, attempts, last outcome and next retry. Restore the missing policy or recipient access to resume pending delivery. A failed attempt leaves all recipients without a partial receipt. Earlier binaries can ignore the additive event and receipt tables. Retain their data on rollback so delivery can resume without duplicating receipts.

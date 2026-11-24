@@ -6,6 +6,8 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 - Allow prose-only progress PRs to complete CI with whitespace validation and the separate secret scan.
 
+- Added governed month-end managed-service margin alerts, buyer recipient configuration, delivery history and inbox acknowledgement.
+
 - Corrected forecast pressure and project allocation indicators for out-of-term projects and missing capacity.
 
 - Anchored forecast charts, roll-off dates and exports to the report source date.

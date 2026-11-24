@@ -37,7 +37,7 @@ The application build and runtime share one pinned Node image index. The buyer P
 
 ## Managed-service margin policy
 
-The governed engagement amendment workflow supports an optional standing threshold, dated adoption and explicit disablement. The [margin portfolio](https://github.com/APReddy-AutoBotz/WorkOS/pull/349) remains available for ad hoc comparisons. Historical alert evaluation and mandatory delivery are open.
+The governed engagement amendment workflow supports an optional standing threshold, dated adoption and explicit disablement. The [margin portfolio](https://github.com/APReddy-AutoBotz/WorkOS/pull/349) remains available for ad hoc comparisons. The month-end alert candidate adds historical evaluation, scoped delivery, retries and inbox acknowledgement. Release acceptance requires integration and independent review.
 
 ## Commercial reporting checkpoint on 24 November 2026
 

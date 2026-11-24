@@ -1,3 +1,4 @@
+import {processMonthEndMarginAlerts} from './modules/commercial-drafting/month-end-margin-alerts.mjs';
 import {startRetainerRiskWorker} from './modules/commercial-drafting/retainer-risk-worker.mjs';
 import {startPurchaseOrderRiskWorker} from './modules/commercial-drafting/purchase-order-risk-worker.mjs';
 import {startFixedFeeWarningWorker} from './modules/commercial-drafting/fixed-fee-risk-worker.mjs';
@@ -6528,7 +6529,7 @@ const server = app.listen(port, () => {
 });
 
 if (pool && process.env.NODE_ENV!=='test') {
-  startFixedFeeWarningWorker(pool,server);
+  startFixedFeeWarningWorker(pool,server,processMonthEndMarginAlerts);
   startPurchaseOrderRiskWorker(pool,server);
   startRetainerRiskWorker(pool,server);
 }
