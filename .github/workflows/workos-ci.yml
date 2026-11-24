@@ -484,8 +484,14 @@ jobs:
       - name: Rebuild frontend after artifact hygiene tests
         run: npm run build
 
-      - name: Run production identity and fail-closed startup tests
+      - name: Build production container
+        run: |
+          APP_VERSION="$(node -p "require('./package.json').version")"
+          docker build --build-arg BUILD_SHA="$GITHUB_SHA" --build-arg APP_VERSION="$APP_VERSION" -t workos-ci:"$GITHUB_SHA" .
+
+      - name: Verify packaged production identity, readiness and fail-closed startup
         env:
+          WORKOS_TEST_PRODUCTION_IMAGE: workos-ci:${{ github.sha }}
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
           PGSSLMODE: disable
         run: npm run test:production-identity
@@ -528,11 +534,6 @@ jobs:
 
       - name: Verify pinned deployment inputs
         run: node tests/container-inputs-smoke.mjs
-
-      - name: Build production container
-        run: |
-          APP_VERSION="$(node -p "require('./package.json').version")"
-          docker build --build-arg BUILD_SHA="$GITHUB_SHA" --build-arg APP_VERSION="$APP_VERSION" -t workos-ci:"$GITHUB_SHA" .
 
       - name: Verify container refuses incomplete production configuration
         run: |
