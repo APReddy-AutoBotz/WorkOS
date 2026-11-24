@@ -391,3 +391,7 @@ WOS-CTR-002, WOS-COM-013 and WOS-INT-002 remain in progress. The in-app worker f
 ### Retainer risk inspection
 
 The entity-scoped register inspects up to ten activated or explicitly adopted contract versions per page, including historical versions. Each finding identifies its own contract version and period. Versions are evaluated independently and have no combined balance. Overconsumption requires positive approved hours above available capacity. Expiry requires positive unused hours after the inclusive end date, after applying the version’s rollover terms. Future work dates are excluded. A missing policy produces a configuration finding. A hold or incompatible change during a covered period requires finance review and suppresses the quantity, including dependent rollover balances. No pricing or billing decision follows from this inspection.
+
+### Retainer risk recipients
+
+The buyer requires explicit engagement assignments per contract version, including unused versions. The owner of a sibling engagement gains no access through the contract alone. Current owners are resolved at delivery and receipt access. A same-contract retainer engagement can be assigned before it adopts new terms. Assignment to one version does not confer access to another. Finance sees missing assignments and unavailable owners. Mandatory recipients also include the named scoped commercial manager and finance/billing owner. One person filling multiple roles receives one receipt.

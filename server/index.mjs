@@ -1,3 +1,4 @@
+import {startRetainerRiskWorker} from './modules/commercial-drafting/retainer-risk-worker.mjs';
 import {startPurchaseOrderRiskWorker} from './modules/commercial-drafting/purchase-order-risk-worker.mjs';
 import {startFixedFeeWarningWorker} from './modules/commercial-drafting/fixed-fee-risk-worker.mjs';
 import {createMilestoneBillingRouter} from './modules/milestone-billing/router.mjs';
@@ -6529,6 +6530,7 @@ const server = app.listen(port, () => {
 if (pool && process.env.NODE_ENV!=='test') {
   startFixedFeeWarningWorker(pool,server);
   startPurchaseOrderRiskWorker(pool,server);
+  startRetainerRiskWorker(pool,server);
 }
 
 if (trafficMetrics) {

@@ -6,7 +6,7 @@ Forecast checkpoints and roll-offs use the UTC source date returned by the repor
 
 The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage. The missing-worker list uses the scoped eligible roster and all timesheets in the selected period. Weekly submission coverage counts each eligible worker once, independently of the review filter.
 
-Updated 2026-11-23. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
+Updated 2026-11-24. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
 
 Managed-service reporting supports a read-only comparison of a retained monthly margin percentage with a user-entered threshold (WOS-RPT-004). Finance can also page through the latest visible engagement margins for a month, including engagements with no retained version. An unavailable percentage stays unavailable. A buyer can adopt a standing managed-service margin threshold through a governed engagement amendment. Automated margin alerts remain pending.
 
@@ -294,4 +294,4 @@ Purchase-order alerts now cover unused released orders, shared orders, verified 
 
 ### Retainer risk reporting
 
-Finance can inspect capacity findings across governed retainer contract versions. The register uses approved work, effective capacity policies and UTC service dates. Mandatory retainer inbox delivery and portfolio margin alerts remain outstanding.
+Finance can inspect capacity findings across governed retainer contract versions. The register uses approved work, effective capacity policies and UTC service dates. Retainer overconsumption and expiry now support mandatory in-app delivery to explicitly assigned engagement owners, a named commercial manager and a finance/billing owner. Portfolio margin alerts remain outstanding.

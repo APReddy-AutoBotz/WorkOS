@@ -3,6 +3,8 @@ import {ServicePeriodReview} from './ServicePeriodReview';
 import {ServiceUnitCapture} from './ServiceUnitCapture';
 import {RetainerConsumption} from '../components/RetainerConsumption';
 import {FixedFeeInstallmentRegister} from '../components/FixedFeeInstallmentRegister';
+import {RetainerAlertAssignments} from '../components/RetainerAlertAssignments';
+import {RetainerNoticePolicy} from './RetainerNoticePolicy';
 import {RetainerRiskRegister} from '../components/RetainerRiskRegister';
 import {MarginPortfolio} from './MarginPortfolio';
 import {PurchaseOrderRiskRegister} from '../components/PurchaseOrderRiskRegister';
@@ -480,6 +482,10 @@ export const CommercialDraftingWorkspace = () => {
               {version.serviceDimensions?.length && state.context ? <ServiceUnitCapture
                 engagements={workspace.engagements.filter(e=>e.contractId===detail.id && e.model==='managed_service')}
                 context={state.context} version={version} today={workspace.asOf}/> : null}
+              {version.model==='retainer' && state.context?.canConfigureRetainerRisk && <div key={state.context.identityKey+version.id}>
+                <RetainerAlertAssignments context={state.context} versionId={version.id} contractId={detail.id} engagements={workspace.engagements}/>
+                <RetainerNoticePolicy context={state.context} versionId={version.id} today={workspace.asOf}/>
+              </div>}
               {version.retainerPeriods?.length ? <div><h4>Retainer service periods</h4>
                 {version.retainerRounding && <p>Base fee and overage round separately · {retainerRoundingModes[version.retainerRounding.mode]} · {version.retainerRounding.precision} decimal places</p>}
                 <p>{version.retainerOveragePolicy ? retainerOverageLabels[version.retainerOveragePolicy] : 'Excess-hour pricing unspecified'}</p>
