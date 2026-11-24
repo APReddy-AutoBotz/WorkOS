@@ -212,7 +212,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           'commercial.invoice_drafts.view',
           'commercial.invoice_drafts.prepare',
           'commercial.invoice_drafts.own',
-          'commercial.invoice_drafts.cancel','commercial.invoice_approval.manage','commercial.invoice_approval.decide','commercial.invoice_export.view', 'commercial.invoice_export.create', 'commercial.invoice_export.configure', 'commercial.invoice_export.recover_notices', 'integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm',
+          'commercial.invoice_drafts.cancel','commercial.invoice_approval.manage','commercial.invoice_approval.decide','commercial.invoice_export.view', 'commercial.invoice_export.create', 'commercial.invoice_export.deliver', 'commercial.invoice_export.configure', 'commercial.invoice_export.recover_notices', 'integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm',
         ],
         added = upgraded.permission_definitions.filter((x) => newKeys.includes(x.v.permission_key));
       assert.deepEqual(added.map((x) => x.v.permission_key).sort(), [...newKeys].sort());
