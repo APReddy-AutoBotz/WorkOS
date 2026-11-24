@@ -4,6 +4,8 @@
 
 On 24 November 2026, two of the ten programme tracking issues were closed as completed. WOS-00 carries 8% and WOS-02 carries 10%. Together they account for **18% of the programme weight**. The remaining **82% belongs to open workstreams**, including engineering already merged into the product. This measures formal workstream closure. Estimating the engineering effort remaining requires a breakdown of the outstanding work inside each open stream. [Programme weights](PROGRAM_CHARTER.md#10-weighted-programme-plan) · [Blueprint acceptance](https://github.com/APReddy-AutoBotz/WorkOS/issues/2) · [Organization and setup](https://github.com/APReddy-AutoBotz/WorkOS/issues/4)
 
+For planning, a rough range is **60-75% delivered**, or **25-40% remaining**. This estimate credits the two completed streams in full and reserves the entire 4% buyer-handover weight. It assumes the seven open engineering streams, together worth 78%, are roughly halfway to three-quarters delivered based on the merged workflows and outstanding criteria below. The calculation gives 57-76.5%, rounded to five-point increments. The range is a planning judgment and does not predict calendar time.
+
 | Open workstreams | Weight | What remains to verify for launch |
 |---|---:|---|
 | Source and branding, platform | 20% | Reconcile source, branding and platform acceptance records with the merged implementation. |
@@ -35,7 +37,7 @@ The governed engagement amendment workflow supports an optional standing thresho
 
 On main at `1f45ddd49a56df67296b1f12130804135f167262`, finance can compare an individual retained managed-service monthly margin with an entered threshold. [Reporting PR](https://github.com/APReddy-AutoBotz/WorkOS/pull/348) and [validation run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45250489157).
 
-The portfolio view extends this evidence across engagements. Automated margin notifications, fixed-fee actual expenses and buyer release acceptance remain open. The retainer risk register and alert delivery have successful candidate checks and await integration in [PR 346](https://github.com/APReddy-AutoBotz/WorkOS/pull/346) and [PR 347](https://github.com/APReddy-AutoBotz/WorkOS/pull/347).
+The portfolio view extends this evidence across engagements. Automated margin notifications, fixed-fee actual expenses and buyer release acceptance remain open. The retainer risk register and version-specific alert delivery merged in [PR 346](https://github.com/APReddy-AutoBotz/WorkOS/pull/346) and [PR 347](https://github.com/APReddy-AutoBotz/WorkOS/pull/347).
 
 ## Delivery status on 24 November 2026
 
