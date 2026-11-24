@@ -20,7 +20,8 @@ import {
   createAmendmentHierarchy,
 } from './support/commercial-amendments-test.mjs';
 import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
-const providerJourney = process.argv.includes('--provider');
+const permanentRejection = process.argv.includes('--provider-rejected');
+const providerJourney = permanentRejection || process.argv.includes('--provider');
 const base = '/api/v1/governed-tm-valuations',
   candidates = '/api/v1/rate-candidates',
   approvals = '/api/v1/commercial-candidate-approvals',
@@ -78,7 +79,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       [k],
     );
   await withCommercialApi(
-    { databaseUrl, identities: ids, financeProviderFixture: providerJourney, onServerError: (s) => process.stderr.write(s) },
+    { databaseUrl, identities: ids, financeProviderFixture: permanentRejection ? 'reject' : providerJourney, onServerError: (s) => process.stderr.write(s) },
     async ({ request }) => {
       const end = shift(fx.today, 30),
         roots = await createAmendmentHierarchy(request, 'SYN-TM-VAL', {
@@ -1019,6 +1020,24 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           const deliver = () => request(csv + '/provider-exports/' + reservation.exportId + '/deliver',
             {method:'POST',body:{expectedOwnerKey:cmd.expectedOwnerKey}});
           assert.equal(ok(await reserve()).exportId,reservation.exportId);
+          const cancel = async () => {
+            const inspected = ok(await request(route + '/batches/' + cmd.batchId + '?forCancellation=true'));
+            return request(route + '/batches/' + cmd.batchId + '/cancellations',{method:'POST',
+              body:{expectedOwnerKey:inspected.ownerKey,expectedCancellationToken:inspected.cancellationToken,
+                requestId:randomUUID(),expectedLineCount:1,reason:'Replace rejected export'}});
+          };
+          if (permanentRejection) {
+            assert.equal(ok(await deliver(),201).deliveryStatus,'permanently_rejected');
+            assert.equal(ok(await deliver()).replayed,true);
+            assert.equal(ok(await request(csv + '/batches/' + cmd.batchId)).batch.state,'Approved');
+            assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[cmd.batchId])).rowCount,1);
+            ok(await cancel(),201);
+            assert.equal(ok(await request(csv + '/batches/' + cmd.batchId)).batch.state,'Cancelled');
+            assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[cmd.batchId])).rowCount,0);
+            assert.equal((await pool.query('select 1 from invoice_provider_attempts where export_id=$1',[reservation.exportId])).rowCount,1);
+            console.log('Exact permanent rejection, replay and protected cancellation releasing occupancy passed.');
+            return;
+          }
           assert.equal(ok(await deliver(),201).deliveryStatus,'unconfirmed');
           const failureEvents = await pool.query(
             `select e.id from invoice_export_notice_events e join invoice_csv_failures f on f.id=e.failure_id
@@ -1026,8 +1045,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           assert.equal(failureEvents.rowCount,1);
           assert.equal(ok(await request(csv + '/batches/' + cmd.batchId)).batch.state,'Approved');
           assert.equal((await request(csv + '/exports',{method:'POST',body:cmd})).status,409);
-          assert.equal((await request(route + '/batches/' + cmd.batchId + '/cancellations',{method:'POST',
-            body:{expectedOwnerKey:draft.ownerKey,requestId:randomUUID(),expectedLineCount:1,reason:'Synthetic delivery pending'}})).status,409);
+          const pendingCancellation = await cancel();
+          assert.equal(pendingCancellation.status,409);
+          assert.equal(pendingCancellation.body.error.code,'INVOICE_PROVIDER_PENDING');
           const accepted = ok(await deliver(),201);
           assert.equal(ok(await deliver()).artifact.id,accepted.artifact.id);
           assert.equal(ok(await request(csv + '/batches/' + cmd.batchId)).batch.state,'Exported');

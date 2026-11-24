@@ -1,6 +1,6 @@
 -- Persist the destination and exact delivery before any outbound request.
 alter table invoice_csv_failures drop constraint invoice_csv_failures_code_check;
-alter table invoice_csv_failures add check (code in ('ARTIFACT_GENERATION_FAILED','PROVIDER_DELIVERY_UNCONFIRMED'));
+alter table invoice_csv_failures add check (code in ('ARTIFACT_GENERATION_FAILED','PROVIDER_DELIVERY_UNCONFIRMED','PROVIDER_DELIVERY_REJECTED'));
 insert into permission_definitions(permission_key,module,label,description,protected)
 values ('commercial.invoice_export.deliver','Commercial','Deliver approved invoices',
         'Send an approved invoice payload to the configured finance provider.',false);
@@ -35,13 +35,13 @@ create table invoice_provider_attempts (
   actor_id uuid not null references users(id),
   active_role text not null,
   attempted_at timestamptz not null default clock_timestamp(),
-  result text not null check (result in ('unconfirmed','accepted')),
+  result text not null check (result in ('unconfirmed','accepted','permanently_rejected')),
   -- Successful delivery and its immutable local artifact commit together.
   artifact_id uuid unique references invoice_csv_artifacts(id) deferrable initially deferred,
   check ((result = 'accepted') = (artifact_id is not null))
 );
-create unique index invoice_provider_single_acceptance on invoice_provider_attempts(export_id)
-  where result='accepted';
+create unique index invoice_provider_single_terminal_result on invoice_provider_attempts(export_id)
+  where result in ('accepted','permanently_rejected');
 create trigger immutable_invoice_provider_export before update or delete on invoice_provider_exports
   for each row execute function reject_commercial_draft_rewrite();
 create trigger immutable_invoice_provider_attempt before update or delete on invoice_provider_attempts
@@ -85,6 +85,15 @@ create trigger guarded_invoice_provider_reservation before insert on invoice_pro
 
 create function check_invoice_provider_receipt() returns trigger language plpgsql as $$
 begin
+  if new.result='permanently_rejected' and not exists(
+    select from invoice_provider_exports e join invoice_csv_failures f on f.batch_id=e.batch_id
+    join audit_logs a on a.operation_id=f.operation_id and a.entity_id=e.id::text
+    where e.id=new.export_id and f.id=new.id and f.code='PROVIDER_DELIVERY_REJECTED'
+      and f.actor_id=new.actor_id and f.active_role=new.active_role
+      and a.module='Invoice Export' and a.action='Record provider delivery result'
+      and a.new_value->>'attemptId'=new.id::text and a.new_value->>'deliveryStatus'=new.result
+  ) then raise exception 'A permanent rejection requires its audited provider failure.' using errcode='ICV02';
+  end if;
   if new.result='accepted' and not exists(
     select from invoice_provider_exports e join invoice_csv_artifacts a on a.batch_id=e.batch_id
     where e.id=new.export_id and a.id=new.artifact_id and a.sha256=e.sha256
@@ -105,6 +114,12 @@ begin
   perform 1 from invoice_draft_batches where id=new.batch_id for update;
   select * into reservation from invoice_provider_exports where batch_id=new.batch_id;
   if not found then return new; end if;
+  if tg_table_name='invoice_draft_cancellations' and exists(
+    select from invoice_provider_attempts where export_id=reservation.id and result='permanently_rejected'
+  ) then return new; end if;
+  if tg_table_name='invoice_draft_cancellations' then
+    raise exception 'Reconcile the pending provider delivery before cancellation.' using errcode='IPD01';
+  end if;
   if tg_table_name='invoice_csv_artifacts' then
     if new.payload=reservation.payload and new.schema_version=reservation.schema_version
        and exists(select from invoice_provider_attempts where export_id=reservation.id and artifact_id=new.id) then

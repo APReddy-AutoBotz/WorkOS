@@ -39,11 +39,11 @@ export function createFinanceExportProvider({ endpoint, token, fetchImpl = fetch
       }
       if (!response.ok) throw new Error('Finance provider delivery unconfirmed');
       const receipt = await response.json().catch(() => null);
-      if (receipt?.status !== 'accepted' ||
+      if (!['accepted','permanently_rejected'].includes(receipt?.status) ||
           !Object.entries(identity).every(([key, value]) => receipt[key] === value)) {
         throw new Error('Finance provider receipt does not match the export');
       }
-      return { ...identity, status: 'accepted' };
+      return { ...identity, status: receipt.status };
     },
   };
 }

@@ -481,6 +481,8 @@ export const createInvoiceCsvRouter = (o) => {
       [exportId],
     )).rows[0];
     if (accepted) return { ...(await envelope(c,r)), artifact: artifactView(accepted), replayed: true };
+    const rejected = await c.query("select 1 from invoice_provider_attempts where export_id=$1 and result='permanently_rejected'", [exportId]);
+    if (rejected.rowCount) return { ...(await envelope(c,r)), exportId, deliveryStatus:'permanently_rejected', replayed:true };
     if (row.state !== 'Approved' || !review?.current || review.id !== reservation.approval_id ||
         review.final_transition_id !== reservation.final_transition_id || review.lineage_hash !== reservation.lineage_hash)
       throw fail(409, 'INVOICE_CSV_SOURCE', 'Current approved source or final decision changed.');
@@ -490,21 +492,22 @@ export const createInvoiceCsvRouter = (o) => {
     const rendered = {schemaVersion: reservation.schema_version, bytes: reservation.payload,
       sha256: reservation.sha256, lineCount: reservation.line_count, currency: reservation.currency, total: String(reservation.total)};
     const attemptId = randomUUID();
-    let artifactId;
+    let deliveryStatus;
     try {
-      await o.financeProvider.deliver({operationId: exportId, batchId: row.id, artifact: rendered});
-      artifactId = randomUUID();
+      const receipt = await o.financeProvider.deliver({operationId: exportId, batchId: row.id, artifact: rendered});
+      deliveryStatus = receipt.status;
     } catch {
-      artifactId = null;
+      deliveryStatus = 'unconfirmed';
     }
+    const artifactId = deliveryStatus === 'accepted' ? randomUUID() : null;
     await c.query(
       'insert into invoice_provider_attempts(id,export_id,actor_id,active_role,result,artifact_id) values($1,$2,$3,$4,$5,$6)',
-      [attemptId,exportId,r.user.sub,r.user.activeRole,artifactId ? 'accepted' : 'unconfirmed',artifactId],
+      [attemptId,exportId,r.user.sub,r.user.activeRole,deliveryStatus,artifactId],
     );
-    await providerAudit(c,r,artifactId ? 'Accept provider delivery' : 'Record unconfirmed delivery',exportId,
-      {batchId:row.id,attemptId,artifactId});
+    await providerAudit(c,r,'Record provider delivery result',exportId,
+      {batchId:row.id,attemptId,artifactId,deliveryStatus});
     if (!artifactId) {
-      const code = 'PROVIDER_DELIVERY_UNCONFIRMED';
+      const code = deliveryStatus === 'permanently_rejected' ? 'PROVIDER_DELIVERY_REJECTED' : 'PROVIDER_DELIVERY_UNCONFIRMED';
       await context(c,r,{batchId:row.id,failureId:attemptId});
       await c.query(
         `insert into invoice_csv_failures(id,batch_id,organization_id,legal_entity_id,actor_id,active_role,
@@ -514,7 +517,7 @@ export const createInvoiceCsvRouter = (o) => {
       );
       await audit(c,r,'Record CSV Failure',attemptId,{batchId:row.id,failureId:attemptId,code});
       await emitInvoiceExportNotice(c,r,{batch:row,policy:notificationPolicy,resultId:attemptId,kind:'failure'});
-      return {...await envelope(c,r), exportId, deliveryStatus:'unconfirmed', replayed:false};
+      return {...await envelope(c,r), exportId, deliveryStatus, replayed:false};
     }
     const d = {batchId:row.id,approvalId:reservation.approval_id,finalTransitionId:reservation.final_transition_id,
       lineageHash:reservation.lineage_hash,schemaVersion:reservation.schema_version,reason:reservation.reason,requestId:exportId};
