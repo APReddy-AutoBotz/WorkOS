@@ -4,11 +4,11 @@ const baseUrl = process.env.WORKOS_BROWSER_BASE_URL || 'http://127.0.0.1:4177';
 const browser = await chromium.launch({headless: true,
   ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {}),
 });
-const page = await browser.newPage({viewport: {width: 1100, height: 900}, acceptDownloads: true, timezoneId: 'UTC'});
+const page = await browser.newPage({viewport: {width: 1100, height: 900}, acceptDownloads: true, timezoneId: 'America/Los_Angeles'});
 page.setDefaultTimeout(10000);
 // Freeze Date, not timers/rAF: chart animation and asynchronous UI still run.
 // Native setMonth is deliberately retained: Jan31 +1/+2/+3 = Mar3/Mar31/May1.
-await page.clock.setFixedTime(new Date('2026-01-31T12:34:56.000Z'));
+await page.clock.setFixedTime(new Date('2026-02-14T12:34:56.000Z'));
 const pageErrors = [], unexpectedApi = [], unexpectedRemote = [], downloads = [];
 let deliberateExports = 0;
 let measurementProbeReported = false;
@@ -93,6 +93,8 @@ const allocations = tag => [
   allocation(tag, 'roll-second', 'inactive', 'completed', 12, '2026-01-01', '2026-02-01'),
   allocation(tag, 'roll-fourth', 'excluded', 'completed', 14, '2026-01-01', '2026-02-03'),
 ];
+const dates=['2026-01-31','2026-03-03','2026-03-31','2026-05-01'];
+const forecastPeriod=horizon=>({mode:'forecast',sourceDate:dates[0],asOfDate:dates[horizon],forecastMonths:horizon});
 const bundle = (tag = 'baseline', horizon = 3, options = {}) => {
   const people = employees(tag);
   return {
@@ -100,9 +102,7 @@ const bundle = (tag = 'baseline', horizon = 3, options = {}) => {
     projects: options.empty ? [] : projects(tag),
     allocations: options.empty ? [] : allocations(tag),
     settings: {...settings, ...options.settings},
-    // Deliberately unrelated metadata: the unchanged browser checkpoints are
-    // based on local today, not on report metadata or new query parameters.
-    forecast: {mode: 'forecast', asOfDate: '2024-04-26', sourceDate: '2024-04-26', horizonMonths: horizon, rows: options.empty ? [] : [
+    forecast: {...forecastPeriod(horizon), rows: options.empty ? [] : [
       {...people[0], plannedUtilization: 80}, {...people[1], plannedUtilization: ({1: 33.3, 2: 44.4, 3: 0})[horizon]},
       {...people[3], plannedUtilization: 0}, {...people[4], plannedUtilization: 75},
       {...people[5], plannedUtilization: 110}, {...people[6], plannedUtilization: 110.1},
@@ -324,7 +324,7 @@ const expectedCsv = (tag, horizon = 3, chosen = golden) => {
       currentPlannedUtilization: person.plannedUtilization, averageFutureLoad: row.average[horizon],
       peakForecastLoad: Math.max(...row.loads.slice(0, horizon + 1)), horizonLoad: row.horizon[horizon], status: row.status,
       ...Object.fromEntries(checkpoints.slice(0, horizon + 1).map((point, index) => [point, row.loads[index]])),
-      horizon: `${horizon} ${horizon === 1 ? 'Month' : 'Months'}`};
+      horizon: `${horizon} ${horizon === 1 ? 'Month' : 'Months'}`,sourceDate:dates[0],horizonDate:dates[horizon]};
   }));
 };
 const expectExport = async (name, tag, horizon = 3, chosen = golden, expectedContent) => {
@@ -355,7 +355,7 @@ const expectExport = async (name, tag, horizon = 3, chosen = golden, expectedCon
 const expectChart = async horizon => {
   const root = chart();
   const selector = '.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-value';
-  const labels = ['Jan 2026', 'Mar 2026', 'Mar 2026', 'May 2026'].slice(0, horizon + 1);
+  const labels = dates.slice(0, horizon + 1);
   await root.locator(mainChartSvg).waitFor();
   const handle = await root.elementHandle();
   try {
@@ -366,7 +366,7 @@ const expectChart = async horizon => {
     assert.deepEqual(await root.locator(selector).evaluateAll(ticks => ticks.map(tick => {
       const lines = [...tick.querySelectorAll('tspan')];
       return lines.length ? lines.map(line => line.textContent).join(' ') : tick.textContent;
-    })), labels, 'chart keeps native month overflow, inclusive endpoints and repeated March checkpoint labels');
+    })), labels, 'chart keeps native month overflow, inclusive endpoints and distinct dated March checkpoints');
     // Recharts rectangle height ratios prove the actual plotted values, using
     // capacity as scale. Wait out animation before asserting exact ratios.
     const expected = [800, 900, 900, 900].slice(0, horizon + 1);
@@ -404,7 +404,7 @@ try {
   await expectSuccess('baseline');
   await expectKpis(3);
   await expectChart(3);
-  await page.getByText('66% in Jan 2026', {exact: true}).waitFor();
+  await page.getByText('66% in 2026-01-31', {exact: true}).waitFor();
   await page.getByText('Committed demand remains within active capacity for the selected horizon.', {exact: true}).waitFor();
   await page.getByText('No immediate hiring trigger detected from committed allocation dates.', {exact: true}).waitFor();
   const rolloffs = riskGroup('Upcoming Roll-offs (3 Months)');
@@ -551,7 +551,7 @@ try {
   const bench = await refresh(lastId(omitted));
   const benchPeople = [10, 70, 30, 60, 20, 50, 40].map((load, index) => employee('bench', String(index), load));
   await settle(bench, {employees: benchPeople, projects: [], allocations: [], settings,
-    forecast: {rows: benchPeople.map(person => ({...person, plannedUtilization: 0}))}});
+    forecast: {...forecastPeriod(3),rows: benchPeople.map(person => ({...person, plannedUtilization: 0}))}});
   await expectReady();
   await page.waitForFunction(() => document.querySelectorAll('table tbody tr a').length === 7);
   assert.deepEqual(await riskGroup('Future Bench Watch').getByRole('link').locator('p:first-child').allTextContents(),
@@ -563,9 +563,9 @@ try {
   const pressure = await refresh(lastId(bench));
   const pressurePerson = employee('pressure', 'only', 125);
   await settle(pressure, {employees: [pressurePerson], projects: [project('pressure', 'steady')], settings,
-    allocations: [allocation('pressure', 'steady', 'only', 'steady', 125)], forecast: {rows: [{...pressurePerson, plannedUtilization: 125}]}});
+    allocations: [allocation('pressure', 'steady', 'only', 'steady', 125)], forecast: {...forecastPeriod(3),rows: [{...pressurePerson, plannedUtilization: 125}]}});
   await expectReady();
-  await page.getByText('125% in Jan 2026', {exact: true}).waitFor();
+  await page.getByText('125% in 2026-01-31', {exact: true}).waitFor();
   await page.getByText('Demand exceeds active capacity by 0 FTE at the peak point.', {exact: true}).waitFor();
   await page.getByText('Peak demand reaches 125% of active capacity; review hiring or project start dates.', {exact: true}).waitFor();
   assert.equal(await kpi('Demand Pressure').getByText('High', {exact: true}).count(), 1);
@@ -590,14 +590,14 @@ try {
   const boundaryPerson = employee('boundary', 'excluded', 0, {utilizationEligible: false});
   const boundaryData = {employees: [boundaryPerson], projects: [project('boundary', 'completed', 'Completed')], settings,
     allocations: ['2026-01-30', '2026-01-31', '2026-03-03', '2026-03-04', '2026-05-01', '2026-05-02'].map((date, index) =>
-      allocation('boundary', String(index), 'excluded', 'completed', index + 1, '2026-01-01', date)), forecast: {rows: []}};
+      allocation('boundary', String(index), 'excluded', 'completed', index + 1, '2026-01-01', date)), forecast: {...forecastPeriod(3),rows: []}};
   await settle(boundary, boundaryData);
   await expectReady();
   await table().getByRole('status').getByText(sectionEmptyText, {exact: true}).waitFor();
   assert.deepEqual(await riskGroup('Upcoming Roll-offs (3 Months)').locator('span').allTextContents(), ['31 Jan', '03 Mar', '04 Mar', '01 May']);
   await button('1 Month').click();
   const boundaryOne = await pending(lastId(boundary), 1);
-  await settle(boundaryOne, boundaryData);
+  await settle(boundaryOne, {...boundaryData,forecast:{...forecastPeriod(1),rows:[]}});
   await expectReady();
   await page.waitForFunction(() => [...document.querySelectorAll('h6')].some(h => h.textContent === 'Upcoming Roll-offs (1 Month)'));
   assert.deepEqual(await riskGroup('Upcoming Roll-offs (1 Month)').locator('span').allTextContents(), ['31 Jan', '03 Mar']);

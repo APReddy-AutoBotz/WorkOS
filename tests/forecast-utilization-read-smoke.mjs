@@ -51,11 +51,12 @@ const rawSettings = [
 ];
 let empty = {employees: false, projects: false, allocations: false, report: false};
 let omitReportEmployee = false;
+let periodOverride = {};
 const rawEmployees = () => empty.employees ? [] : baseEmployees;
 const rawProjects = () => empty.projects ? [] : baseProjects;
 const rawAllocations = () => empty.allocations ? [] : baseAllocations;
 const rawReport = months => ({
-  mode: 'forecast', asOfDate: '2026-10-20', sourceDate: '2026-10-20', forecastMonths: months, expectedWeeklyHours: 37.5,
+  mode: 'forecast', asOfDate: ({1:'2026-11-20',2:'2026-12-20',3:'2027-01-20'})[months], sourceDate: '2026-10-20', forecastMonths: months, expectedWeeklyHours: 37.5, ...periodOverride,
   thresholds: {high: 110, low: 75, bench: 15},
   summary: {rows: empty.report ? 0 : omitReportEmployee ? 1 : 2, averagePlanned: 44.44, averageActual: 0, overloaded: 0, underutilized: 1, bench: 1},
   rows: empty.report ? [] : baseEmployees.slice(0, omitReportEmployee ? 1 : 2).map((employee, index) => ({...employee,
@@ -136,6 +137,8 @@ const assertParity = (snapshot, months = 3) => {
   assert.deepEqual(snapshot.projects, projects, 'project normalizer, dates and ordering are unchanged');
   assert.deepEqual(snapshot.allocations, allocations, 'allocation normalizer, project labels, decimals and dates are unchanged');
   assert.deepEqual(snapshot.settings, settings, 'settings retain existing thresholds and defaults');
+  assert.equal(snapshot.sourceDate,rawReport(months).sourceDate);
+  assert.equal(snapshot.horizonDate,rawReport(months).asOfDate);
   assert.deepEqual(snapshot.forecastReportEmployees, normalizeUtilizationReport(rawReport(months)).rows, 'authoritative report values and row ordering retain existing normalization');
 };
 
@@ -144,6 +147,8 @@ await assert.rejects(checkBackend(), /Backend API is required/);
 health = 'connected';
 let start = calls.length;
 assertParity(await readForecastUtilization(3));
+
+
 assertAllReaders(start);
 assert.equal(calls.filter(call => call.url === '/api/health').length, 2, 'coordinated retry recovers a previously cached failed availability check');
 for (const months of [1, 2, 3]) {
@@ -153,6 +158,12 @@ for (const months of [1, 2, 3]) {
 }
 
 // Fail every individual request, including the second/third calls to shared paths.
+for (const invalid of [{sourceDate:'2026-02-30'},{asOfDate:'2027-01-21'},{forecastMonths:1},{mode:'planned'}]) {
+  periodOverride=invalid;
+  await assert.rejects(readForecastUtilization(3), TypeError);
+}
+periodOverride={};
+
 for (const target of expectedRequests(3)) {
   failureTarget = target;
   for (const status of [400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504]) {

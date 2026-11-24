@@ -1,3 +1,4 @@
+import {nativeCheckpoint} from '../../shared/native-forecast.mjs';
 import {GovernedNativeForecast} from '../components/GovernedNativeForecast';
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -45,6 +46,8 @@ type ForecastSnapshot = {
   projects: Project[];
   allocations: Allocation[];
   settings: SystemSettings;
+  sourceDate: string;
+  horizonDate: string;
   forecastReportEmployees: Employee[];
 };
 type ForecastResult = {
@@ -63,10 +66,11 @@ export const readForecastUtilization = async (horizonMonths: number): Promise<Fo
     utilizationReportService.getForecast(horizonMonths),
   ]);
   if (!Array.isArray(employees) || !Array.isArray(projects) || !Array.isArray(allocations)
-    || !settings || !report || !Array.isArray(report.rows)) {
+    || !settings || !report || !Array.isArray(report.rows) || report.mode !== 'forecast' || report.forecastMonths !== horizonMonths
+    || nativeCheckpoint(report.sourceDate, horizonMonths) !== report.asOfDate) {
     throw new TypeError('Report response unavailable');
   }
-  return { employees, projects, allocations, settings, forecastReportEmployees: report.rows };
+  return { employees, projects, allocations, settings, sourceDate: report.sourceDate, horizonDate: report.asOfDate, forecastReportEmployees: report.rows };
 };
 
 export const ForecastUtilizationStatus = ({ status, retry }: { status: ForecastStatus; retry: () => void }) => {
@@ -91,14 +95,6 @@ export const ForecastUtilizationStatus = ({ status, retry }: { status: ForecastS
       </button>
     </div>
   );
-};
-
-const toIsoDate = (date: Date) => date.toISOString().split('T')[0];
-
-const addMonths = (date: Date, months: number) => {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + months);
-  return next;
 };
 
 export const ForecastUtilization = () => {
@@ -145,26 +141,15 @@ export const ForecastUtilization = () => {
   const [deptFilter, setDeptFilter] = useState('All Departments');
 
   const horizonMonths = useMemo(() => Number(horizon.split(' ')[0]), [horizon]);
-  const forecastWindow = useMemo(() => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + horizonMonths);
-      return { start, end };
-  }, [horizonMonths]);
-
+  const sourceDate = snapshot?.sourceDate;
+  const horizonDate = snapshot?.horizonDate;
   const forecastPoints = useMemo(() => {
+    if (!sourceDate) return [];
     return Array.from({ length: horizonMonths + 1 }, (_, index) => {
-      const date = addMonths(forecastWindow.start, index);
-      return {
-        index,
-        date,
-        iso: toIsoDate(date),
-        label: index === 0 ? 'Now' : `+${index}M`,
-        period: date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
-      };
+      const iso = nativeCheckpoint(sourceDate, index);
+      return { index, iso, label: index === 0 ? 'Now' : '+' + index + 'M', period: iso };
     });
-  }, [forecastWindow.start, horizonMonths]);
+  }, [sourceDate, horizonMonths]);
 
   const getEmployeeForecastAt = (employeeId: string, dateIso: string) => {
     return roundMetric(getAllocationLoad(employeeId, allocations, projects, dateIso, dateIso, true));
@@ -251,7 +236,7 @@ export const ForecastUtilization = () => {
   }, [forecastRows, searchQuery, deptFilter]);
 
   const kpis = useMemo<KPIData[]>(() => {
-    if (employees.length === 0) return [];
+    if (!horizonDate || employees.length === 0) return [];
     const horizonForecasts = forecastRows.map(row => row.horizonLoad);
     const peakForecasts = forecastRows.map(row => row.peakLoad);
     const projectedAvg = forecastRows.length > 0 ? roundMetric(horizonForecasts.reduce((sum, value) => sum + value, 0) / forecastRows.length) : 0;
@@ -263,8 +248,8 @@ export const ForecastUtilization = () => {
         .filter(a =>
           a.projectId === project.id &&
           a.status === 'Active' &&
-          isProjectAvailableForPlanning(project, toIsoDate(forecastWindow.end), toIsoDate(forecastWindow.end), true) &&
-          overlapsDateRange(a.startDate, a.endDate, toIsoDate(forecastWindow.end), toIsoDate(forecastWindow.end))
+          isProjectAvailableForPlanning(project, horizonDate, horizonDate, true) &&
+          overlapsDateRange(a.startDate, a.endDate, horizonDate, horizonDate)
         )
         .reduce((sum, a) => sum + a.percentage, 0);
       return projectLoad < 100;
@@ -277,13 +262,14 @@ export const ForecastUtilization = () => {
       { title: 'Demand Pressure', value: highPressureMonth?.pressure > 90 ? 'High' : 'Moderate', icon: 'Activity' },
       { title: 'Active Horizon', value: horizon, icon: 'Calendar' }
     ];
-  }, [employees, horizon, allocations, projects, forecastWindow, forecastRows, supplyDemandData, settings]);
+  }, [employees, horizon, allocations, projects, horizonDate, forecastRows, supplyDemandData, settings]);
 
   const rollOffs = useMemo(() => {
+    if (!sourceDate || !horizonDate) return [];
     return allocations
       .filter(a => {
-        const end = new Date(a.endDate);
-        return a.status === 'Active' && end >= forecastWindow.start && end <= forecastWindow.end;
+        const end = a.endDate.slice(0,10);
+        return a.status === 'Active' && end >= sourceDate && end <= horizonDate;
       })
       .map(a => {
         const employee = employees.find(e => e.id === a.employeeId);
@@ -297,7 +283,7 @@ export const ForecastUtilization = () => {
           client: project.client,
           load: a.percentage,
           endTime: new Date(a.endDate).getTime(),
-          date: new Date(a.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+          date: new Date(a.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' })
         };
       })
       .filter((item): item is {
@@ -312,7 +298,7 @@ export const ForecastUtilization = () => {
       } => Boolean(item))
       .sort((a, b) => a.endTime - b.endTime)
       .slice(0, 5);
-  }, [employees, projects, allocations, forecastWindow]);
+  }, [employees, projects, allocations, sourceDate, horizonDate]);
 
   const futureBenchRows = useMemo(() => {
     return forecastRows
@@ -340,7 +326,7 @@ export const ForecastUtilization = () => {
       horizonLoad: row.horizonLoad,
       status: row.status,
       ...Object.fromEntries(row.snapshots.map(snapshot => [snapshot.label, snapshot.load])),
-      horizon,
+      horizon, sourceDate, horizonDate,
     })), 'Forecast Utilization');
   };
 
@@ -402,7 +388,7 @@ export const ForecastUtilization = () => {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h3 className="text-sm font-bold text-heading">Capacity vs Demand Horizon</h3>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Indicative forecast based on current allocation data</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Allocation checkpoints from {sourceDate} through {horizonDate} (UTC)</p>
             </div>
             <div className="flex items-center gap-4">
                <div className="flex items-center gap-1.5">

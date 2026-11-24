@@ -4,6 +4,8 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+- Anchored forecast charts, roll-off dates and exports to the report source date.
+
 - Added a scoped missing-worker drilldown and corrected weekly submission coverage under status filters.
 
 - Corrected actual utilization displays and CSVs when approval or capacity evidence is missing.
