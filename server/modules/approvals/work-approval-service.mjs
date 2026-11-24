@@ -98,6 +98,13 @@ const emit = async (c, req, v, key, sequence, stage, operationId, reason, o) => 
     }
     return id;
 };
+const refreshStageDeadline = (c, instanceId) => c.query(`
+    update approval_records a
+    set due_at = coalesce((select tr.created_at from work_approval_transitions tr
+                           where tr.instance_id=i.id order by tr.sequence desc limit 1), i.created_at)
+                 + make_interval(mins => (p.definition->>'stageDueMinutes')::numeric::integer)
+    from work_approval_instances i join work_approval_policy_versions p on p.id=i.policy_id
+    where i.id=$1 and a.entity_type='Timesheet' and a.entity_id=i.timesheet_id::text and a.status='Pending'`, [instanceId]);
 export const startWorkApproval = async (c, req, timesheetId, o) => {
     const t = await sourceHeader(c, req, timesheetId), s = await submission(c, req, timesheetId);
     if (!s)
@@ -123,7 +130,7 @@ export const startWorkApproval = async (c, req, timesheetId, o) => {
     await c.query('insert into work_approval_instances(id,organization_id,legal_entity_id,timesheet_id,submission_id,submission_sequence,policy_id,employee_id,requester_user_id,source_token,source_canonical)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [id, ...workApprovalScope(req), t.id, s.id, s.sequence, policy.id, t.employee_id, s.actor_id, capacityHash(canonical), canonical]);
     const v = await scopedWorkApproval(c, req, id, o);
     await emit(c, req, v, 'approval.action_required', 0, 0, req.operationId, null, o);
-    await c.query("update approval_records set due_at=null where entity_type='Timesheet'and entity_id=$1", [t.id]);
+    await refreshStageDeadline(c, id);
     await o.audit(c, req, { module: 'Approvals', action: 'Start Staged Work Approval', entityType: 'WorkApprovalInstance', entityId: id, newValue: { id, timesheetId: t.id, submissionId: s.id, policyId: policy.id, sourceToken: v.i.source_token }, details: 'Explicit adopted work policy; current named-stage authority and mandatory canonical in-app handoff; no default SLA or external delivery.' });
     return true;
 };
@@ -157,8 +164,10 @@ export const decideWorkApproval = async (c, req, id, input, o) => {
         await o.retainWorkDecision(c, req, t, next.status, input.reason, 'Governed approval workspace');
         await o.decideApprovalRecord(c, req, { entityType: 'Timesheet', entityId: t.id, status: next.status, comments: input.reason, suppressNotification: true });
     }
-    if (next.status === 'Pending')
+    if (next.status === 'Pending') {
+        await refreshStageDeadline(c, id);
         await emit(c, req, v, 'approval.action_required', sequence, sequence, req.operationId, null, o);
+    }
     else if (next.status === 'Rejected')
         await emit(c, req, v, 'approval.rejected_or_correction_required', sequence, v.state.currentStage, req.operationId, input.reason, o);
     else {

@@ -18,6 +18,7 @@ export type WorkApprovalDefinition = {
     stages: WorkStage[];
     locale: string;
     completionInApp: boolean;
+    stageDueMinutes?: number;
     templates: Array<{
         key: string;
         subject: string;
