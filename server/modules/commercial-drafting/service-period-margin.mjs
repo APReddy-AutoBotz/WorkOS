@@ -38,6 +38,12 @@ export async function servicePeriodMargin(client,req,input,buildEmployeeScopeWhe
   if (!scope.visible) fail(403,'MARGIN_DENIED','Current access to all contributing workers is required.');
   const token=createHash('sha256').update(JSON.stringify([...args,report])).digest('hex');
   const data={engagementId:req.params.id,monthStart:input.monthStart,report,token};
+  if (input.version) {
+    const {rows:[assessment]}=await client.query(`select ends_on::text "monthEnd", threshold_percent::text "thresholdPercent",
+      status from commercial_service_month_end_thresholds where margin_version_id=$1 and organization_id=$2 and legal_entity_id=$3`,
+      [saved.id,organizationId,legalEntityId]);
+    data.monthEndAssessment=assessment;
+  }
   if (input.thresholdPercent!==undefined) {
     const actual=report.marginPercent;
     const status=actual===null?'Unavailable':hundredths(actual)<hundredths(input.thresholdPercent)?'Below':'AtOrAbove';

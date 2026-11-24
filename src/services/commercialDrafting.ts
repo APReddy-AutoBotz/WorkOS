@@ -698,6 +698,10 @@ export const commercialDraftingService = {
           !/^[A-Z]{3}$/.test(text(p.currency)) || !/^[0-9a-f]{64}$/.test(text(r.token))) throw invalid();
         const exact=(v:unknown)=>{const s=text(v);if (!/^-?(0|[1-9]\d*)(\.\d+)?$/.test(s)) throw invalid();return s;};
         return {version:r.version===null?null:integer(r.version,1),latestVersion:integer(r.latestVersion),token:text(r.token),
+          monthEndAssessment:options.version===undefined?null:z.object({
+            monthEnd:z.string().date(),thresholdPercent:z.string().nullable(),
+            status:z.enum(['Open','Inactive','Unavailable','Below','AtOrAbove'])
+          }).strict().parse(r.monthEndAssessment),
           comparison:options.thresholdPercent===undefined?null:z.object({thresholdPercent:z.literal(options.thresholdPercent),status:z.enum(['Unavailable','Below','AtOrAbove'])}).strict().parse(r.thresholdComparison),
           currency:text(p.currency),billable:exact(p.billable),cost:exact(p.retainedCost),margin:p.margin===null?null:exact(p.margin),
           percent:p.marginPercent===null?null:exact(p.marginPercent),hours:exact(p.approvedHours),entries:integer(p.approvedEntries),

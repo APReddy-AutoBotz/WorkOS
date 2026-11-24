@@ -30,6 +30,11 @@ export function ServicePeriodMargin({context,engagement,today}:{context:Commerci
         {state.version===null && context.canRetainServiceMargin && (state.entries+state.receipts+state.billingEvents)>0 &&
           <button type="button" onClick={()=>void inspect({expectedToken:state.token})}>Retain month</button>}
         {state.version!==null && <div>
+          {state.monthEndAssessment ? <p role="status">Month ending {state.monthEndAssessment.monthEnd} · {{
+            Open:'Awaiting month-end', Inactive:'No active threshold', Unavailable:'Margin percentage unavailable',
+            Below:'Below approved threshold', AtOrAbove:'At or above approved threshold'
+          }[state.monthEndAssessment.status]}{state.monthEndAssessment.thresholdPercent!==null && ' · '+state.monthEndAssessment.thresholdPercent+'%'}</p> :
+            <button type="button" onClick={()=>void inspect({version:state.version!})}>Check month-end threshold</button>}
           <label>Comparison threshold (%)<input value={threshold} onChange={event=>setThreshold(event.target.value)} /></label>
           <button type="button" disabled={!/^-?(?:0|[1-9]\d{0,11})(?:\.\d{1,2})?$/.test(threshold)}
             onClick={()=>void inspect({version:state.version!,thresholdPercent:threshold})}>Compare retained margin</button>
