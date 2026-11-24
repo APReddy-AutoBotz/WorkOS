@@ -126,6 +126,8 @@ The separate PR-006 deployment-auditor recovery increment closes the known failu
 
 PR identifiers after PR #1 are planned sequence identifiers until opened.
 
+The following table preserves the original planning and corrective-hold checkpoint. For subsequent controller decisions and current workstream closure, see the [launch acceptance checkpoint](IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint).
+
 | Work package | Requirement groups | Issue | PR | Accepted commit | Release | Status |
 |---|---|---|---|---|---|---|
 | WOS-00 | Programme/architecture/NFR/control | #2 / corrective #13 | Historical PR #1 merged; Draft PR #14 active | Historical `main@880b3dc244bf516c4e535fb68e455e6153aec395`; corrected baseline pending | v0.1.0 | Corrective hold; accepted weight 0/suspended until PR #14 receives a clean exact-head review, guarded merge and corrected-baseline recording |

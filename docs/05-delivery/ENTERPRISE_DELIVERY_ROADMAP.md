@@ -1,5 +1,22 @@
 # Enterprise delivery and integration roadmap
 
+The [launch acceptance checkpoint](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint) lists the weight of each open workstream and the evidence still required for release.
+
+## Launch work by accountable role
+
+Reviewed against commercial main `774f6f53351b8e8976b67c63d13cd6c9e616af6d` on 24 November. Each row names the evidence to take to the existing programme issue. These are release priorities. Each issue retains its complete acceptance criteria.
+
+| Issue | Evidence to reuse | Next action and exit condition | Accountable role |
+| --- | --- | --- | --- |
+| [WOS-01 #3](https://github.com/APReddy-AutoBotz/WorkOS/issues/3) | Bootstrap import verified against all 118 included file hashes and five hosted acceptance jobs | Retain the receipts on #3. Review [buyer-configurable branding](https://github.com/APReddy-AutoBotz/WorkOS/pull/361) against WOS-ORG-005. | Engineering release lead |
+| [WOS-03 #5](https://github.com/APReddy-AutoBotz/WorkOS/issues/5) | Merged platform PRs #40 and #41 with hosted CI receipts on #5 | Reconcile remaining production mutation audit coverage. Verify [packaged readiness](https://github.com/APReddy-AutoBotz/WorkOS/pull/362) on the candidate. Measure the prose-only CI path after #358 merges. | Platform engineering |
+| [WOS-04 #6](https://github.com/APReddy-AutoBotz/WorkOS/issues/6) | Hosted journeys for all seven lifecycle models, daily/weekly capture, assignment versions, capacity, historical reads and worklog identity | Use the linked checks on #6. Reconcile the remaining workforce criteria and mutation audit coverage. | Product engineering |
+| [WOS-05 #7](https://github.com/APReddy-AutoBotz/WorkOS/issues/7) | Hosted work-approval and delegation checks; invoice withdrawal and compatibility-write negatives | Verify overdue approval delivery to the current approvers and configured escalation target, then reconcile bulk authority and remaining source types. | Approval workflow owner |
+| [WOS-06 #8](https://github.com/APReddy-AutoBotz/WorkOS/issues/8) | Immutable CSV, signed fixed-fee statements and approved expense budgets; [provider delivery](https://github.com/APReddy-AutoBotz/WorkOS/pull/360) in review | Complete provider review. Finance must select the evidence source for actual non-labor costs. Reconcile those costs, margins, corrections and locks before product-owner Gate C. | Commercial engineering and finance owner |
+| [WOS-07 #9](https://github.com/APReddy-AutoBotz/WorkOS/issues/9) | Mandatory PO and retainer notices; [closed-month margin alert](https://github.com/APReddy-AutoBotz/WorkOS/pull/359) passed bounded and hosted acceptance | Review and merge #359. Evaluate remaining reporting and adapter criteria against the existing contracts. | Reporting and integration engineering |
+| [WOS-08 #10](https://github.com/APReddy-AutoBotz/WorkOS/issues/10) | Production identity checks, PostgreSQL restore rehearsal and five historical scanner fingerprints on #10 | Record the disposition of each historical finding. Measure recovery on the selected candidate and assign buyer environment alert ownership. | Security and operations leads |
+| [WOS-09 #11](https://github.com/APReddy-AutoBotz/WorkOS/issues/11) | Checksummed image packaging; the existing identity journey now targets the image in [draft #362](https://github.com/APReddy-AutoBotz/WorkOS/pull/362) | Verify the packaged candidate and publish its digest. After pilot assignment, reconcile imports, complete role UAT and record the buyer decision for Gate D. | Release lead, then assigned buyer owner |
+
 The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.
 
 Forecast checkpoints and roll-offs use the UTC source date returned by the report. The chart labels individual checkpoint dates and the audited CSV includes the source and horizon end dates.
@@ -290,7 +307,7 @@ Finance can inspect released purchase orders across the selected legal entity fo
 
 ### Purchase-order alert assignments
 
-Purchase-order alerts now cover unused released orders, shared orders, verified threshold crossings and exhaustion. The delivery work includes a finance register for assignment gaps, retriable in-app delivery, a dated opening observation for at-risk upgraded orders, and receipt access checks after reassignment. Broader commercial risk coverage still includes retainer and portfolio margin alerts.
+Purchase-order alerts now cover unused released orders, shared orders, verified threshold crossings and exhaustion. The delivery work includes a finance register for assignment gaps, retriable in-app delivery, a dated opening observation for at-risk upgraded orders, and receipt access checks after reassignment. Retainer capacity notices now reach the current owners of explicitly assigned engagements. Portfolio margin alerts remain open.
 
 ### Retainer risk reporting
 
