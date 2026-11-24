@@ -22,6 +22,9 @@ import {periodDecision,periodReviewGrant,servicePeriodReview} from './service-pe
 import {captureCommand,captureGrant,captureServiceUnits,evidenceQuery,serviceUnitHistory} from './service-unit-evidence.mjs';
 import {retainerRegister,retainerIssueGrant,retainerIssueCommand} from './retainer-eligibility.mjs';
 import {retainerStatement,statementGrant,statementCommand,statementQuery,reviewGrant,reviewCommand} from './retainer-statement.mjs';
+import {retainerAssignments} from './retainer-risk-assignments.mjs';
+import {retainerRiskConfigureGrant,retainerRiskPolicy,retainerDeliveryStatus} from './retainer-risk-policy.mjs';
+import {retainerRiskQuery,retainerRiskRegister} from './retainer-risk-register.mjs';
 import {getRetainerConsumption} from './retainer-consumption.mjs';
 import {fixedFeeRegister,fixedFeeGrant,installmentCommand} from './fixed-fee-eligibility.mjs';
 import {purchaseOrderRelease,purchaseOrderBalance,purchaseOrderRisks,purchaseOrderRiskQuery,purchaseOrderRiskHistory,purchaseOrderHistoryQuery,releaseSchema} from './purchase-order-release.mjs';
@@ -72,10 +75,10 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if (error?.code==='PRA01') res.status(403).json({error:{code:'PO_ASSIGNMENT_DENIED',message:'Current purchase order authority is required.'}});
-      else if (error?.code==='PRA02') res.status(409).json({error:{code:'PO_ASSIGNMENT_INVALID',message:'Review the assignment version and the engagements on this contract.'}});
-      else if (['FRN01','PRN01'].includes(error?.code)) res.status(403).json({error:{code:'RISK_POLICY_DENIED',message:'Current scoped configuration authority is required.'}});
-      else if (['FRN02','FRN03','PRN02','PRN03'].includes(error?.code)) res.status(409).json({error:{code:'RISK_POLICY_UNAVAILABLE',message:'Review the current recipient relationships, policy version and effective date.'}});
+      }else if (['PRA01','RRA01'].includes(error?.code)) res.status(403).json({error:{code:'PO_ASSIGNMENT_DENIED',message:'Current purchase order authority is required.'}});
+      else if (['PRA02','RRA02'].includes(error?.code)) res.status(409).json({error:{code:'PO_ASSIGNMENT_INVALID',message:'Review the assignment version and the engagements on this contract.'}});
+      else if (['FRN01','PRN01','RRN01'].includes(error?.code)) res.status(403).json({error:{code:'RISK_POLICY_DENIED',message:'Current scoped configuration authority is required.'}});
+      else if (['FRN02','FRN03','PRN02','PRN03','RRN02','RRN03'].includes(error?.code)) res.status(409).json({error:{code:'RISK_POLICY_UNAVAILABLE',message:'Review the current recipient relationships, policy version and effective date.'}});
       else if(valuationPeriodWrite && ['CTM04','40001'].includes(error?.code))res.status(409).json({error:{
         code:'FIXED_FEE_PERIOD_UNAVAILABLE',message:'Verify reporting-period coverage and financial locks before recording this value.'}});
       else if(permission===fixedFeeStatementGrant && ['MFS01','40001','23505'].includes(error?.code))res.status(409).json({error:{code:'STATEMENT_CHANGED',message:'Review the locked period and signed versions again.'}});
@@ -216,6 +219,12 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.get('/purchase-orders/:id/risk-assignments',handle(lifecycleQuerySchema,false,(c,r)=>orderAssignments(c,r)));
   router.post('/purchase-orders/:id/risk-assignments',handle(poRiskAssignments,true,(c,r,i)=>orderAssignments(c,r,i,audit),'commercial.purchase_orders.release'));
   router.get('/purchase-orders/:id/risk-history',handle(purchaseOrderHistoryQuery,false,purchaseOrderRiskHistory));
+  router.get('/retainer-versions/:id/risk-assignments',handle(lifecycleQuerySchema,false,(c,r)=>retainerAssignments(c,r)));
+  router.post('/retainer-versions/:id/risk-assignments',handle(poRiskAssignments,true,(c,r,i)=>retainerAssignments(c,r,i,audit),retainerRiskConfigureGrant));
+  router.get('/retainer-versions/:id/risk-deliveries',handle(workspaceQuerySchema,false,retainerDeliveryStatus));
+  router.get('/retainer-versions/:id/risk-policy',handle(workspaceQuerySchema,false,(c,r)=>retainerRiskPolicy(c,r)));
+  router.post('/retainer-versions/:id/risk-policy',handle(riskPolicyCommand,true,(c,r,i)=>retainerRiskPolicy(c,r,i,audit),retainerRiskConfigureGrant));
+  router.get('/retainer-capacity-risks',handle(retainerRiskQuery,false,(c,r,q)=>retainerRiskRegister(c,r,buildEmployeeScopeWhere,q)));
   router.get('/purchase-order-risks',handle(purchaseOrderRiskQuery,false,purchaseOrderRisks));
   router.get('/purchase-orders/:id/balance',handle(lifecycleQuerySchema,false,(client,req)=>purchaseOrderBalance(client,req)));
   router.get('/purchase-orders/:id/release',handle(lifecycleQuerySchema,false,(client,req)=>purchaseOrderRelease(client,req,null)));

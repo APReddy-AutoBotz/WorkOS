@@ -308,3 +308,11 @@ In the commercial workspace, use **Check purchase-order risks** to review releas
 Once a purchase order is released, open **Review alert assignments** and select the engagements that use it. A shared order can have several engagement owners. Finance can filter the risk register for missing assignments or unavailable owners before the first commitment.
 
 In **Review purchase-order risk recipients**, an authorized administrator selects the commercial manager, finance/billing owner and buyer notice template. The governed inbox alerts the current recipients when the order expires, crosses its warning threshold or runs out of available value. **Check order alert deliveries** shows pending retries and evidence of delivery.
+
+### Retainer capacity risks
+
+In Commercial drafting, select **Check governed retainer versions** to find service periods with excess approved hours or unused hours that expired. The register identifies the contract number, exact version, dates and hours. It also flags missing capacity policies. Use **Check next retainer versions** to continue across the portfolio. Access requires entity-wide worker visibility and utilization reporting permission.
+
+### Retainer alert ownership
+
+In a retainer version’s history, open **Review alert assignments** and select the engagements whose current owners should receive capacity alerts. Finance can use **Show missing retainer assignments or owners** before anyone books time. A notice policy names the commercial manager and finance/billing owner and sets the buyer’s template. In **Check retainer alert deliveries**, finance can inspect attempts and recover missing assignments or grants.
