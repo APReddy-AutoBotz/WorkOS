@@ -56,7 +56,7 @@ if (!process.env.WORKOS_PROFILE_DATE_CHILD) {
         defaultTimeZone: 'UTC',baseCurrency: 'USD',fiscalYearStart: '01-01',defaultWeekStart: 1,effectiveFrom: today};
       await database.query(`insert into organization_profile_versions(organization_id,name,legal_name,product_display_name,support_contact,
         default_locale,default_time_zone,base_currency,fiscal_year_start,default_week_start,effective_from,created_by)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'synthetic-date-actor')`, Object.values(profile));
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,null)`, Object.values(profile));
       const pool = {
         query: (sql, values) => sql.includes('from user_organization_scopes s')
           ? Promise.resolve({rows: [{organization_id: 'profile-date-org',legal_entity_id: 'profile-date-legal'}]})
@@ -75,6 +75,9 @@ if (!process.env.WORKOS_PROFILE_DATE_CHILD) {
       const endpoint = `http://127.0.0.1:${server.address().port}/api/organization-setup/profile`;
       // Exercise the real upgrade against the already populated, connection-local profile table.
       await database.query(readFileSync(new URL('../server/migrations/118_wos02_organization_branding.sql',import.meta.url),'utf8'));
+      process.env.PUBLIC_BRANDING_ORGANIZATION_ID = profile.organizationId;
+      const loginBrand = () => fetch(endpoint.replace('/profile','/login-brand')).then(response => response.json());
+      assert.deepEqual(await loginBrand(),{},'an untouched backfilled profile retains deployment branding');
       const send = value => fetch(endpoint, {method: 'PUT',headers: {'Content-Type': 'application/json'},body: JSON.stringify(value)});
       let response = await fetch(endpoint);
       assert.equal(response.status,200);
@@ -91,6 +94,8 @@ if (!process.env.WORKOS_PROFILE_DATE_CHILD) {
       assert.equal(audits.length,1);
       assert.equal(audits[0].oldValue.branding,null);
       assert.deepEqual(audits[0].newValue.branding,branding);
+      assert.deepEqual(await loginBrand(),{productName:profile.productDisplayName,logoUrl:branding.logoUrl,
+        faviconUrl:null,primaryAccent:branding.primaryAccent,secondaryAccent:null});
       assert.equal(audits[0].oldValue.effective_from,today,'latest locked profile audit preserves the calendar date');
       response = await send({...profile,effectiveFrom: earlier});
       assert.equal(response.status,409,'earlier date remains a stable no-write conflict');
