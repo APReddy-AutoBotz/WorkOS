@@ -1,5 +1,9 @@
 # WorkOS Release and Operations Runbook
 
+## Checking missing utilization logs
+
+Select the reporting month, then open **Review workers without logs**. Each listed worker is eligible in the scoped report roster and has no timesheet of any status in that period. For a displayed week, coverage counts distinct eligible workers with a non-draft log divided by the eligible roster. Historical results use the compatibility report roster. A reporting period with a different historical workforce requires dated workforce evidence. Reverting this presentation change requires no data migration.
+
 ## Interpreting compatibility actual utilization
 
 For an approved timesheet, compare billable hours with the configured expected weekly hours. A measured zero is valid. For an unavailable result, check approval status and weekly capacity before using the value in a comparison. The global CSV preserves the same distinction. Weekly reconciliation requires a comparable plan for every approved worker before displaying a gap. Use the governed report when effective available capacity is required. Reverting the presentation change requires no data migration.

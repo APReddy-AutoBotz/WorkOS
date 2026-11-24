@@ -2,6 +2,8 @@
 
 ## Utilization evidence
 
+Reviewers can inspect which eligible workers have no timesheet in the selected period. Changing review status preserves this roster measure and the coverage denominator.
+
 The compatibility actual utilization report now displays missing approval or capacity explicitly in its table, summary and global export. The actual and planned KPI cards display measured values without fixed trend indicators. Governed effective-capacity reports use their existing approved-work sources.
 
 ## Deployment reproducibility

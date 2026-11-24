@@ -35,6 +35,26 @@ function logPercentLabel(sheet: TimesheetSummary, actual: number | null) {
   return actual === null ? 'Unavailable' : formatPercent(actual);
 }
 
+function MissingLogWorkers({ workers }: { workers: Employee[] }) {
+  const [page, setPage] = useState<number | null>(null);
+  const pageSize = 25;
+  if (!workers.length) return null;
+  return <section aria-label="Workers without logs" className="mb-6">
+    <button type="button" className="btn-secondary" aria-expanded={page !== null}
+      onClick={() => setPage(page === null ? 0 : null)}>Review workers without logs ({workers.length})</button>
+    {page !== null && <div className="mt-3 rounded-xl border border-border-light p-4">
+      <p>Eligible workers with no timesheet in the selected period, across all review statuses.</p>
+      <ul className="my-3">{workers.slice(page * pageSize, (page + 1) * pageSize).map(worker =>
+        <li key={worker.id}>{worker.name}</li>)}</ul>
+      {workers.length > pageSize && <div className="flex items-center gap-3">
+        <button type="button" className="btn-secondary" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous workers</button>
+        <span aria-live="polite">Page {page + 1} of {Math.ceil(workers.length / pageSize)}</span>
+        <button type="button" className="btn-secondary" disabled={(page + 1) * pageSize >= workers.length} onClick={() => setPage(page + 1)}>Next workers</button>
+      </div>}
+    </div>}
+  </section>;
+}
+
 type ActualStatus = 'loading' | 'ready' | 'access' | 'unavailable' | 'error';
 type ActualSnapshot = { employees: Employee[]; timesheets: TimesheetSummary[]; settings: SystemSettings };
 type ActualResult = {
@@ -133,15 +153,16 @@ export const ActualUtilization = () => {
     }
   }, [monthOptions, selectedMonth]);
 
-  const scopedTimesheets = useMemo(() => {
-    return timesheets.filter(timesheet => {
-      const matchesMonth = selectedMonth === 'all' || timesheet.weekEnding.startsWith(selectedMonth);
-      const matchesStatus = statusFilter === 'Consolidated'
-        || (statusFilter === 'Approved Only' && timesheet.status === 'Approved')
-        || (statusFilter === 'Pending Review' && timesheet.status === 'Submitted');
-      return matchesMonth && matchesStatus;
-    });
-  }, [timesheets, selectedMonth, statusFilter]);
+  const periodTimesheets = useMemo(() => selectedMonth === 'all' ? timesheets :
+    timesheets.filter(sheet => sheet.weekEnding.startsWith(selectedMonth)), [timesheets, selectedMonth]);
+  const eligibleWorkers = useMemo(() => getUtilizationEligibleEmployees(employees), [employees]);
+  const missingWorkers = useMemo(() => {
+    const logged = new Set(periodTimesheets.map(sheet => sheet.employeeId));
+    return eligibleWorkers.filter(worker => !logged.has(worker.id)).sort((a,b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }, [eligibleWorkers, periodTimesheets]);
+  const scopedTimesheets = useMemo(() => periodTimesheets.filter(sheet => statusFilter === 'Consolidated'
+    || (statusFilter === 'Approved Only' && sheet.status === 'Approved')
+    || (statusFilter === 'Pending Review' && sheet.status === 'Submitted')), [periodTimesheets, statusFilter]);
 
   const filteredLogs = useMemo(() => {
     return scopedTimesheets.filter(ts => ts.employeeName.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -150,7 +171,7 @@ export const ActualUtilization = () => {
   const kpis = useMemo<KPIData[]>(() => {
     if (employees.length === 0) return [];
 
-    const active = getUtilizationEligibleEmployees(employees);
+    const active = eligibleWorkers;
 
     // Average actual utilization across approved timesheets in the current scope
     const approvedTimesheets = scopedTimesheets.filter(timesheet => timesheet.status === 'Approved');
@@ -161,7 +182,6 @@ export const ActualUtilization = () => {
     const approved = scopedTimesheets.filter(t => t.status === 'Approved').length;
     const total = scopedTimesheets.length;
     const submissionRate = total > 0 ? ((approved + pendingReview) / total * 100) : 0;
-    const missingLogs = active.filter(e => !scopedTimesheets.some(t => t.employeeId === e.id)).length;
     const latestApprovedByEmployee = new Map<string, TimesheetSummary>();
     approvedTimesheets
       .sort((a, b) => new Date(a.weekEnding).getTime() - new Date(b.weekEnding).getTime())
@@ -179,12 +199,12 @@ export const ActualUtilization = () => {
       { title: 'Pending Review', value: pendingReview, icon: 'Timer' },
       { title: 'Approved Logs', value: approved, icon: 'FileCheck' },
       { title: 'Logging Variance', value: loggingVariance === null ? 'Unavailable' : formatPercent(loggingVariance), icon: 'AlertTriangle' },
-      { title: 'Missing Logs', value: missingLogs, icon: 'Clock' }
+      { title: 'Workers Without Logs', value: missingWorkers.length, icon: 'Clock' }
     ];
-  }, [employees, scopedTimesheets, settings]);
+  }, [employees, eligibleWorkers, missingWorkers, scopedTimesheets, settings]);
 
   const weeklyReconciliation = useMemo(() => {
-    const active = getUtilizationEligibleEmployees(employees);
+    const active = eligibleWorkers;
     const activeById = new Map(active.map(employee => [employee.id, employee]));
     const weeks = Array.from(new Set<string>(scopedTimesheets.map(timesheet => timesheet.weekEnding)))
       .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
@@ -192,7 +212,7 @@ export const ActualUtilization = () => {
 
     return weeks.map(weekEnding => {
       const weekSheets = scopedTimesheets.filter(timesheet => timesheet.weekEnding === weekEnding);
-      const submittedSheets = weekSheets.filter(timesheet => timesheet.status !== 'Draft');
+      const submittedSheets = periodTimesheets.filter(sheet => sheet.weekEnding === weekEnding && sheet.status !== 'Draft' && activeById.has(sheet.employeeId));
       const approvedSheets = weekSheets.filter(timesheet => timesheet.status === 'Approved');
       const submittedEmployeeIds = new Set<string>(submittedSheets.map(timesheet => timesheet.employeeId));
       const approvedEmployeeIds = new Set<string>(approvedSheets.map(timesheet => timesheet.employeeId));
@@ -211,11 +231,11 @@ export const ActualUtilization = () => {
         planned: planned === null ? null : Math.round(planned),
         actual: actual === null ? null : Math.round(actual),
         gap: actual === null || planned === null ? null : Math.round(actual - planned),
-        coverage: active.length ? Math.round((submittedEmployeeIds.size / active.length) * 100) : 0,
+        coverage: active.length ? Math.round((submittedEmployeeIds.size / active.length) * 100) : null,
         pending: weekSheets.filter(timesheet => timesheet.status === 'Submitted').length,
       };
     });
-  }, [employees, scopedTimesheets, settings]);
+  }, [eligibleWorkers, periodTimesheets, scopedTimesheets, settings]);
 
   const varianceWatchlist = useMemo(() => {
     const expectedWeeklyHours = settings?.expectedWeeklyHours;
@@ -361,13 +381,14 @@ export const ActualUtilization = () => {
 
       {hasData && <>
       <KPIStrip kpis={kpis} />
+      <div key={selectedMonth + result.generation}><MissingLogWorkers workers={missingWorkers} /></div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="lg:col-span-2 bg-white border border-border-light rounded-3xl p-6 shadow-sm">
           <div className="flex items-start justify-between gap-6 mb-6">
             <div>
               <h3 className="text-sm font-bold text-heading">Actual vs Planned Reconciliation</h3>
-              <p className="text-xs text-gray-600">Weekly actual uses approved billable hours divided by configured weekly hours per approved worker. A gap requires planned utilization for the same workers.</p>
+              <p className="text-xs text-gray-600">Weekly actual uses approved billable hours divided by configured weekly hours per approved worker. A gap requires planned utilization for the same workers. Coverage counts eligible workers with a non-draft log that week across all statuses.</p>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Approved effort compared with allocation plan by week</p>
             </div>
             <div className="hidden sm:flex items-center gap-4 text-[9px] font-bold uppercase tracking-widest text-gray-400">
@@ -414,7 +435,7 @@ export const ActualUtilization = () => {
                     </div>
                     <div className="bg-white rounded-xl border border-slate-100 p-3">
                       <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Coverage</p>
-                      <p className="text-sm font-bold text-heading mt-1">{row.coverage}%</p>
+                      <p className="text-sm font-bold text-heading mt-1">{row.coverage === null ? 'N/A' : formatPercent(row.coverage)}</p>
                     </div>
                     <div className="bg-white rounded-xl border border-slate-100 p-3">
                       <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Review</p>
