@@ -381,17 +381,28 @@ const fixedFeeBalance = z.object({
     gross + credits === balanceUnits(row.net);
 });
 export type FixedFeeBalance=z.infer<typeof fixedFeeBalance>;
-export const invoiceDrafts = {
-  fixedFeeBalances: async(engagementId:string,c:RateContext|null):Promise<FixedFeeBalance[]>=>{
+const fixedFeeControl = z.object({
+  currency:z.string().regex(/^[A-Z]{3}$/),
+  boundary:z.enum(['Source','Eligibility event','Register item','Current occupancy','Current line','Exported line','Confirmed line','Released historical line']),
+  expected:z.number().int().positive(),observed:z.number().int().nonnegative(),
+  amount:balanceAmount,exceptions:z.number().int().nonnegative(),
+}).strict().refine(row=>row.observed<=row.expected && row.exceptions<=row.expected && row.expected-row.observed<=row.exceptions);
+const fixedFeeReport = async(engagementId:string,c:RateContext|null, includeControls:boolean)=>{
     const allowed=()=>hasRatePermission('commercial.fixed_fee_eligibility.issue') && hasRatePermission('commercial.invoice_export.view');
     if (!allowed() || !id.safeParse(engagementId).success) return bad();
-    const raw=await call('GET','/reconciliation/fixed-fee?'+new URLSearchParams({engagementId}),c,'view');
-    const report=z.object({...envelope,engagementId:id,balances:z.array(fixedFeeBalance)}).strict().safeParse(raw);
+    const raw=await call('GET','/reconciliation/fixed-fee?'+new URLSearchParams(includeControls ? {engagementId,controls:'1'} : {engagementId}),c,'view');
+    const report=z.object({...envelope,engagementId:id,balances:z.array(fixedFeeBalance),controls:z.array(fixedFeeControl).optional()}).strict().safeParse(raw);
     if (!allowed() || !report.success || report.data.engagementId!==engagementId) return bad();
     const keys=report.data.balances.map(row=>row.currency+row.status);
     if (new Set(keys).size!==keys.length) return bad();
-    return report.data.balances;
-  },
+    const controls=report.data.controls;
+    if (includeControls && !controls || controls && new Set(controls.map(row=>row.currency+'/'+row.boundary)).size!==controls.length) return bad();
+    return {balances:report.data.balances,controls:controls ?? []};
+  };
+
+export const invoiceDrafts = {
+  fixedFeeBalances: async(engagementId:string,c:RateContext|null) => (await fixedFeeReport(engagementId,c,false)).balances,
+  fixedFeeReport: (engagementId:string,c:RateContext|null) => fixedFeeReport(engagementId,c,true),
   availableInstallments: async(batchId:string,c:RateContext|null,after?:string)=>{
     if (!uuid.safeParse(batchId).success || !hasRatePermission('commercial.fixed_fee_eligibility.issue')) return bad();
     const data=await call('GET','/batches/'+batchId+'/available-installments'+(after?'?after='+encodeURIComponent(after):''),c,'view');
