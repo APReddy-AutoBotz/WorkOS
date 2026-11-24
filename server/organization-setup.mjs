@@ -156,7 +156,7 @@ export const registerOrganizationSetupRoutes = ({
     const {rows}=await pool.query(`select product_display_name as "productName",
       branding->>'logoUrl' as "logoUrl",branding->>'faviconUrl' as "faviconUrl",
       branding->>'primaryAccent' as "primaryAccent",branding->>'secondaryAccent' as "secondaryAccent"
-      from organization_profile_versions where organization_id=$1 and (now() at time zone 'UTC')::date
+      from organization_profile_versions where organization_id=$1 and (created_by is not null or branding is not null) and (now() at time zone 'UTC')::date
       between effective_from and coalesce(effective_to,'infinity'::date) order by effective_from desc limit 1`,
       [organizationId]);
     return res.json(rows[0] ?? {});
@@ -212,7 +212,7 @@ export const registerOrganizationSetupRoutes = ({
         await client.query('update organization_profile_versions set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
       const values=[req.organizationScope.organizationId,parsed.data.name,parsed.data.legalName,parsed.data.productDisplayName,parsed.data.supportContact,
         parsed.data.defaultLocale,parsed.data.defaultTimeZone,parsed.data.baseCurrency,parsed.data.fiscalYearStart,parsed.data.defaultWeekStart,parsed.data.effectiveFrom,req.user.sub,
-        JSON.stringify(parsed.data.branding ?? latest?.branding ?? {})];
+        parsed.data.branding ?? latest?.branding ?? null];
       const result=await client.query(`insert into organization_profile_versions(organization_id,name,legal_name,product_display_name,support_contact,
         default_locale,default_time_zone,base_currency,fiscal_year_start,default_week_start,effective_from,created_by,branding)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) on conflict(organization_id,effective_from) do update set
@@ -540,10 +540,10 @@ export const registerOrganizationSetupRoutes = ({
     const termsResponse=row?{...row,terms:normalizeTerminologyTerms(row.terms)}:{terms:{}};
     if(req.query.includeBrand !== '1') return res.json(termsResponse);
     const brand=await pool.query(`select name as "organizationName",product_display_name as "productName",branding
-      from organization_profile_versions p where organization_id=$1 and ${asOfPredicate('p','$2')}
+      from organization_profile_versions p where organization_id=$1 and (p.created_by is not null or p.branding is not null) and ${asOfPredicate('p','$2')}
       order by effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
     const profile=brand.rows[0];
-    res.json({...termsResponse,...(profile ? {brand:{...brandingSchema.parse(profile.branding),
+    res.json({...termsResponse,...(profile ? {brand:{...brandingSchema.parse(profile.branding ?? {}),
       productName:profile.productName,organizationName:profile.organizationName}} : {})});
   }));
   router.post('/terminology',requirePermission('settings.manage'),asyncHandler(async(req,res)=>{

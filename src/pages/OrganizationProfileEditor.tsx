@@ -128,7 +128,7 @@ export const OrganizationProfileEditor = () => {
     if (owner.generation !== state.generation || owner.status !== 'ready' || !owner.draft || !current(owner)) return;
     publish({...owner, status: 'saving', message: undefined});
     try {
-      const profile = await adminService.updateOrganizationProfile({...owner.draft}, owner.context);
+      const profile = await adminService.updateOrganizationProfile({...owner.draft,branding:owner.draft.branding ?? {}}, owner.context);
       if (discardStale(owner)) return;
       if (profile.organizationId !== owner.context!.scope.organizationId) throw new Error('Saved profile scope did not match');
       publish({...owner, status: 'ready', draft: profile, message: profile.effectiveFrom > new Date().toISOString().slice(0, 10)
