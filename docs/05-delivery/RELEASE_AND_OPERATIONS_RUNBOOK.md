@@ -1,5 +1,9 @@
 # WorkOS Release and Operations Runbook
 
+## Interpreting forecast allocation pressure
+
+For each checkpoint, count the eligible workers and multiply by 100 to obtain capacity in allocation percentage points. Compare this with active allocations for those workers on active or proposed projects in term that day. The project indicator counts in-term projects below 100 allocated points at the final checkpoint. Diagnosing an actual staffing shortage requires the project's demand evidence. A zero eligible roster leaves pressure unavailable. Reverting the reporting change requires no migration.
+
 ## Reconciling a forecast period
 
 Use the source and horizon end dates displayed on the compatibility forecast or retained in the CSV. The existing UTC month-overflow rule applies each offset to the original source date. For example, one and two months from 31 January 2026 give 3 March and 31 March. The exact checkpoint labels distinguish those observations. Refresh the report if its period could not be confirmed. Reverting this presentation change requires no data migration.
