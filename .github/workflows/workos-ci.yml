@@ -15,8 +15,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate application, migrations, and container
+  scope:
+    name: Check documentation scope
+    runs-on: ubuntu-24.04
+    outputs:
+      prose: ${{ steps.scope.outputs.prose }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - id: scope
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Compare the tested merge tree to its actual base parent.
+          changes=$(git diff --no-renames --name-status HEAD^1 HEAD)
+          [[ -n "$changes" ]] || exit 0
+          while IFS= read -r change; do
+            case "$change" in
+              $'M\tCHANGELOG.md'|$'M\tdocs/00-control/IMPLEMENTATION_STATUS.md'|$'M\tdocs/05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md') ;;
+              *) exit 0 ;;
+            esac
+          done <<< "$changes"
+          summary=$(git diff --summary HEAD^1 HEAD)
+          [[ -z "$summary" ]] || exit 0
+          git diff --check HEAD^1 HEAD
+          echo "prose=true" >> "$GITHUB_OUTPUT"
+
+  application:
+    name: Run application and deployment checks
+    needs: scope
+    if: needs.scope.outputs.prose != 'true'
     # The locked Playwright browser registry supports Ubuntu 24.04.
     runs-on: ubuntu-24.04
     permissions:
@@ -518,6 +551,23 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
+
+  validate:
+    name: Validate application, migrations, and container
+    needs: [scope, application]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require the selected checks
+        env:
+          SCOPE: ${{ needs.scope.result }}
+          PROSE: ${{ needs.scope.outputs.prose }}
+          APPLICATION: ${{ needs.application.result }}
+        run: |
+          [[ "$SCOPE" == success ]] && {
+            [[ "$PROSE" == true && "$APPLICATION" == skipped ]] ||
+            [[ "$PROSE" != true && "$APPLICATION" == success ]]
+          }
 
   secret-scan:
     name: Scan full history for secrets

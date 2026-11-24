@@ -893,3 +893,7 @@ For application rollback, stop the new worker by reverting the application relea
 Apply migration 113 and grant commercial.retainer_risk.configure to authorized commercial administrators. In contract version history, assign the intended engagements, then set the effective notice policy. Finance can find unconfigured versions and unavailable engagement owners using the routing filter. Review the named roles, template and inbox permissions before treating delivery as operational.
 
 The API worker polls every 30 seconds and schedules each governed retainer version for reassessment after five minutes. An observation records the exact capacity inputs and hours at detection. A later observation can resolve an episode. Unverified coverage does not establish recovery. Pending notices retain their observed event and retry with bounded backoff. External delivery and point-in-time reconstruction between scans are outside this gate. For an application rollback, retain migration 113 and its evidence. Restoring the worker resumes pending deliveries.
+
+## CI for progress updates
+
+PRs targeting main that only modify existing text in the changelog, implementation status, or enterprise delivery roadmap run a whitespace check and the full-history secret scan. Other PR changes, main pushes and manual runs select the application and deployment suite. Use a manual run to obtain full evidence for a release revision. Revert the workflow change to restore full application validation on every eligible progress PR.

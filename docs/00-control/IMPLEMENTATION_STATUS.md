@@ -1,5 +1,9 @@
 # WorkOS implementation status
 
+## Delivery acceleration
+
+The WOS-OPS-007 candidate scopes application validation for progress-only PRs. Buyer acceptance and release evidence still use the full release path.
+
 ## Utilization evidence
 
 Forecast pressure and project allocation indicators now use the same dated eligible workforce and project population. A checkpoint without capacity cannot generate a hiring assessment.
