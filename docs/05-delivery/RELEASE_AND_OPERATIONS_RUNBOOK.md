@@ -904,7 +904,7 @@ After UTC month-end, the worker evaluates the last version retained during the m
 
 Open **Governance Settings → Customize Branding** with settings-management authority. Supply image paths served by the buyer's frontend, review the preview, select the effective date and save the organization profile. Both accent colors need at least 4.5:1 contrast against white. Empty asset and color fields use deployment defaults. The report label prefixes report export filenames and the email label prefixes Graph notification subjects.
 
-To publish the effective product name, login logo, favicon and accents before authentication, set `PUBLIC_BRANDING_ORGANIZATION_ID` to the deployment's buyer organization. An unset selector leaves the deployment login brand in use. The login endpoint takes no organization selector from the browser. For rollback, restore the prior values through the profile editor and retain the profile versions and audit records.
+To publish the effective product name, login logo, favicon and accents before authentication, set `PUBLIC_BRANDING_ORGANIZATION_ID` to the deployment's buyer organization. An unset selector leaves the deployment login brand in use. A profile without a favicon uses the deployment logo configured by `VITE_PRODUCT_LOGO_URL`. The login endpoint takes no organization selector from the browser. For rollback, restore the prior values through the profile editor and retain the profile versions and audit records.
 
 ### Governed work approval deadlines
 

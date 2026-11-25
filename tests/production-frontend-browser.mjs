@@ -7,8 +7,9 @@ import {chromium} from 'playwright';
 import express from 'express';
 
 const brand = 'Synthetic & Co';
+const deploymentIcon = '/workos-mark.svg?deployment';
 execFileSync(process.execPath, ['scripts/build-frontend.mjs'], {
-  env: {...process.env, VITE_PRODUCT_NAME: brand, VITE_APP_MODE: 'production'},
+  env: {...process.env, VITE_PRODUCT_NAME: brand, VITE_PRODUCT_LOGO_URL: deploymentIcon, VITE_APP_MODE: 'production'},
   stdio: 'inherit',
 });
 
@@ -49,6 +50,7 @@ try {
   const signIn = page.getByText('Sign in', {exact: true}).first();
   await signIn.waitFor();
   assert.equal(await page.title(), brand);
+  assert.equal(await page.locator('#workos-favicon').getAttribute('href'), deploymentIcon);
   assert.equal(await signIn.evaluate(el => getComputedStyle(el).textTransform), 'uppercase');
   assert.deepEqual(errors, []);
   await new Promise(resolve => server.close(resolve));

@@ -562,7 +562,7 @@ Production Compose wiring for WOS-IAM-008 is checked with a fractional session l
 
 WOS-IAM-001 and WOS-NFR-SEC-001/002/013: shared auth throttle migration 057c, API middleware and `test:persistent-auth-throttle` verify durable replica budgets and safe storage failure.
 
-The production frontend build verifies WOS-ORG-005 document branding in `tests/document-metadata-smoke.mjs` and exercises the compiled login route in `tests/production-frontend-browser.mjs`. Build output checks cover default and configured metadata and a server-only environment marker.
+The production frontend build verifies WOS-ORG-005 document branding in `tests/document-metadata-smoke.mjs` and exercises the compiled login route in `tests/production-frontend-browser.mjs`. Build output checks cover default and configured metadata and a server-only environment marker. The compiled login check verifies that the deployment favicon survives runtime branding initialization.
 
 
 Notification diagnostics: WOS-IAM-005/010, CORE-003, INT-002/004, NFR-SEC-004/008/013 and PRV-001 map to scoped delivery SQL, the typed diagnostic projection, new notification writes, historical integration/audit readers and real API/browser negative tests. See [the task](../tasks/WOS-05-NOTIFICATION-DIAGNOSTIC-BOUNDARY.md). Broader notification policy/retry and deployment-wide support access remain separate.
