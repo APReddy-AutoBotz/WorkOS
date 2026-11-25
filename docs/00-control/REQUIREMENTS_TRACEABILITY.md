@@ -840,3 +840,9 @@ WOS-APR-008. The timesheet bulk action requires a configured approval role and t
 ### Fixed-fee engagement billing controls
 
 WOS-RPT-007 and WOS-INV-008. Fixed-fee engagement reconciliation compares pinned installments and approved line reversals with eligibility events, register items, current occupancy, invoice lines, exports and confirmations. The commercial drafting browser journey follows a charge and credit through those states.
+
+### Retainer and managed-service billing reconciliation
+
+WOS-RPT-007 and WOS-INV-008. The commercial drafting journey follows registered retainer periods, managed-service periods and managed-service units alongside their full-line credits. The engagement report compares pinned source amounts, current and released lines, exports and confirmations using the source's existing billing permission.
+
+WOS-RPT-007. The portfolio report accepts an eligible date range for registered fixed-fee installments, retainer periods, managed-service units or managed-service periods. The commercial drafting journey exercises the source permissions, signed balances, portfolio controls and audited CSV download.

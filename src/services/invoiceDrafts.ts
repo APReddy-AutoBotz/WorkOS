@@ -367,31 +367,56 @@ const balanceUnits = (value: string) => {
   const [integer, fraction = ''] = value.split('.');
   return BigInt(integer + fraction.padEnd(4, '0'));
 };
-const fixedFeeBalance = z.object({
+const balanceFields = {
   currency: z.string().regex(/^[A-Z]{3}$/),
   status: z.enum(['Available', 'Reserved', 'Exported', 'Confirmed']),
-  installments: z.number().int().nonnegative(),
   credits: z.number().int().nonnegative(),
   gross: balanceAmount, adjustments: balanceAmount, net: balanceAmount,
-}).strict().refine(row => {
+};
+const count=z.number().int().nonnegative();
+const chargeBalance=z.object({...balanceFields,charges:count}).strict().refine(row => {
   if (![row.gross,row.adjustments,row.net].every(value => balanceAmount.safeParse(value).success)) return false;
   const gross = balanceUnits(row.gross), credits = balanceUnits(row.adjustments);
-  return row.installments + row.credits > 0 && gross >= 0n && credits <= 0n &&
-    (row.installments === 0) === (gross === 0n) && (row.credits === 0) === (credits === 0n) &&
+  return row.charges + row.credits > 0 && gross >= 0n && credits <= 0n &&
+    (row.charges === 0) === (gross === 0n) && (row.credits === 0) === (credits === 0n) &&
     gross + credits === balanceUnits(row.net);
 });
-export type FixedFeeBalance=z.infer<typeof fixedFeeBalance>;
-const fixedFeeControl = z.object({
+const fixedFeeBalance=z.object({...balanceFields,installments:count}).strict()
+  .transform(({installments,...row})=>({...row,charges:installments})).pipe(chargeBalance);
+export type FixedFeeBalance=z.input<typeof fixedFeeBalance>;
+const chargeControl = z.object({
   currency:z.string().regex(/^[A-Z]{3}$/),
-  boundary:z.enum(['Source','Eligibility event','Register item','Current occupancy','Current line','Exported line','Confirmed line','Released historical line']),
+  boundary:z.enum(['Source','Eligibility event','Register item','Current occupancy','Current line','Batch membership','Exported line','Confirmed line','Released historical line']),
   expected:z.number().int().positive(),observed:z.number().int().nonnegative(),
   amount:balanceAmount,exceptions:z.number().int().nonnegative(),
 }).strict().refine(row=>row.observed<=row.expected && row.exceptions<=row.expected && row.expected-row.observed<=row.exceptions);
-const fixedFeeReport = async(engagementId:string,c:RateContext|null, includeControls:boolean)=>{
-    const allowed=()=>hasRatePermission('commercial.fixed_fee_eligibility.issue') && hasRatePermission('commercial.invoice_export.view');
+export const reconciliationGrants={
+  'fixed-fee':'commercial.fixed_fee_eligibility.issue',
+  retainer:'commercial.retainer_eligibility.issue',
+  'service-units':'commercial.service_units.issue',
+  'service-periods':'commercial.service_periods.issue',
+} as const;
+export type ChargeReportSource=keyof typeof reconciliationGrants;
+const portfolioSource=z.enum(['both','time_and_materials','milestone','fixed-fee','retainer','service-units','service-periods']);
+type PortfolioSource=z.infer<typeof portfolioSource>;
+const canReadPortfolioSource=(source:PortfolioSource)=>{
+  if (source==='both' || source==='milestone') return hasRatePermission('commercial.milestone_billing.view');
+  return source==='time_and_materials' || hasRatePermission(reconciliationGrants[source]);
+};
+const chargePortfolioTotals={
+  controls:z.array(z.object({
+    currency:z.string(),boundary:z.string(),lineCount:count,amount:balanceAmount,expected:count,exceptions:count,
+  }).strict().refine(({lineCount,...row})=>chargeControl.safeParse({...row,observed:lineCount}).success)),
+  totals:z.array(z.object({
+    currency:z.string().regex(/^[A-Z]{3}$/),status:z.string().regex(/^(Available|Reserved|Exported|Confirmed) (charges|credits)$/),
+    lineCount:z.number().int().positive(),amount:balanceAmount,
+  }).strict().refine(row=>row.status.endsWith('credits') ? balanceUnits(row.amount)<0n : balanceUnits(row.amount)>0n)),
+};
+const chargeReport = async(engagementId:string,c:RateContext|null, includeControls:boolean,source:ChargeReportSource)=>{
+    const allowed=()=>hasRatePermission(reconciliationGrants[source]) && hasRatePermission('commercial.invoice_export.view');
     if (!allowed() || !id.safeParse(engagementId).success) return bad();
-    const raw=await call('GET','/reconciliation/fixed-fee?'+new URLSearchParams(includeControls ? {engagementId,controls:'1'} : {engagementId}),c,'view');
-    const report=z.object({...envelope,engagementId:id,balances:z.array(fixedFeeBalance),controls:z.array(fixedFeeControl).optional()}).strict().safeParse(raw);
+    const raw=await call('GET','/reconciliation/'+source+'?'+new URLSearchParams(includeControls ? {engagementId,controls:'1'} : {engagementId}),c,'view');
+    const report=z.object({...envelope,engagementId:id,balances:z.array(source==='fixed-fee'?fixedFeeBalance:chargeBalance),controls:z.array(chargeControl).optional()}).strict().safeParse(raw);
     if (!allowed() || !report.success || report.data.engagementId!==engagementId) return bad();
     const keys=report.data.balances.map(row=>row.currency+row.status);
     if (new Set(keys).size!==keys.length) return bad();
@@ -400,9 +425,14 @@ const fixedFeeReport = async(engagementId:string,c:RateContext|null, includeCont
     return {balances:report.data.balances,controls:controls ?? []};
   };
 
+const fixedFeeReport=async(engagementId:string,c:RateContext|null,includeControls:boolean)=>{
+  const report=await chargeReport(engagementId,c,includeControls,'fixed-fee');
+  return {...report,balances:report.balances.map(({charges,...row})=>({...row,installments:charges}))};
+};
 export const invoiceDrafts = {
   fixedFeeBalances: async(engagementId:string,c:RateContext|null) => (await fixedFeeReport(engagementId,c,false)).balances,
   fixedFeeReport: (engagementId:string,c:RateContext|null) => fixedFeeReport(engagementId,c,true),
+  chargeReport: (engagementId:string,c:RateContext|null,source:ChargeReportSource) => chargeReport(engagementId,c,true,source),
   availableInstallments: async(batchId:string,c:RateContext|null,after?:string)=>{
     if (!uuid.safeParse(batchId).success || !hasRatePermission('commercial.fixed_fee_eligibility.issue')) return bad();
     const data=await call('GET','/batches/'+batchId+'/available-installments'+(after?'?after='+encodeURIComponent(after):''),c,'view');
@@ -433,12 +463,12 @@ export const invoiceDrafts = {
   portfolio: async (
     start: string,
     end: string,
-    source: 'both' | 'time_and_materials' | 'milestone',
+    source: PortfolioSource,
     c: RateContext | null,
   ) => {
     const allowed = () =>
       hasRatePermission('commercial.invoice_export.view') &&
-      (source === 'time_and_materials' || hasRatePermission('commercial.milestone_billing.view'));
+      canReadPortfolioSource(source);
     if (!date.safeParse(start).success || !date.safeParse(end).success || start > end || !allowed())
       return bad();
     const raw = await call(
@@ -454,9 +484,9 @@ export const invoiceDrafts = {
         reportToken: z.string().regex(/^[a-f0-9]{64}$/),
         start: date,
         end: date,
-        source: z.enum(['both', 'time_and_materials', 'milestone']),
+        source: portfolioSource,
         asOf: instant,
-        ...reconciliationTotals,
+        ...(source in reconciliationGrants ? chargePortfolioTotals : reconciliationTotals),
         exceptionCount: z.number().int().nonnegative(),
       })
       .strict()
@@ -680,7 +710,7 @@ export const invoiceDrafts = {
       | {
           start: string;
           end: string;
-          source: 'both' | 'time_and_materials' | 'milestone';
+          source: PortfolioSource;
           reportToken: string;
           version: 'workos.portfolio-reconciliation/1';
         },
@@ -699,10 +729,9 @@ export const invoiceDrafts = {
     const filters = portfolio
       ? { start: report.start, end: report.end, source: report.source }
       : { engagementId: report.engagementId };
-    const milestone = portfolio
-      ? report.source !== 'time_and_materials'
-      : report.version === 'workos.milestone-reconciliation/1';
-    if (milestone && !hasRatePermission('commercial.milestone_billing.view')) return bad();
+    const allowedSource=()=>portfolio ? canReadPortfolioSource(report.source)
+      : report.version!=='workos.milestone-reconciliation/1' || hasRatePermission('commercial.milestone_billing.view');
+    if (!allowedSource()) return bad();
     const raw = await call(
       'POST',
       portfolio ? '/reconciliation/portfolio/exports' : '/reconciliation/exports',
@@ -713,7 +742,7 @@ export const invoiceDrafts = {
     if (
       !hasRatePermission('commercial.invoice_export.view') ||
       !hasRatePermission('reports.export') ||
-      (milestone && !hasRatePermission('commercial.milestone_billing.view'))
+      !allowedSource()
     )
       return bad();
     const receipt = {
@@ -739,7 +768,7 @@ export const invoiceDrafts = {
             ...receipt,
             start: date,
             end: date,
-            source: z.enum(['both', 'time_and_materials', 'milestone']),
+            source: portfolioSource,
             version: z.literal('workos.portfolio-reconciliation/1'),
           })
           .strict(),
