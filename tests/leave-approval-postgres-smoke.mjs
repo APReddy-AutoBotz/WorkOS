@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import {withCommercialDatabase,migrateCommercialDatabase,withCommercialApi,commercialFixture as f,withCommercialMigrationsThrough} from './support/commercial-drafting-test.mjs';
 import {runMigrations} from '../server/migrate.mjs';
 import {seedWorkApproval,readApprovalOwner} from './support/work-approval-test.mjs';
@@ -11,13 +11,17 @@ await withCommercialDatabase(async({pool})=>{
  await withCommercialMigrationsThrough(127, async rootDir => {await runMigrations({pool,rootDir,logger:{log(){}}});const fx=await seedWorkApproval(pool);
   await pool.query("insert into leave_requests(id,employee_id,leave_type_id,start_date,end_date,total_days,status,reason)values('synthetic-old-leave',$1,'leave-type-annual',$2,$2,1,'Submitted','Synthetic pre-upgrade source')",[f.ownerId,fx.today]);
   const keep=['leave_requests','leave_balances','role_permissions','users','approval_records','work_approval_instances'],before=Object.fromEntries(await Promise.all(keep.map(async t=>[t,await table(pool,t)])));
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('128_wos05_configured_leave_stages'));for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);for(const t of ['leave_approval_policies','leave_approval_instances','leave_approval_events'])assert.deepEqual(await table(pool,t),[]);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('128_wos05_configured_leave_stages'));
+  await includeReleaseGrant(pool, before.role_permissions);
+  for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);for(const t of ['leave_approval_policies','leave_approval_instances','leave_approval_events'])assert.deepEqual(await table(pool,t),[]);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
  });
 });
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);const fx=await seedWorkApproval(pool),{today,identities:ids}=fx;
  await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Employee','leave.self_service',true)on conflict(role_name,permission_key)do update set enabled=true");
  await withCommercialApi({databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s),timeZone:'Pacific/Kiritimati'},async({request})=>{
+  const release = await request('/api/organization-setup/module-releases/teams',{method:'PUT',body:{enabled:true,expectedRevision:0,evidence:'Synthetic staged leave notification delivery'}});
+  assert.equal(release.status,201,JSON.stringify(release.body));
   await adoptActualInputs(request,today);const permissions=await table(pool,'role_permissions'),owner=await readApprovalOwner(request,ids.manager);
   const old=await createLeave(request,fx);assert.equal(old.instance,undefined);const p=await adoptLeavePolicy(request,fx);assert.deepEqual(await table(pool,'role_permissions'),permissions);
   const editBody={leave_type_id:'leave-type-annual',start_date:today,end_date:today,expected_calendar_token:old.quote.sourceToken,reason:'Synthetic old unconfigured edit after adoption'};ok(await request('/api/leave/requests/'+old.leave.id,{method:'PATCH',identity:ids.reader,body:editBody}));assert.deepEqual(await leaveReviews(request,old.leave.id),[]);await pool.query("insert into notification_preferences(employee_id,event_type,in_app,email,teams)values($1,'ApprovalDecided',true,true,true)on conflict(employee_id,event_type)do update set in_app=true,email=true,teams=true",[f.ownerId]);ok(await request('/api/leave/requests/'+old.leave.id+'/cancel',{method:'PATCH',identity:ids.reader}));const compatibilityDelivery=(await pool.query("select a.channel,a.provider from notification_delivery_attempts a join notification_events e on e.id=a.notification_id where e.entity_type='LeaveRequest'and e.event_type='ApprovalDecided'and e.entity_id=$1 order by a.channel",[old.leave.id])).rows;assert.deepEqual(compatibilityDelivery.map(r=>r.channel),['Email','InApp','Teams']);assert(compatibilityDelivery.filter(r=>r.channel!=='InApp').every(r=>r.provider==='mock'),'Only synthetic mock adapters are allowed in this compatibility test');

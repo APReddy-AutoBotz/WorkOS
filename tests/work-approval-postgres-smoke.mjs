@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { runMigrations } from '../server/migrate.mjs';
@@ -11,6 +11,7 @@ await withCommercialDatabase(async ({ pool }) => withPreWorkApprovalMigrations(a
     await seedWorkApproval(pool);
     const keep = ['timesheets', 'timesheet_entries', 'work_submission_evidence', 'work_submission_decisions', 'approval_records', 'approval_delegations', 'notification_events', 'notification_templates', 'notification_preferences', 'notification_delivery_attempts', 'role_permissions', 'users', 'project_allocations', 'assignment_versions', 'worker_capacity_versions', 'native_forecast_evidence'], before = Object.fromEntries(await Promise.all(keep.map(async (t) => [t, await table(pool, t)])));
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('063_wos05_staged_work_approvals'));
+    await includeReleaseGrant(pool, before.role_permissions);
     for (const t of newTables)
         assert.deepEqual(await table(pool, t), []);
     for (const t of keep)

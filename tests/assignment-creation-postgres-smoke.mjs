@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { commercialFixture as f, withCommercialDatabase, withCommercialMigrationsThrough, migrateCommercialDatabase, withCommercialApi } from './support/commercial-drafting-test.mjs';
 import { seedAssignmentApproval, adoptAssignmentApproval, assignmentApprovalDefinition, decideAssignment, createApprovalAssignment } from './support/assignment-approval-test.mjs';
 import { readApprovalOwner } from './support/work-approval-test.mjs';
-import { expectedMigrationsFrom } from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import { runMigrations } from '../server/migrate.mjs';
 import { capacityHash } from '../server/modules/planning/worker-capacity-service.mjs';
 const base = '/api/v1/work-approvals/assignments';
@@ -21,6 +21,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => withCommercialMigr
     const snapshot = async () => Object.fromEntries(await Promise.all(keep.map(async t => [t, (await pool.query(`select to_jsonb(t)v from ${t} t order by to_jsonb(t)::text`)).rows])));
     const before = await snapshot(); assert.equal(before.assignment_approval_instances.length, 1); assert(before.timesheet_entries.length > 0);
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('127_wos05_assignment_creation_approvals'));
+    await includeReleaseGrant(pool, before.role_permissions);
     const after = await snapshot(); for (const row of after.assignment_approval_instances) { assert.equal(row.v.operation_kind, 'MaterialChange'); delete row.v.operation_kind; }
     assert.deepEqual(after, before, 'All prior fields, nonempty work and material-source/stage/recipient evidence unchanged');
     assert.equal((await pool.query("select count(*)::int n from assignment_approval_policies where definition?'creationRequired'")).rows[0].n, 0, 'No buyer creation option is installed or backfilled');

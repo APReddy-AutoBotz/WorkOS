@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {copyFile,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -31,6 +31,7 @@ await withCommercialDatabase(async({pool})=>{
   for(const row of before.timesheet_entries){row.value.source_identity=null;row.value.category_code=null;row.value.category_reference=null;}
   for(const row of before.work_submission_evidence){row.value.duplicate_entry_check=null;row.value.submission_timing=null;} // additive 050; old JSON contents remain exact
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
+  await includeReleaseGrant(pool, grants);
   assert.deepEqual(await workSnapshot(pool),before);assert.deepEqual(await table(pool,'role_permissions'),grants);
   assert.deepEqual((await pool.query("select to_jsonb(t)-array['evidence_required','overtime_rule','submission_deadline'] value from work_capture_policy_versions t order by to_jsonb(t)::text")).rows,rules);
   const legacy=(await pool.query('select *,effective_from::text,minimum_increment::text,daily_maximum::text,weekly_maximum::text from work_capture_policy_versions')).rows[0];assert.equal(legacy.evidence_required,null);assert.equal(capturePolicyView(legacy).evidenceRequired,false);

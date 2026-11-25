@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {copyFile,readdir} from 'node:fs/promises';
@@ -12,7 +12,9 @@ const profile={skills:[{skill:'Synthetic skill',proficiency:'Buyer β'}],certifi
 const table=async(pool,t)=>(await pool.query(`select to_jsonb(t) value from ${t} t order by to_jsonb(t)::text`)).rows;
 await withCommercialDatabase(async({pool})=>{await withPreCommercialMigrations(async rootDir=>{
  for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-4])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));await runMigrations({pool,rootDir,logger:{log(){}}});await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);const keep=['employees','projects','project_allocations','timesheets','timesheet_entries','work_entry_source_claims','workforce_capability_versions','approval_records','role_permissions','commercial_contract_versions','work_submission_evidence'];const before=Object.fromEntries(await Promise.all(keep.map(async t=>[t,await table(pool,t)])));for(const row of before.timesheet_entries){row.value.category_code=null;row.value.category_reference=null;}
- assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);assert.deepEqual(await table(pool,'resource_demands'),[]);assert.deepEqual(await table(pool,'resource_demand_versions'),[]);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
+ await includeReleaseGrant(pool, before.role_permissions);
+ for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);assert.deepEqual(await table(pool,'resource_demands'),[]);assert.deepEqual(await table(pool,'resource_demand_versions'),[]);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);
 });});
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);const identities=await seedCommercialIdentities(pool);await grantWorkPermissions(pool);await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Admin','employees.manage',true),('Employee','employees.view',true),('Employee','projects.view',true),('TeamLead','employees.view',true),('TeamLead','projects.view',true),('TeamLead','allocations.view',true) on conflict(role_name,permission_key) do update set enabled=excluded.enabled");

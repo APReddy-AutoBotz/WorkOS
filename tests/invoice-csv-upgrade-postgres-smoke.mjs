@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import {expectedMilestoneUpgradeSnapshot} from './support/milestone-upgrade-expectations.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
@@ -62,6 +62,7 @@ await withCommercialDatabase(async ({ pool }) => {
       0,
     );
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065i_wos06_approved_invoice_csv'));
+    await includeReleaseGrant(pool, before.role_permissions);
     assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
     assert.equal(
       (

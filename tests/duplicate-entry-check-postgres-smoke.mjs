@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {copyFile,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -18,7 +18,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    select 'synthetic-pre050-submission',$1,$2,$3,1,'assignment-work-date/1',jsonb_build_array(jsonb_build_object('entryId',e.id,'projectId',e.project_id,'workType',e.work_type,'workDate',e.work_date::text,'hours',e.hours::text,'billable',e.billable,'clientName',e.client_name,'category',e.category,'remark',e.remark,'evidenceUrl',e.evidence_url,'workReference',e.work_reference)),
    '[]'::jsonb,$4,'Admin','Web','synthetic-pre050-correlation','synthetic-pre050-operation' from timesheet_entries e where e.timesheet_id=$3`,[f.organizationId,f.legalEntityId,f.timesheetId,identities.manager.id]);
   const before=await workSnapshot(pool),grants=await table(pool,'role_permissions');for(const row of before.timesheet_entries){row.value.source_identity=null;row.value.category_code=null;row.value.category_reference=null;}for(const row of before.work_submission_evidence){row.value.duplicate_entry_check=null;row.value.submission_timing=null;}
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));assert.deepEqual(await workSnapshot(pool),before);assert.deepEqual(await table(pool,'role_permissions'),grants);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
+  await includeReleaseGrant(pool, grants);
+  assert.deepEqual(await workSnapshot(pool),before);assert.deepEqual(await table(pool,'role_permissions'),grants);
   assert.equal((await pool.query('select count(*)::int n from work_submission_evidence where duplicate_entry_check is not null')).rows[0].n,0,'no inferred historical check');assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);assert.deepEqual(await workSnapshot(pool),before);
   await grantWorkPermissions(pool);await pool.query(`insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
    values('duplicate-legacy-first',$1,$2,'SYN-DUP-LEGACY-1','Synthetic legacy first','2020-03-08','2020-03-14','Open','Weekly'),('duplicate-legacy-second',$1,$2,'SYN-DUP-LEGACY-2','Synthetic legacy second','2020-03-15','2020-03-21','Open','Weekly')`,[f.organizationId,f.legalEntityId]);
