@@ -4829,17 +4829,42 @@ app.post('/api/role-definitions', requireDatabase, requireAuth, requirePermissio
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
-  await run(res, `
-    insert into role_definitions (id, name, department, description, active)
-    values ($1,$2,$3,$4,$5)
-    on conflict (id) do update set
-      name = excluded.name,
-      department = excluded.department,
-      description = excluded.description,
-      active = excluded.active,
-      updated_at = now()
-    returning *
-  `, [parsed.data.id, parsed.data.name, parsed.data.department, parsed.data.description || null, parsed.data.active]);
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    // Serialize first-time saves as well as updates so the audit predecessor is exact.
+    await client.query("select pg_advisory_xact_lock(hashtextextended('role-definition:' || $1, 0))", [parsed.data.id]);
+    const previous = (await client.query('select * from role_definitions where id = $1 for update', [parsed.data.id])).rows[0];
+    const result = await client.query( `
+      insert into role_definitions (id, name, department, description, active)
+      values ($1,$2,$3,$4,$5)
+      on conflict (id) do update set
+        name = excluded.name,
+        department = excluded.department,
+        description = excluded.description,
+        active = excluded.active,
+        updated_at = now()
+      returning *
+    `, [parsed.data.id, parsed.data.name, parsed.data.department, parsed.data.description || null, parsed.data.active]);
+    await audit(client, req, {
+      module: 'Role Definition',
+      action: previous ? 'Update Role Definition' : 'Create Role Definition',
+      entityType: 'RoleDefinition',
+      entityId: parsed.data.id,
+      oldValue: previous,
+      newValue: result.rows[0],
+      details: 'Saved deployment-wide job role definition',
+      organizationScope: null,
+    });
+    await client.query('commit');
+    res.json(result.rows);
+  } catch (error) {
+    await client.query('rollback');
+    console.error(error);
+    res.status(500).json({error: 'Database operation failed'});
+  } finally {
+    client.release();
+  }
 });
 app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePermission('settings.manage'), async (req, res) => {
   const client = await pool.connect();

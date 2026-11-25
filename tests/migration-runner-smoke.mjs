@@ -4020,9 +4020,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(blockedRoleDefinitionDelete.status, 409,
       'a role definition used by an employee must remain undeactivatable');
     const blockedRoleDefinitionAudit = await pool.query(`select action,organization_id,legal_entity_id
-      from audit_logs where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2`,
+      from audit_logs where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2 order by created_at`,
     [multiScopeActorId, blockedRoleDefinitionId]);
     assert.deepEqual(blockedRoleDefinitionAudit.rows, [
+      {action: 'Create Role Definition', organization_id: null, legal_entity_id: null},
       {action: 'Delete Blocked', organization_id: null, legal_entity_id: null},
     ], 'a blocked deployment-wide role deactivation must be recorded at deployment scope');
     await pool.query(`delete from role_definitions where id=$1`, [blockedRoleDefinitionId]);
@@ -4038,6 +4039,15 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       });
     assert.equal(successfulRoleDefinitionCreate.status, 200,
       'deployment-wide role-definition creation must retain its existing API behavior');
+    const [createdRole] = await successfulRoleDefinitionCreate.json();
+    const roleEdit = await postScopedJson('/api/role-definitions', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {...createdRole, department: 'Delivery'});
+    assert.equal(roleEdit.status, 200);
+    const [updatedRole] = await roleEdit.json();
+    const roleEditAudit = await pool.query(`select old_value, new_value from audit_logs
+      where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2 and action='Update Role Definition'`,
+    [multiScopeActorId, successfulRoleDefinitionId]);
+    assert.deepEqual(roleEditAudit.rows, [{old_value: createdRole, new_value: updatedRole}]);
     const roleDefinitionDelete = await fetch(`${baseUrl}/api/role-definitions/${encodeURIComponent(successfulRoleDefinitionId)}`, {
       method: 'DELETE', headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
       signal: AbortSignal.timeout(5000),
@@ -4048,6 +4058,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       from audit_logs where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2 order by created_at`,
     [multiScopeActorId, successfulRoleDefinitionId]);
     assert.deepEqual(roleDefinitionAuditRows.rows, [
+      {action: 'Create Role Definition', organization_id: null, legal_entity_id: null},
+      {action: 'Update Role Definition', organization_id: null, legal_entity_id: null},
       {action: 'Deactivate Role Definition', organization_id: null, legal_entity_id: null},
     ], 'successful deployment-wide role deactivation must be recorded at deployment scope');
 
