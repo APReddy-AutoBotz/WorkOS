@@ -11,6 +11,7 @@ type ReleaseState = {environment:string; decisions:Decision[]};
 const modules = {
   teams:{label:'Teams', link:'Teams mapping', path:'/integrations/teams'},
   entra:{label:'Entra administration', link:'identity mapping', path:'/integrations/identity'},
+  notifications:{label:'Notification center', link:'notification center', path:'/notifications'},
   planning:{label:'Planning workspace', link:'planning workspace', path:'/planning'},
 } satisfies Record<ReleasedModule,{label:string; link:string; path:string}>;
 

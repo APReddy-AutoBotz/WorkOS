@@ -8,7 +8,7 @@ const readFlag = (viteKey: string, serverKey: string) => {
   return ['true', '1', 'yes', 'on'].includes(String(value).trim().toLowerCase());
 };
 
-export type ReleasedModule = 'teams' | 'entra' | 'planning';
+export type ReleasedModule = 'teams' | 'entra' | 'planning' | 'notifications';
 type ReleaseState = Partial<Record<ReleasedModule,boolean>>;
 let releaseDecision: {organizationId:string; states:ReleaseState} | undefined;
 
@@ -28,7 +28,7 @@ function enabled(module:ReleasedModule) {
 
 export const enterpriseFeatureFlags: Record<EnterpriseFeatureFlag, boolean> = {
   leave: readFlag('VITE_FEATURE_LEAVE', 'FEATURE_LEAVE'),
-  notifications: readFlag('VITE_FEATURE_NOTIFICATIONS', 'FEATURE_NOTIFICATIONS'),
+  get notifications() { return enabled('notifications'); },
   get teams() { return enabled('teams'); },
   get entra() { return enabled('entra'); },
   get planning() { return enabled('planning'); },

@@ -86,7 +86,7 @@ const FeatureRoute = ({
   flag: EnterpriseFeatureFlag;
   roles: readonly UserRole[];
 }) => {
-  if ((flag === 'teams' || flag === 'entra' || flag === 'planning') && moduleReleasePending()) return <p role="status">Loading module release settings…</p>;
+  if ((flag !== 'leave') && moduleReleasePending()) return <p role="status">Loading module release settings…</p>;
   if (!isEnterpriseFeatureEnabled(flag)) {
     return <Navigate to="/governance/brd-traceability" replace />;
   }
@@ -297,9 +297,9 @@ export default function App() {
                   </FeatureRoute>
                 } />
                 <Route path="/approvals" element={
-                  <FeatureRoute flag="notifications" roles={ROUTE_ROLES.approvals}>
+                  <RoleRoute roles={ROUTE_ROLES.approvals}>
                     <ApprovalsWorkspace />
-                  </FeatureRoute>
+                  </RoleRoute>
                 } />
                 <Route path="/notifications" element={
                   <FeatureRoute flag="notifications" roles={ROUTE_ROLES.notifications}>

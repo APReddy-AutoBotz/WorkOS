@@ -81,6 +81,21 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('link',{name:'Allocation Control',exact:true}).first().click();
    await page.waitForURL('**/allocations');
    await page.getByRole('heading',{name:'Allocation Control',level:1}).waitFor();
+   await page.goto(origin+'/admin/module-releases');
+   await page.getByLabel('Module',{exact:true}).selectOption('notifications');
+   await evidence.fill('Synthetic notification operations review');
+   await page.getByRole('button',{name:'Enable Notification center',exact:true}).click();
+   await page.getByRole('link',{name:'Open notification center'}).click();
+   await page.getByRole('heading',{name:'Notifications',level:1}).waitFor();
+   await page.goto(origin+'/admin/module-releases');
+   await page.getByLabel('Module',{exact:true}).selectOption('notifications');
+   await evidence.fill('Synthetic rollback of notification preferences');
+   await page.getByRole('button',{name:'Disable Notification center',exact:true}).click();
+   await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
+   await page.goto(origin+'/notifications');
+   await page.waitForURL('**/governance/brd-traceability');
+   await page.goto(origin+'/approvals');
+   await page.getByLabel('Delegator',{exact:true}).waitFor();
    console.log('Real approval workspace: invalid participant role displays server refusal with zero writes; corrected delegation saves once and displays acknowledgement.');
   }finally{await browser?.close();await fixtureServer.close();}
  });
