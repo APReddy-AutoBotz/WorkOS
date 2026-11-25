@@ -2,7 +2,7 @@
 
 ### Rejecting a request
 
-In the shared approval inbox or team leave calendar, select Reject and enter the reason for the requester. Cancel the prompt to leave the request pending. The recorded reason appears alongside the rejected status in Approval History and on the worker’s leave request.
+In the shared approval inbox or team leave calendar, select Reject and enter the reason for the requester. Cancel the prompt to leave the request pending. The recorded reason appears alongside the rejected status in Approval History and on the worker’s leave request. For generic approvals opened through a Teams link, enter a decision comment before selecting Execute Action. A missing reason leaves the link available for retry.
 
 ## Interpreting forecast allocation pressure
 

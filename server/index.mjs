@@ -4037,7 +4037,7 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
       return;
     }
     if (actionToken.entity_type === 'ApprovalRecord' && ['approve', 'reject'].includes(actionToken.action)) {
-      const approval = await client.query('select * from approval_records where id = $1', [actionToken.entity_id]);
+      const approval = await client.query('select * from approval_records where id = $1 for update', [actionToken.entity_id]);
       if (!approval.rows[0] || ['CommercialCandidateApproval','TmBillingEligibilityApproval','InvoiceBatchApproval','MilestoneBillingEligibilityApproval'].includes(approval.rows[0].entity_type)) {
         await client.query('rollback');
         res.status(404).json({ error: 'Approval record not found' });
@@ -4051,11 +4051,26 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
         await client.query('rollback');
         res.status(409).json({error:'Decide leave in the scoped leave approval workspace.',code:'LEAVE_SOURCE_DECISION_REQUIRED'}); return;
       }
+      const record = approval.rows[0];
+      const actorIds = [req.user.employeeRecordId, req.user.employeeId].filter(Boolean);
+      if (!req.user.permissions.includes('approvals.view') || actorIds.includes(record.subject_employee_id) || actorIds.includes(record.requester_id)) {
+        await client.query('rollback');
+        return res.status(403).json({error: 'Independent approval authority is required'});
+      }
+      if (record.status !== 'Pending') {
+        await client.query('rollback');
+        return res.status(422).json({error: 'Only pending approvals can be decided'});
+      }
+      const comments = parsed.data.comments?.trim();
+      if (actionToken.action === 'reject' && !comments) {
+        await client.query('rollback');
+        return res.status(422).json({error: 'Enter a rejection reason'});
+      }
       await decideApprovalRecord(client, req, {
-        entityType: approval.rows[0].entity_type,
+        entityType: record.entity_type,
         entityId: approval.rows[0].entity_id,
         status: actionToken.action === 'approve' ? 'Approved' : 'Rejected',
-        comments: parsed.data.comments || 'Decided from deterministic Teams action.',
+        comments: comments || null,
       });
     }
     const result = await client.query('update teams_action_tokens set used_at = now() where id = $1 returning *', [actionToken.id]);

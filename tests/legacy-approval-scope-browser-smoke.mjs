@@ -17,7 +17,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  values('synthetic-comment-review','AllocationChange','synthetic-comment-source',$1,'Synthetic requester','Pending')`,[recipient]);
  await withCommercialApi({databaseUrl,identities:ids},async({request,tokenFor,baseUrl})=>{
   const identity=ids.manager,current=await request('/api/auth/me');assert.equal(current.status,200);
-  const fixtureServer = await startFixtureServer({root, fixtures: ['legacy-approval'], apiUrl: baseUrl, publicEnv: {VITE_APP_MODE: 'production', VITE_ALLOW_TEST_FALLBACK: 'false'}});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['legacy-approval'], application: true, apiUrl: baseUrl, publicEnv: {VITE_FEATURE_TEAMS: 'true', VITE_APP_MODE: 'production', VITE_ALLOW_TEST_FALLBACK: 'false'}});
   let browser;
   try{
    const origin = fixtureServer.url;
@@ -53,6 +53,20 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('button',{name:'Create Delegation',exact:true}).click();assert.equal((await saved).status(),200);
    await page.getByRole('status').filter({hasText:'Created approval delegation to Synthetic browser delegate.'}).waitFor();
    assert.equal((await pool.query('select count(*)::int n from approval_delegations')).rows[0].n,1);
+   await pool.query(`insert into approval_records(id,entity_type,entity_id,subject_employee_id,requester_name,status)
+     values('synthetic-teams-review','AllocationChange','synthetic-teams-source',$1,'Synthetic requester','Pending')`,[recipient]);
+   const issued = await request('/api/integrations/teams-action-tokens',{method:'POST',body:{
+     entity_type:'ApprovalRecord',entity_id:'synthetic-teams-review',action:'reject',expires_at:new Date(Date.now()+3600000).toISOString(),
+   }});
+   assert.equal(issued.status,200);
+   await page.goto(origin+'/teams/actions/'+issued.body.token);
+   const execute = page.getByRole('button',{name:'Execute Action',exact:true});
+   await execute.click();
+   await page.getByRole('alert').getByText('Enter a rejection reason',{exact:false}).waitFor();
+   await page.getByLabel('Decision comment (required for rejection)').fill(reason);
+   await execute.click();
+   await page.getByText('Teams action completed: reject').waitFor();
+   assert.deepEqual((await pool.query("select status,comments from approval_records where id='synthetic-teams-review'")).rows[0],{status:'Rejected',comments:reason});
    console.log('Real approval workspace: invalid participant role displays server refusal with zero writes; corrected delegation saves once and displays acknowledgement.');
   }finally{await browser?.close();await fixtureServer.close();}
  });
