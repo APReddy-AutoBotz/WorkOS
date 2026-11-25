@@ -939,3 +939,5 @@ Enable creation approval in the scoped assignment policy and select the workers 
 In Approvals, adopt an effective leave policy for the selected workers and name the stage reviewers. Reviewers open the current request revision. Only the final approval changes the leave balance and availability. An edit restarts review on a new revision. For rollback, retain migration 128 and the application version capable of resolving pending stages. Disable prospective routing using a new policy with an empty worker selection.
 
 For job role definition changes, an authorized deployment auditor can inspect the creation, edit or deactivation under `RoleDefinition` in deployment audit history. Application rollback preserves recorded events.
+
+Manual import/export history and its audit record commit together. Look up the returned history ID under `ImportExportLog` in the selected entity's audit history. A failed history acknowledgement after a CSV download means the recording outcome needs checking before retry. Roll back the server and frontend together to restore the previous two-request flow.

@@ -4455,6 +4455,30 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'both routes must persist and return equivalent data except generated ID/timestamp');
     const persistedWrites = await pool.query('select * from import_export_logs where id=any($1::uuid[])',
       [importWriteResults.map(row => row.id)]);
+    const savedHistoryAudit = await pool.query(`select entity_id, active_role, organization_id, legal_entity_id, new_value
+      from audit_logs where entity_type='ImportExportLog' and entity_id=any($1::text[]) and user_id=$2`,
+    [importWriteResults.map(row => row.id), actorId]);
+    assert.equal(savedHistoryAudit.rowCount, 2);
+    await pool.query(`create function reject_test_history_audit() returns trigger language plpgsql as $$
+      begin raise exception 'Synthetic audit unavailable'; end $$;
+      create trigger reject_test_history_audit before insert on audit_logs for each row
+      when (new.entity_type='ImportExportLog') execute function reject_test_history_audit()`);
+    try {
+      const fileName = 'synthetic-atomic-history-rollback.csv';
+      const failed = await postScopedJson('/api/import-export-logs', token, 'org-default', 'legal-default',
+        {...versionedImportPayload, fileName});
+      assert.equal(failed.status, 500);
+      assert.equal((await pool.query('select id from import_export_logs where file_name=$1', [fileName])).rowCount, 0);
+    } finally {
+      await pool.query('drop trigger reject_test_history_audit on audit_logs; drop function reject_test_history_audit()');
+    }
+    for (const event of savedHistoryAudit.rows) {
+      const history = importWriteResults.find(row => row.id === event.entity_id);
+      assert.equal(event.new_value.fileName, history.file_name);
+      assert.equal(event.active_role, 'Admin');
+      assert.equal(event.organization_id, history.organization_id);
+      assert.equal(event.legal_entity_id, history.legal_entity_id);
+    }
     assert.equal(persistedWrites.rows.length, 2);
     assert(persistedWrites.rows.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
 

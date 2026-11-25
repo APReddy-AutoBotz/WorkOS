@@ -870,3 +870,5 @@ WOS-RES-008 extends the existing assignment policy with optional creation approv
 WOS-APR-001, WOS-APR-002, WOS-APR-003, WOS-APR-006 and WOS-INT-002. Migration 128 pins each governed leave revision to an effective policy. The leave approval database and browser journeys cover intermediate and final decisions, an edited source, recipient acknowledgements, leave balances and restoration of availability after cancellation. Timed leave reminders and delegation are tracked separately.
 
 WOS-CORE-005 and WOS-IAM-010. Deployment-wide job role definition saves record the actor and before/after values in the same transaction as the change. The existing migration-runner API journey covers create, edit, blocked deactivation, successful deactivation and scoped audit visibility.
+
+WOS-CORE-005. The manual import/export history API creates one scoped audit event in the same transaction as the history row. The existing two-alias API fixture verifies the persisted actor, role, scope and generated ID, and checks rollback on audit failure. Report export browser journeys exercise the single request.
