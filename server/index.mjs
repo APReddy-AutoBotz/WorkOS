@@ -1159,7 +1159,8 @@ const sendNotification = async (client, req, {
   const event = eventResult.rows[0];
 
   const recipient = await fetchNotificationRecipient(client, recipientEmployeeId);
-  const preference = recipient?.id
+  const preferencesEnabled = recipient?.id && await moduleReleased(client,recipient.organization_id,'notifications');
+  const preference = preferencesEnabled
     ? (await client.query('select * from notification_preferences where employee_id = $1 and event_type = $2', [recipient.id, eventType])).rows[0]
     : null;
   const channelSet = new Set(Array.isArray(channels) && channels.length > 0 ? channels : [channel || 'InApp']);
@@ -1172,7 +1173,7 @@ const sendNotification = async (client, req, {
   const deliveryResults = [];
 
   for (const deliveryChannel of channelSet) {
-    const template = await fetchNotificationTemplate(client, eventType, deliveryChannel);
+    const template = preferencesEnabled ? await fetchNotificationTemplate(client, eventType, deliveryChannel) : null;
     const context = {
       title,
       body,
@@ -3607,7 +3608,17 @@ app.get('/api/reports/approval-sla', requireDatabase, requireAuth, requirePermis
   }
 });
 
+const requireModuleRelease = module => async (req,res,next) => {
+  try {
+    if (await moduleReleased(pool,req.organizationScope.organizationId,module)) return next();
+    return res.status(403).json({error:`${module} is disabled for this organization and environment`,code:'MODULE_DISABLED'});
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const notificationRouter = createNotificationRouter({
+  requireNotificationRelease:requireModuleRelease('notifications'),
   pool,
   run,
   requireDatabase,
@@ -3683,15 +3694,6 @@ const isTeamsActionEntityInScope = async (client, req, entityType, entityId) => 
   }
 
   return false;
-};
-
-const requireModuleRelease = module => async (req,res,next) => {
-  try {
-    if (await moduleReleased(pool,req.organizationScope.organizationId,module)) return next();
-    return res.status(403).json({error:`${module} is disabled for this organization and environment`,code:'MODULE_DISABLED'});
-  } catch (error) {
-    return next(error);
-  }
 };
 
 app.get('/api/integrations/identity-links', requireDatabase, requireAuth, requirePermission('integrations.identity'), requireModuleRelease('entra'), (req, res) => {
@@ -5357,7 +5359,7 @@ const getResourcePlanningPayload = async (req) => {
   };
 };
 
-app.get('/api/reports/resource-planning', requireDatabase, requireAuth, requirePermission('allocations.view'), async (req, res) => {
+app.get('/api/reports/resource-planning', requireDatabase, requireAuth, requirePermission('allocations.view'), requireModuleRelease('planning'), async (req, res) => {
   try {
     res.json(await getResourcePlanningPayload(req));
   } catch (error) {

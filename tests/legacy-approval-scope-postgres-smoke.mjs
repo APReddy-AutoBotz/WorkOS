@@ -32,10 +32,24 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   assert.equal(disabled.status,201);
   assert.equal((await request(releases)).body.decisions[0].enabled,false);
   assert.equal((await request(teamsLinks)).status,403);
-  assert.deepEqual((await request(releases+'/effective',{identity:ids.reader})).body,{teams:false,entra:false});
+  assert.deepEqual((await request(releases+'/effective',{identity:ids.reader})).body,{teams:false,entra:false,planning:false,notifications:false});
+  const report = '/api/reports/resource-planning';
+  assert.equal((await request(report)).body.code,'MODULE_DISABLED');
+  const planningRelease = (enabled,expectedRevision) => request(releases+'/planning',{method:'PUT',body:{
+    enabled, expectedRevision, evidence:'Synthetic planning review',
+  }});
+  assert.equal((await planningRelease(true,0)).status,201);
+  assert.equal((await request(report)).status,200);
+  assert.equal((await planningRelease(false,1)).status,201);
+  assert.equal((await request(report)).body.code,'MODULE_DISABLED');
+  assert.equal((await request('/api/allocations')).status,200);
+  assert.equal((await request('/api/reports/workforce-command-center')).status,200);
   await pool.query(`insert into notification_preferences(employee_id,event_type,in_app,email,teams)
     values($1,'TestDelivery',true,false,true)`,[employee]);
   const deliver = channels => request('/api/notifications/test-delivery',{method:'POST',body:{employee_id:employee,channels}});
+  assert.equal((await deliver(['InApp'])).body.code,'MODULE_DISABLED');
+  assert.equal((await request('/api/notifications')).status,200);
+  assert.equal((await request(releases+'/notifications',{method:'PUT',body:{...change,evidence:'Synthetic notification center release'}})).status,201);
   assert.equal((await deliver(['Teams'])).status,403);
   const notice = await deliver(['InApp']);
   assert.equal(notice.status,200,JSON.stringify(notice.body));

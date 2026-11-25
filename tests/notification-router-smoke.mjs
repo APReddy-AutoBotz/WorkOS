@@ -78,7 +78,7 @@ const sendNotification = async (_client, _req, event) => {
 
 const app = express();
 app.use(express.json());
-app.use('/api', createNotificationRouter({pool, run, requireDatabase, requireAuth, requirePermission, buildEmployeeScopeWhere, audit, sendNotification, logError: error => loggedErrors.push(error.message)}));
+app.use('/api', createNotificationRouter({requireNotificationRelease:(_req,_res,next)=>next(), pool, run, requireDatabase, requireAuth, requirePermission, buildEmployeeScopeWhere, audit, sendNotification, logError: error => loggedErrors.push(error.message)}));
 const server = app.listen(0, '127.0.0.1');
 await new Promise(resolve => server.once('listening', resolve));
 const baseUrl = `http://127.0.0.1:${server.address().port}/api`;
