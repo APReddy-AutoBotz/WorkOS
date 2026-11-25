@@ -2,7 +2,7 @@
 
 ### Rejecting a request
 
-In the shared approval inbox or team leave calendar, select Reject and enter the reason for the requester. Cancel the prompt to leave the request pending.
+In the shared approval inbox or team leave calendar, select Reject and enter the reason for the requester. Cancel the prompt to leave the request pending. The recorded reason appears alongside the rejected status in Approval History and on the worker’s leave request.
 
 ## Interpreting forecast allocation pressure
 

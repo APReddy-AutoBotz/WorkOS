@@ -84,7 +84,10 @@ const ApprovalTable = ({
               <td className="py-3 pr-4 font-bold text-heading">{record.subjectEmployeeName || record.subjectEmployeeId || '-'}</td>
               <td className="py-3 pr-4 text-body">{formatDateTime(record.createdAt)}</td>
               <td className="py-3 pr-4 text-body">{formatDateTime(record.dueAt)}</td>
-              <td className="py-3 pr-4"><Badge variant={statusVariant(record.status)}>{record.status}</Badge></td>
+              <td className="py-3 pr-4">
+                <Badge variant={statusVariant(record.status)}>{record.status}</Badge>
+                {record.status === 'Rejected' && record.comments && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-body">{record.comments}</p>}
+              </td>
               {onDecide && (
                 <td className="py-3 text-right">
                   {record.status === 'Pending' && (

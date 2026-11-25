@@ -36,6 +36,8 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercial
  response = await pending;
  assert.equal(response.status(),200,await response.text());
  assert.deepEqual((await pool.query('select status,comments from leave_requests where id=$1',[lateRequest.id])).rows[0],{status:'Rejected',comments:reviewComment});
+ await worker.reload();
+ await worker.getByRole('row').filter({hasText:'Rejected'}).getByText(reviewComment,{exact:true}).waitFor();
  assert.deepEqual(await protectedSources(),beforeWork);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);for(const c of contexts)await c.close();
  }finally{await browser?.close();await fixtureServer.close();}
  });});

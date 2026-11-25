@@ -40,6 +40,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await reject.click();
    assert.equal((await decision).status(),200);
    assert.deepEqual((await pool.query("select status,comments from approval_records where id='synthetic-comment-review'")).rows[0],{status:'Rejected',comments:reason});
+   await page.getByRole('row').filter({hasText:'synthetic-comment-source'}).getByText(reason,{exact:true}).waitFor();
    await page.getByLabel('Delegator',{exact:true}).selectOption(f.ownerId);
    await page.getByLabel('Delegate',{exact:true}).selectOption(recipient);
    await page.getByLabel('Delegation role',{exact:true}).selectOption('Admin');

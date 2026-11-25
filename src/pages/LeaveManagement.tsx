@@ -910,7 +910,10 @@ const LeaveRequestTable = ({
                 <td className="py-3 pr-4 text-body">{request.leaveTypeName || request.leaveTypeId}</td>
                 <td className="py-3 pr-4 text-body">{request.startDate} to {request.endDate}</td>
                 <td className="py-3 pr-4 font-black text-heading">{request.totalDays.toFixed(1)}</td>
-                <td className="py-3 pr-4"><Badge variant={statusVariant(request.status)}>{request.status}</Badge></td>
+                <td className="py-3 pr-4">
+                  <Badge variant={statusVariant(request.status)}>{request.status}</Badge>
+                  {request.status === 'Rejected' && request.comments && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-body">{request.comments}</p>}
+                </td>
                 {hasActions && (
                   <td className="py-3 text-right">
                     <div className="flex justify-end gap-2">

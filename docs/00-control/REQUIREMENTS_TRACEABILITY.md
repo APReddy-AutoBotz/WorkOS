@@ -52,7 +52,7 @@ PR-007D integration correction (WOS-CTR-003, WOS-CORE-003/005, WOS-NFR-SEC-004/0
 
 ### WOS-APR-006 reviewer comments
 
-The shared approval inbox and team leave calendar send the reviewer’s entered rejection reason. The existing legacy approval browser journey checks that blank input leaves the record pending and the entered comment reaches PostgreSQL. The team calendar journey verifies cancellation and the retained leave decision comment.
+The shared approval inbox and team leave calendar send the reviewer’s entered rejection reason. The existing legacy approval browser journey checks that blank input leaves the record pending and the entered comment reaches PostgreSQL. The two journeys also verify the reason in Approval History and on the worker’s own leave request after reload.
 
 ## WOS03 current-main integration candidate
 
