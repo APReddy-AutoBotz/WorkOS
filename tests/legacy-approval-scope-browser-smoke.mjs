@@ -65,6 +65,22 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
    await page.goto(origin+'/integrations/identity');
    await page.waitForURL('**/governance/brd-traceability');
+   await page.goto(origin+'/admin/module-releases');
+   await page.getByLabel('Module',{exact:true}).selectOption('planning');
+   await evidence.fill('Synthetic planning review');
+   await page.getByRole('button',{name:'Enable Planning workspace',exact:true}).click();
+   await page.getByRole('link',{name:'Open planning workspace'}).click();
+   await page.getByRole('heading',{name:'Planning Workspace',exact:true}).waitFor();
+   await page.goto(origin+'/admin/module-releases');
+   await page.getByLabel('Module',{exact:true}).selectOption('planning');
+   await evidence.fill('Synthetic planning rollback');
+   await page.getByRole('button',{name:'Disable Planning workspace',exact:true}).click();
+   await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
+   await page.goto(origin+'/planning');
+   await page.waitForURL('**/governance/brd-traceability');
+   await page.getByRole('link',{name:'Allocation Control',exact:true}).first().click();
+   await page.waitForURL('**/allocations');
+   await page.getByRole('heading',{name:'Allocation Control',level:1}).waitFor();
    console.log('Real approval workspace: invalid participant role displays server refusal with zero writes; corrected delegation saves once and displays acknowledgement.');
   }finally{await browser?.close();await fixtureServer.close();}
  });

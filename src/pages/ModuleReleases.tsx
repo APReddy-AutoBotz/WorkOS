@@ -8,6 +8,12 @@ import {applyModuleReleases, type ReleasedModule} from '../config/featureFlags';
 type Decision = {revision:number; enabled:boolean; evidence:string; activated_at:string; owner_id:string; module:string};
 type ReleaseState = {environment:string; decisions:Decision[]};
 
+const modules = {
+  teams:{label:'Teams', link:'Teams mapping', path:'/integrations/teams'},
+  entra:{label:'Entra administration', link:'identity mapping', path:'/integrations/identity'},
+  planning:{label:'Planning workspace', link:'planning workspace', path:'/planning'},
+} satisfies Record<ReleasedModule,{label:string; link:string; path:string}>;
+
 export function ModuleReleases() {
   const user = authService.getCurrentUser();
   const scope = getOrganizationScope();
@@ -27,7 +33,7 @@ function ReleaseForm({organizationId,legalEntityId}:{organizationId:string;legal
   const token = getToken();
   const [module,setModule] = useState<ReleasedModule>('teams');
   const decision = state?.decisions.find(item => item.module === module);
-  const label = module === 'teams' ? 'Teams' : 'Entra administration';
+  const {label, link, path:modulePath} = modules[module];
   const path = '/api/v1/organization-setup/module-releases';
   useEffect(() => {
     active.current = true;
@@ -67,9 +73,9 @@ function ReleaseForm({organizationId,legalEntityId}:{organizationId:string;legal
       <label htmlFor="release-module">Module</label>
       <select id="release-module" value={module} disabled={saving} onChange={event=>{
         setModule(event.target.value as ReleasedModule); setEvidence(''); setMessage('');
-      }}><option value="teams">Teams</option><option value="entra">Entra administration</option></select>
+      }}>{Object.entries(modules).map(([key,item]) => <option key={key} value={key}>{item.label}</option>)}</select>
       <p>{label} is <strong>{decision?.enabled ? 'enabled' : 'disabled'}</strong> for {organizationId} in {state.environment}.</p>
-      {decision?.enabled && <Link className="underline" to={module === 'teams' ? '/integrations/teams' : '/integrations/identity'}>Open {module === 'teams' ? 'Teams mapping' : 'identity mapping'}</Link>}
+      {decision?.enabled && <Link className="underline" to={modulePath}>Open {link}</Link>}
       {decision && <p>Last decision by {decision.owner_id} on {new Date(decision.activated_at).toLocaleString()}. {decision.evidence}</p>}
       <label className="block">Release evidence<textarea className="input-field" maxLength={1000} value={evidence}
         disabled={saving} onChange={event=>setEvidence(event.target.value)}/></label>

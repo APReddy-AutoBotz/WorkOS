@@ -5317,7 +5317,7 @@ const getResourcePlanningPayload = async (req) => {
   };
 };
 
-app.get('/api/reports/resource-planning', requireDatabase, requireAuth, requirePermission('allocations.view'), async (req, res) => {
+app.get('/api/reports/resource-planning', requireDatabase, requireAuth, requirePermission('allocations.view'), requireModuleRelease('planning'), async (req, res) => {
   try {
     res.json(await getResourcePlanningPayload(req));
   } catch (error) {

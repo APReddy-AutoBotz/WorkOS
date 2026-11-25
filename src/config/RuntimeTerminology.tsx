@@ -6,7 +6,7 @@ import { api, getOrganizationScope, getToken } from '../services/apiClient';
 import { authService } from '../services/authService';
 import { getEffectivePermissions } from '../services/permissions';
 
-type TerminologyResponse = { releases?: {teams?: boolean; entra?: boolean}; terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
+type TerminologyResponse = { releases?: {teams?: boolean; entra?: boolean; planning?: boolean}; terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
 const runtimeContext = () => {
   const user = authService.getCurrentUser();
   return JSON.stringify([user?.id, user?.employeeId, user?.role, user?.permissionRole,
