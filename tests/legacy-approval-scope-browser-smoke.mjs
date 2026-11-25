@@ -15,7 +15,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead','approvals.view',true) on conflict(role_name,permission_key)do update set enabled=true");
  await withCommercialApi({databaseUrl,identities:ids},async({request,tokenFor,baseUrl})=>{
   const identity=ids.manager,current=await request('/api/auth/me');assert.equal(current.status,200);
-  const fixtureServer = await startFixtureServer({root, fixtures: ['legacy-approval'], apiUrl: baseUrl, publicEnv: {VITE_APP_MODE: 'production', VITE_ALLOW_TEST_FALLBACK: 'false'}});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['legacy-approval'], application:true, apiUrl: baseUrl, publicEnv: {VITE_APP_MODE: 'production', VITE_ALLOW_TEST_FALLBACK: 'false'}});
   let browser;
   try{
    const origin = fixtureServer.url;
@@ -39,6 +39,19 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('button',{name:'Create Delegation',exact:true}).click();assert.equal((await saved).status(),200);
    await page.getByRole('status').filter({hasText:'Created approval delegation to Synthetic browser delegate.'}).waitFor();
    assert.equal((await pool.query('select count(*)::int n from approval_delegations')).rows[0].n,1);
+   await page.goto(origin+'/admin/module-releases');
+   const evidence = page.getByLabel('Release evidence');
+   await evidence.fill('Synthetic approved Teams handover');
+   await page.getByRole('button',{name:'Enable Teams',exact:true}).click();
+   await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
+   await page.getByRole('link',{name:'Open Teams mapping'}).click();
+   await page.getByRole('heading',{name:'Teams Mapping',exact:true}).waitFor();
+   await page.goto(origin+'/admin/module-releases');
+   await evidence.fill('Synthetic disable after review');
+   await page.getByRole('button',{name:'Disable Teams',exact:true}).click();
+   await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
+   await page.goto(origin+'/integrations/teams');
+   await page.waitForURL('**/governance/brd-traceability');
    console.log('Real approval workspace: invalid participant role displays server refusal with zero writes; corrected delegation saves once and displays acknowledgement.');
   }finally{await browser?.close();await fixtureServer.close();}
  });

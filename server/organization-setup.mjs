@@ -1,4 +1,4 @@
-import {registerModuleReleaseRoutes} from './modules/module-releases.mjs';
+import {registerModuleReleaseRoutes, teamsReleased} from './modules/module-releases.mjs';
 import { registerFinancialPeriodRoutes } from './modules/financial-periods.mjs';
 import {asyncHandler} from './api/async-handler.mjs';
 import {lockCommercialLifecycle} from './modules/commercial-drafting/project-mutation.mjs';
@@ -546,7 +546,9 @@ export const registerOrganizationSetupRoutes = ({
       from organization_profile_versions p where organization_id=$1 and (p.created_by is not null or p.branding is not null) and ${asOfPredicate('p','$2')}
       order by effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
     const profile=brand.rows[0];
-    res.json({...termsResponse,...(profile ? {brand:{...brandingSchema.parse(profile.branding ?? {}),
+    const releases = req.query.includeReleases === '1'
+      ? {releases:{teams:await teamsReleased(pool, req.organizationScope.organizationId)}} : {};
+    res.set('Cache-Control','no-store').json({...termsResponse,...releases,...(profile ? {brand:{...brandingSchema.parse(profile.branding ?? {}),
       productName:profile.productName,organizationName:profile.organizationName}} : {})});
   }));
   router.post('/terminology',requirePermission('settings.manage'),asyncHandler(async(req,res)=>{

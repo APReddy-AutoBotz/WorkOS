@@ -871,4 +871,4 @@ WOS-APR-001, WOS-APR-002, WOS-APR-003, WOS-APR-006 and WOS-INT-002. Migration 12
 
 ### WOS-ORG-007 release decisions
 
-Migration 129 and the organization setup API retain the approving account, deployment environment, evidence, UTC instant, state and revision for Teams release decisions. The PostgreSQL journey covers permission and scope checks, concurrent-version protection, replay and organization-scoped audit. Runtime enforcement and the administrator screen are pending.
+Migration 129 and the organization setup API retain the approving account, deployment environment, evidence, UTC instant, state and revision for Teams release decisions. The PostgreSQL journey covers permission and scope checks, concurrent-version protection, replay and organization-scoped audit. The shared approval browser journey enables Teams in Governance Settings, opens its normal route, then disables it and verifies the route guard. The PostgreSQL journey checks the effective flag and mapping API and verifies that in-app delivery continues while the optional Teams delivery follows the release state. Other optional modules remain open.

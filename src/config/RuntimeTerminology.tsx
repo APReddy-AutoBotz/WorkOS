@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { applyPersistedTerminology, applyRuntimeBrand } from './productConfig';
+import {applyTeamsRelease} from './featureFlags';
 import { api, getOrganizationScope, getToken } from '../services/apiClient';
 import { authService } from '../services/authService';
 import { getEffectivePermissions } from '../services/permissions';
 
-type TerminologyResponse = { terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
+type TerminologyResponse = { releases?: {teams: boolean}; terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
 const runtimeContext = () => {
   const user = authService.getCurrentUser();
   return JSON.stringify([user?.id, user?.employeeId, user?.role, user?.permissionRole,
@@ -21,22 +22,24 @@ export const loadRuntimeTerminology = async (
   const scope = getOrganizationScope();
   const owned = () => isCurrent() && owner === runtimeContext();
   if (!authenticated) {
-    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); }
+    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); applyTeamsRelease(undefined,false); }
     return owned();
   }
   if (!getOrganizationScope()) {
-    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); }
+    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); applyTeamsRelease(undefined,false); }
     return owned();
   }
   try {
-    const result = await (fetchTerms ? fetchTerms() : api.getWithScope<TerminologyResponse>('/api/organization-setup/terminology?includeBrand=1', scope));
+    const result = await (fetchTerms ? fetchTerms() : api.getWithScope<TerminologyResponse>('/api/organization-setup/terminology?includeBrand=1&includeReleases=1', scope));
     if (!owned()) return false;
     applyPersistedTerminology(result.terms || {});
     applyRuntimeBrand(result.brand);
+    applyTeamsRelease(scope?.organizationId,result.releases?.teams === true);
   } catch {
     if (!owned()) return false;
     applyPersistedTerminology({});
     applyRuntimeBrand();
+    applyTeamsRelease(scope?.organizationId,false);
   }
   return true;
 };

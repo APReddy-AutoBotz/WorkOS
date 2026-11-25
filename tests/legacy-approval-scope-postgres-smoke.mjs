@@ -19,7 +19,10 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   assert.deepEqual(initial.body.decisions,[]);
   assert.equal((await setRelease(change,ids.reader)).status,403);
   assert.equal((await setRelease({...change,organizationId:f.otherOrganizationId})).status,400);
+  const teamsLinks = '/api/integrations/teams-user-links';
+  assert.equal((await request(teamsLinks)).status,403);
   const accepted = await setRelease(change);
+  assert.equal((await request(teamsLinks)).status,200);
   assert.equal(accepted.status,201,JSON.stringify(accepted.body));
   assert.equal(accepted.body.owner_id,ids.manager.id);
   assert.ok(Date.parse(accepted.body.activated_at));
@@ -28,6 +31,20 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   const disabled = await setRelease({enabled:false,evidence:'Synthetic rollback',expectedRevision:1});
   assert.equal(disabled.status,201);
   assert.equal((await request(releases)).body.decisions[0].enabled,false);
+  assert.equal((await request(teamsLinks)).status,403);
+  assert.deepEqual((await request(releases+'/effective',{identity:ids.reader})).body,{teams:false});
+  await pool.query(`insert into notification_preferences(employee_id,event_type,in_app,email,teams)
+    values($1,'TestDelivery',true,false,true)`,[employee]);
+  const deliver = channels => request('/api/notifications/test-delivery',{method:'POST',body:{employee_id:employee,channels}});
+  assert.equal((await deliver(['Teams'])).status,403);
+  const notice = await deliver(['InApp']);
+  assert.equal(notice.status,200,JSON.stringify(notice.body));
+  const channelsFor = async id => (await pool.query('select channel from notification_delivery_attempts where notification_id=$1 order by channel',[id])).rows.map(row=>row.channel);
+  assert.deepEqual(await channelsFor(notice.body.id),['InApp']);
+  assert.equal((await setRelease({...change,expectedRevision:2})).status,201);
+  const enabledNotice = await deliver(['InApp']);
+  assert.equal(enabledNotice.status,200,JSON.stringify(enabledNotice.body));
+  assert.deepEqual(await channelsFor(enabledNotice.body.id),['InApp','Teams']);
   const auditRows=await pool.query("select organization_id,legal_entity_id,active_role,old_value,new_value from audit_logs where entity_id=$1",[disabled.body.id]);
   assert.equal(auditRows.rowCount,1);
   assert.deepEqual([auditRows.rows[0].organization_id,auditRows.rows[0].legal_entity_id,auditRows.rows[0].active_role],[f.organizationId,null,ids.manager.role]);

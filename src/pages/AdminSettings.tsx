@@ -368,6 +368,7 @@ export const AdminSettings = () => {
         onCancel={() => setConfirmAction(null)}
       />
 
+      {hasPermission(currentUser,'releases.manage') && <Link className="btn-secondary" to="/admin/module-releases">Manage module releases</Link>}
       {hasPermission(currentUser,'settings.manage') && <FinancialPeriodControl/>}
       {canOpenPermissionSettings && <PermissionSettings onNotice={setNotice} />}
 

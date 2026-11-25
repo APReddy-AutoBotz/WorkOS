@@ -15,8 +15,20 @@ export function releaseEnvironment() {
   return name;
 }
 
+export async function teamsReleased(client, organizationId) {
+  if (!organizationId) return false;
+  const {rows} = await client.query(`select enabled from module_release_decisions
+    where organization_id=$1 and environment=$2 and module='teams' order by revision desc limit 1`,
+    [organizationId, releaseEnvironment()]);
+  return rows[0]?.enabled === true;
+}
+
 export function registerModuleReleaseRoutes(router, {pool, requirePermission, audit}) {
   const manage = requirePermission('releases.manage');
+  router.get('/module-releases/effective', asyncHandler(async (req,res) => {
+    const teams = await teamsReleased(pool,req.organizationScope.organizationId);
+    res.set('Cache-Control','no-store').json({teams});
+  }));
   router.get('/module-releases', manage, asyncHandler(async (req, res) => {
     const environment = releaseEnvironment();
     const {rows} = await pool.query(`select distinct on (module) ${releaseFields}
