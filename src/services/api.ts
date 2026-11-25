@@ -1182,6 +1182,7 @@ export const approvalService = {
     if (!record) throw new Error('Approval record was not found.');
     if (record.status !== 'Pending') throw new Error('Only pending approvals can be decided.');
     if (!canViewLocalApprovalRecord(record)) throw new Error('Approval is outside active-role data scope.');
+    if (status === 'Rejected' && !comments?.trim()) throw new Error('Enter a rejection reason');
     const u = actor();
     const next: ApprovalRecord = {
       ...record,
@@ -1635,7 +1636,7 @@ export const integrationService = {
     if (existing.usedAt) throw new Error('Teams action token has already been used.');
     if (existing.expiresAt < new Date().toISOString()) throw new Error('Teams action token has expired.');
     if (existing.entityType === 'ApprovalRecord' && (existing.action === 'approve' || existing.action === 'reject')) {
-      await approvalService.decide(existing.entityId, existing.action === 'approve' ? 'Approved' : 'Rejected', comments || 'Decided from deterministic Teams action.');
+      await approvalService.decide(existing.entityId, existing.action === 'approve' ? 'Approved' : 'Rejected', comments?.trim());
     }
     const next = { ...existing, usedAt: new Date().toISOString() };
     DataStorage.set(STORAGE_KEYS.INTEGRATION_TEAMS_ACTION_TOKENS, tokens.map(item => item.id === next.id ? next : item));
