@@ -53,6 +53,7 @@ export async function processOverdueWork(pool,o) {
 }
 
 export async function overdueWorkInboxRows(c,req,o,{after=null,id=null}={}) {
+  if (!(await c.query("select to_regclass('public.work_approval_overdue_inbox') is not null as available")).rows[0].available) return [];
   const params=[req.user.sub,...workApprovalScope(req),after,id],where=o.buildEmployeeScopeWhere(req,params,'e');
   return (await c.query(`select r.id,'work-approval/'||r.instance_id||'/'||r.stage||'/approval.overdue_or_escalated/deadline' as "eventId",
     r.instance_id as "instanceId", r.timesheet_id as "timesheetId",r.submission_id as "submissionId",r.stage as "transitionSequence",
