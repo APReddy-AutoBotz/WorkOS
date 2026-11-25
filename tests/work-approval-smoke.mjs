@@ -5,6 +5,11 @@ assert(validWorkApprovalPolicy(definition));
 assert(validWorkApprovalPolicy({...definition,stageDueMinutes:90,escalationUserId:ids[1]}));
 assert.equal(validWorkApprovalPolicy({...definition,escalationUserId:ids[1]}),false);
 assert.equal(validWorkApprovalPolicy({...definition,stageDueMinutes:90,escalationUserId:null}),false);
+const overdue={key:'approval.overdue_or_escalated',subject:'Late stage {{stageNumber}}',body:'Inspect {{sourceRef}}'};
+assert(validWorkApprovalPolicy({...definition,stageDueMinutes:1,overdueTemplate:overdue}));
+assert.equal(validWorkApprovalPolicy({...definition,overdueTemplate:overdue}),false);
+assert.equal(validWorkApprovalPolicy({...definition,stageDueMinutes:1,overdueTemplate:{...overdue,body:'{{email}}'}}),false);
+assert.equal(validWorkApprovalPolicy({...definition,templates:[...templates.slice(0,2),overdue]}),false);
 for (const stageDueMinutes of [0, 1.5, '90', null, 2147483648])
     assert.equal(validWorkApprovalPolicy({...definition, stageDueMinutes}), false);
 assert(validWorkApprovalPolicy({ ...definition, workerIds: [] }), 'explicit empty future selection retires adoption without changing existing instances');

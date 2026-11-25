@@ -11,7 +11,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     await migrateCommercialDatabase(pool);
     const { identities, today } = await seedWorkApproval(pool), weekday = new Date(today + 'T00:00:00Z').getUTCDay(), monday = shiftCapacityDate(today, weekday === 6 ? 2 : weekday === 0 ? 1 : 1 - weekday), pastMonday = shiftCapacityDate(monday, -7);
-    await withCommercialApi({ databaseUrl, identities }, async ({ baseUrl: apiUrl, request, tokenFor }) => {
+    await withCommercialApi({ runBackgroundWorkers:process.argv.includes('--observe-deadline'), databaseUrl, identities }, async ({ baseUrl: apiUrl, request, tokenFor }) => {
         await prepareStagedWork(request, identities, today);
         assert.equal((await request('/api/v1/work-capture-modes/settings', { method: 'POST', body: { expectedLatestId: null, enabledModes: ['daily', 'weekly'] } })).status, 201);
         assert.equal((await request('/api/allocations', { method: 'POST', body: { employee_id: workers.first, project_id: f.projectId, percentage: 20, start_date: pastMonday, end_date: shiftCapacityDate(today, 7), billable: false, status: 'Active' } })).status, 200);
@@ -48,6 +48,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             const observeDeadline=process.argv.includes('--observe-deadline'), minutes=observeDeadline?1:90;
             await config.getByLabel('Time allowed per approval stage (minutes, optional)').fill(String(minutes));
             await config.getByLabel('Escalation recipient (optional)').selectOption(identities.second.id);
+            await config.getByLabel('Overdue title').fill('Late approval {{stageNumber}}');
+            await config.getByLabel('Overdue body').fill('Review {{sourceRef}}');
             await config.getByLabel('Template locale', { exact: true }).fill('en-GB');
             for (const [t, label] of definition.templates.map((t, i) => [t, ['Action request', 'Correction', 'Completion'][i]])) {
                 await config.getByLabel(label + ' title', { exact: true }).fill(t.subject);
@@ -93,10 +95,47 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await assert.rejects(pool.query('insert into work_approval_overdue_stages(instance_id,stage,due_at) select instance_id,stage,due_at from work_approval_timed_stages where instance_id=$1',[instance.id]),{code:'WGA05'});
             if (observeDeadline) {
                 const deadline=await reportedDeadline();
+                const scopeParams=[identities.second.id,f.organizationId,f.legalEntityId];
+                const toggle='update user_organization_scopes set active=$4 where user_id=$1 and organization_id=$2 and legal_entity_id=$3';
+                await pool.query(toggle,[...scopeParams,false]);
                 // Exercise the production worker on a real elapsed deadline only in the clock rehearsal.
                 await w.waitForTimeout(Math.max(0,deadline-Date.now())+10);
                 await Promise.all([collectOverdueWorkStages(pool),collectOverdueWorkStages(pool)]);
                 assert.deepEqual((await observed()).rows,[{stage:0,due_at:new Date(deadline)}]);
+                const failedUntil=Date.now()+45_000;
+                const attempts=()=>pool.query('select failure from work_approval_overdue_attempts where instance_id=$1 and stage=0 order by attempt',[instance.id]);
+                while (!(await attempts()).rowCount && Date.now()<failedUntil) await w.waitForTimeout(1000);
+                assert.deepEqual((await attempts()).rows,[{failure:'RECIPIENT_UNAVAILABLE'}]);
+                assert.equal((await pool.query('select id from work_approval_overdue_inbox where instance_id=$1',[instance.id])).rowCount,0);
+                await pool.query(toggle,[...scopeParams,true]);
+                const waitUntil=Date.now()+100_000;
+                const deliveries=()=>pool.query('select id,user_id,reasons from work_approval_overdue_inbox where instance_id=$1',[instance.id]);
+                while ((await deliveries()).rowCount===0 && Date.now()<waitUntil) await w.waitForTimeout(1000);
+                const delivered=(await deliveries()).rows;
+                assert.equal(delivered.length,2);
+                assert.deepEqual((await attempts()).rows,[{failure:'RECIPIENT_UNAVAILABLE'},{failure:null}]);
+                const noticePage=await ac.newPage();
+                await noticePage.goto(url);
+                await noticePage.getByRole('button',{name:'My notifications',exact:true}).click();
+                const inbox=noticePage.getByRole('region',{name:'Canonical work approval notifications'});
+                await inbox.getByRole('button',{name:'Load my governed notifications'}).click();
+                await inbox.getByText('Late approval 1',{exact:true}).waitFor();
+                await noticePage.close();
+                for (const [recipient,reason] of [[identities.manager,'current_stage_approver'],[identities.second,'escalation_target']]) {
+                    const row=delivered.find(r=>r.user_id===recipient.id);
+                    assert.deepEqual(row.reasons,[reason]);
+                    const page=await request(api+'/inbox',{identity:recipient});
+                    const own=page.body.notifications.find(n=>n.id===row.id);
+                    assert.equal(own.eventKey,'approval.overdue_or_escalated');
+                    assert.equal(own.policyClass,'CONTROL_MANDATORY');
+                    assert.equal(own.title,'Late approval 1');
+                    const ack=await request(api+'/inbox/'+row.id+'/read',{method:'POST',identity:recipient,body:{expectedOwnerKey:page.body.ownerKey}});
+                    assert.equal(ack.status,200,JSON.stringify(ack.body));
+                    assert(ack.body.notification.readAt);
+                }
+                const workerInbox=await request(api+'/inbox',{identity:identities.first});
+                assert(!workerInbox.body.notifications.some(n=>n.eventKey==='approval.overdue_or_escalated'));
+
             }
             assert(instance);
             assert.equal(instance.requester_user_id, identities.first.id);

@@ -6541,7 +6541,7 @@ const server = app.listen(port, () => {
 if (pool && process.env.NODE_ENV!=='test') {
   startFixedFeeWarningWorker(pool,server,processMonthEndMarginAlerts);
   startPurchaseOrderRiskWorker(pool,server);
-  startOverdueWorkWorker(pool,server);
+  startOverdueWorkWorker(pool,server,workApprovalOptions);
   startRetainerRiskWorker(pool,server);
 }
 

@@ -61,10 +61,16 @@ export const scopedWorkApproval = async (c, req, id, o, lock = false, includeSou
             workApprovalFail('WORK_APPROVAL_SOURCE_UNAVAILABLE', 'Retained source identity does not match the instance.');
         source = { weekEnding: captured.header.weekEnding, totalHoursExact: canonicalHours(captured.header.totalHours), billableHoursExact: canonicalHours(captured.header.billableHours), currentHeaderStatus: header.status, isCurrentSubmission: latest?.id === i.submission_id, entries: captured.submission.entries.map(e => ({ id: e.entryId, date: e.workDate, workType: e.workType, projectId: e.projectId ?? null, clientName: e.clientName ?? null, category: e.category ?? null, categoryCode: e.categoryCode ?? null, hoursExact: canonicalHours(e.hours), billable: e.billable, remark: e.remark ?? null, evidenceUrl: e.evidenceUrl ?? null, workReference: e.workReference ?? null })) };
     }
-    return { i, policy, transitions, state: approvalState(policy.definition.stages, transitions), worker, notificationFailures, source };
+    const overdueDeliveries=includeSource ? (await c.query(`select d.stage,d.due_at as "dueAt",
+      coalesce(last.attempt,0) as attempts,case when last.attempt is null then 'Pending'
+        when last.failure is not null then 'Recipient unavailable' else 'Delivered' end as status
+      from work_approval_overdue_stages d left join lateral(select a.attempt,a.failure from work_approval_overdue_attempts a
+        where a.instance_id=d.instance_id and a.stage=d.stage order by a.attempt desc limit 1) last on true
+      where d.instance_id=$1 order by d.stage`,[id])).rows : [];
+    return { i, policy, transitions, overdueDeliveries, state: approvalState(policy.definition.stages, transitions), worker, notificationFailures, source };
 };
 export const workApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at });
-export const workApprovalView = v => ({ id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, source: v.source });
+export const workApprovalView = v => ({ id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, ...(v.overdueDeliveries.length ? {overdueDeliveries:v.overdueDeliveries} : {}), source: v.source });
 export const workApprovalRecipientScope = async (c,req,id,workerIds,o) => {
     const user=await workApprovalUser(c,req,id,o), remaining=new Set(workerIds);
     for (const role of user.roles) {

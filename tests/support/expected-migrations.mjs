@@ -146,6 +146,7 @@ const expected = [
   '119_wos05_work_stage_deadline',
   '120_wos05_approval_escalation_recipient',
   '121_wos05_overdue_work_stages',
+  '122_wos05_overdue_delivery',
 ];
 
 export function expectedMigrationsFrom(first) {
