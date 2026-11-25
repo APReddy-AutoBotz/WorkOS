@@ -670,11 +670,12 @@ export const invoiceCsv = {
     if (!hasRatePermission('commercial.invoice_drafts.prepare') || ![batchId, lineId, artifactId].every(v => uuid.safeParse(v).success)) return bad();
     const raw = await call(write ? 'POST' : 'GET', '/batches/' + batchId + '/lines/' + lineId + '/reversal-request',
       c, 'view', write ? { ...write, artifactId } : undefined);
-    const out = z.object({ ...envelope, request: reversalRequest.nullable(), ...(write ? { replayed: z.boolean() } : {}) }).strict().safeParse(raw);
+    const chargeBalance = z.object({ currency: z.string().regex(/^[A-Z]{3}$/), remaining: money }).strict();
+    const out = z.object({ ...envelope, request: reversalRequest.nullable(), chargeBalance: chargeBalance.nullable().optional(), ...(write ? { replayed: z.boolean() } : {}) }).strict().safeParse(raw);
     if (!out.success || (out.data.request && (out.data.request.lineId !== lineId || out.data.request.artifactId !== artifactId))) return bad();
     if (write && (!out.data.request || out.data.request.reason !== write.reason || out.data.request.actorId !== out.data.actorUserId ||
       out.data.request.activeRole !== out.data.activeRole || Boolean(out.data.request.confirmationId) !== (write.inspectedState === 'Billed/Confirmed'))) return bad();
-    return out.data.request;
+    return { request: out.data.request, chargeBalance: out.data.chargeBalance };
   },
   source: async (batchId: string, c: RateContext | null) => {
     if (!uuid.safeParse(batchId).success) return bad();

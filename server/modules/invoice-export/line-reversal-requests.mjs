@@ -37,7 +37,19 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
   registerReversalReview(router, { path, handle, inspect, envelope, audit });
   router.get(path, handle(false, async (c, r) => {
     const { existing } = await inspect(c, r, false);
-    return { ...(await envelope(c, r)), request: existing };
+    const { rows } = await c.query(
+      `select l.currency, trim_scale(l.amount - coalesce(approved.total, 0))::text as remaining
+       from invoice_draft_lines l
+       left join lateral (
+         select sum(-credit.amount) as total from invoice_line_reversal_requests req
+         join invoice_reversal_reviews review on review.request_id=req.id
+         cross join lateral full_line_reversal_source(review.id) credit
+         where req.line_id=l.id
+       ) approved on true
+       where l.id=$1 and l.batch_id=$2 and l.amount>0`,
+      [r.params.lineId, r.params.batchId],
+    );
+    return { ...(await envelope(c, r)), request: existing, chargeBalance: rows[0] ?? null };
   }));
   router.get(path + '/review-route', handle(false, async (c, r) => {
     const { row, existing } = await inspect(c, r, false);

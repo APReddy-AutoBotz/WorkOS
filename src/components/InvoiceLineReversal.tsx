@@ -9,6 +9,7 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
 }) {
   const [line, select] = useState(''), [reason, setReason] = useState('');
   const [receipt, setReceipt] = useState<InvoiceLineReversalRequest | null | undefined>();
+  const [balance, setBalance] = useState<{ currency: string; remaining: string } | null>();
   const [route, setRoute] = useState<InvoiceReversalRoute | null>(null);
   const [review, setReview] = useState<SubmittedReversalReview | null>(null);
   const [canSubmit, setCanSubmit] = useState(false);
@@ -36,7 +37,10 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
     setReview(null);
     setCanSubmit(false);
     setReceipt(undefined);
-    setReceipt(await invoiceCsv.lineReversal(source.id, line, artifact.id, c));
+    setBalance(undefined);
+    const result = await invoiceCsv.lineReversal(source.id, line, artifact.id, c);
+    setReceipt(result.request);
+    setBalance(result.chargeBalance);
   });
   const submit = () => void run(async c => {
     setRoute(null);
@@ -46,19 +50,20 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
     const result = await invoiceCsv.lineReversal(source.id, line, artifact.id, c, {
       sha256: artifact.sha256, inspectedState: state, reason: reason.trim(),
     });
-    setReceipt(result);
+    setReceipt(result.request);
     setReason('');
   });
   return <fieldset disabled={disabled} className="space-y-2">
     <legend>Full line reversal request</legend>
     <p>A request records the reason for finance review. The exported amount and line reservation stay in place.</p>
     <label>Exported line to review
-      <select value={line} onChange={e => {select(e.target.value); setReview(null); setCanSubmit(false); setRoute(null); setReceipt(undefined); setReason('');}}>
+      <select value={line} onChange={e => {select(e.target.value); setReview(null); setCanSubmit(false); setRoute(null); setReceipt(undefined); setReason(''); setBalance(undefined);}}>
         <option value="">Choose an exported line</option>
         {source.lines.map(l => <option key={l.lineId} value={l.lineId}>Line {l.sequence} · {l.currency} {l.amount} · {l.lineId}</option>)}
       </select>
     </label>
     <button type="button" disabled={!line} onClick={inspect}>Check reversal request</button>
+    {balance && <p>Remaining on original charge at inspection: {balance.currency} {balance.remaining}</p>}
     {receipt === null && <>
       <label>Full reversal reason <input value={reason} maxLength={1000} onChange={e => setReason(e.target.value)} /></label>
       <button type="button" disabled={reason.trim().length < 3} onClick={submit}>Request full line reversal</button>

@@ -779,6 +779,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       await csvDesk.getByRole('button',{name:'Retrieve retained invoice CSV'}).click();
       await csvDesk.getByLabel('Exported line to review').selectOption(lineId);
       await csvDesk.getByRole('button',{name:'Check reversal request'}).click();
+      await csvDesk.getByText('Remaining on original charge at inspection: '+a.currency+' '+amount,{exact:true}).waitFor();
       await csvDesk.getByLabel('Full reversal reason').fill(requestBody.reason);
       await csvDesk.getByRole('button',{name:'Request full line reversal'}).click();
       await csvDesk.getByRole('button',{name:'Check reversal reviewers'}).click();
@@ -831,6 +832,7 @@ const verifyCommercialDrafting = async reversalScenario => {
         const eligibility=ok(await apiRequest(reversalPath+'/eligibility',{identity:finance}),200);
         assert.equal(eligibility.source.amount,'-'+amount);
         assert.equal(eligibility.source.originalEventId,original.eventId);
+        assert.deepEqual(ok(await apiRequest(reversalPath,{identity:finance}),200).chargeBalance,{currency:a.currency,remaining:'0'});
         const issueBody={expectedOwnerKey:ownerKey,reviewId:savedReview.id,decisionId:eligibility.source.decisionId,
           confirmationId:receipt.id,eligibleOn:eligibility.serverDate,reason:'Correct the original service-period charge'};
         assert.equal((await reverse('/eligibility',{...issueBody,confirmationId:null})).status,409);
