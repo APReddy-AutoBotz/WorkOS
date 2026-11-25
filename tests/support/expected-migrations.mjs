@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+
 // This independent list pins the exact order expected by historical upgrade tests.
 const expected = [
   '033_wos03_audit_operation_context',
@@ -160,4 +162,25 @@ export function expectedMigrationsFrom(first) {
   const index = expected.indexOf(first);
   if (index < 0) throw new Error('Unknown expected upgrade migration: ' + first);
   return expected.slice(index);
+}
+
+export function assertReleaseGrantUpgrade(before, after) {
+  const isNewGrant = row => row.permission_key === 'releases.manage';
+  assert.equal(before.some(isNewGrant), false);
+  const additions = after.filter(isNewGrant);
+  assert.equal(additions.length, 1);
+  const {updated_at, ...grant} = additions[0];
+  assert.ok(Number.isFinite(Date.parse(updated_at)));
+  assert.deepEqual(grant, {role_name:'Admin', permission_key:'releases.manage', enabled:true, updated_by:null});
+  assert.deepEqual(after.filter(row => !isNewGrant(row)), before);
+}
+
+/** Include migration 129's single verified addition in a historical table snapshot. */
+export async function includeReleaseGrant(pool, expectedRows) {
+  const field = Object.keys(expectedRows[0])[0];
+  const {rows} = await pool.query('select to_jsonb(r) as grant from role_permissions r order by to_jsonb(r)::text');
+  const after = rows.map(row => row.grant);
+  assertReleaseGrantUpgrade(expectedRows.map(row => row[field]), after);
+  const index = after.findIndex(row => row.permission_key === 'releases.manage');
+  expectedRows.splice(index, 0, {[field]:after[index]});
 }

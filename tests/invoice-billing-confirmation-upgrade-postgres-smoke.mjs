@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import {expectedMilestoneUpgradeSnapshot} from './support/milestone-upgrade-expectations.mjs';
 import { mkdtemp, mkdir, copyFile, readdir, cp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -1138,6 +1138,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             0,
           );
           assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065k_wos06_invoice_billing_confirmation'));
+          await includeReleaseGrant(pool, before.role_permissions);
           assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
           for (const t of ['role_permissions', 'user_permission_grants'])
             assert.equal(

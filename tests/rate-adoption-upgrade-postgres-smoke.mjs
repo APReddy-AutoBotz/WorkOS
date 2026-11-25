@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
@@ -199,6 +199,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           before.commercial_candidate_approval_events.length > 0,
       );
       assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065d_wos06_approved_rate_adoptions'));
+      await includeReleaseGrant(pool, before.role_permissions);
       const upgraded = await snapshot(),
         newKeys = [
           'commercial.milestone_billing.view',
@@ -217,7 +218,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         added = upgraded.permission_definitions.filter((x) => newKeys.includes(x.v.permission_key));
       assert.deepEqual(added.map((x) => x.v.permission_key).sort(), [...newKeys].sort());
       assert.deepEqual(
-        upgraded.permission_definitions.filter((x) => !newKeys.includes(x.v.permission_key)),
+        upgraded.permission_definitions.filter((x) => ![...newKeys, 'releases.manage'].includes(x.v.permission_key)),
         before.permission_definitions,
       );
       assert.deepEqual({ ...upgraded, permission_definitions: before.permission_definitions }, before);

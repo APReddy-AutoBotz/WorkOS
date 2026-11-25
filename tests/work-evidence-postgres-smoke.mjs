@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {syntheticCredential} from './support/synthetic-values.mjs';
 import {copyFile,readdir} from 'node:fs/promises';
@@ -27,6 +27,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const before=(await pool.query('select to_jsonb(e) value from timesheet_entries e order by id')).rows;
   const grants=(await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows;
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
+  await includeReleaseGrant(pool, grants);
   assert.deepEqual((await pool.query("select to_jsonb(e)-array['evidence_url','work_reference','source_identity','category_code','category_reference'] value from timesheet_entries e order by id")).rows,before);
   assert.equal((await pool.query('select count(*)::int n from timesheet_entries where evidence_url is not null')).rows[0].n,0);
   assert.deepEqual((await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows,grants);

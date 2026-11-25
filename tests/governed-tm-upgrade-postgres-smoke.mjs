@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -289,6 +289,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             before.timesheet_entries.length > 0,
         );
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065e_wos06_governed_tm_valuation'));
+        await includeReleaseGrant(pool, before.role_permissions);
         const after = await snapshot(),
           newKeys = [
           'commercial.milestone_billing.view',
@@ -312,7 +313,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           [...newKeys].sort(),
         );
         assert.deepEqual(
-          after.permission_definitions.filter((x) => !newKeys.includes(x.v.permission_key)),
+          after.permission_definitions.filter((x) => ![...newKeys, 'releases.manage'].includes(x.v.permission_key)),
           before.permission_definitions,
         );
         assert.deepEqual({ ...after, permission_definitions: before.permission_definitions }, before);

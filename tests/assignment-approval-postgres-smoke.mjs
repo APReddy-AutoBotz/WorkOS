@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { commercialFixture as f, withCommercialDatabase, migrateCommercialDatabase, withCommercialApi } from './support/commercial-drafting-test.mjs';
@@ -13,6 +13,7 @@ await withCommercialDatabase(async ({ pool }) => withPreAssignmentApprovalMigrat
     await seedAssignmentApproval(pool);
     const keep = ['project_allocations', 'assignment_versions', 'assignment_overlap_policy_versions', 'assignment_overlap_evidence', 'approval_records', 'users', 'role_permissions', 'timesheets', 'timesheet_entries', 'work_submission_evidence', 'work_submission_decisions', 'resource_demands', 'resource_demand_versions', 'work_approval_instances', 'work_approval_events', 'work_period_notice_policies', 'work_period_notice_events', 'notification_events'], before = await snapshot(pool, keep);
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065_wos05_assignment_material_approvals'));
+    await includeReleaseGrant(pool, before.role_permissions);
     assert.deepEqual(await snapshot(pool, keep), before);
     for (const t of tables)
         assert.deepEqual(await table(pool, t), []);

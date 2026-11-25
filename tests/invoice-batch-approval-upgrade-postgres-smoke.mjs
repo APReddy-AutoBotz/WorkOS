@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import {expectedMilestoneUpgradeSnapshot} from './support/milestone-upgrade-expectations.mjs';
 import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -839,12 +839,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert(!defs.some((x) => keys.includes(x.v.permission_key)));
         assert.equal(before.invoice_draft_occupancies.length, 1);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065h_wos06_invoice_batch_approval'));
+        await includeReleaseGrant(pool, before.role_permissions);
         assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
         const after = (
           await pool.query('select to_jsonb(x)v from permission_definitions x order by to_jsonb(x)::text')
         ).rows;
         assert.deepEqual(
-          after.filter((x) => !keys.includes(x.v.permission_key)),
+          after.filter((x) => ![...keys, 'releases.manage'].includes(x.v.permission_key)),
           defs,
         );
         assert.deepEqual(
