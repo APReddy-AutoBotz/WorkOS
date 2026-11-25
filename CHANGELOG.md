@@ -4,6 +4,8 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+- Buyers can require named-stage approval before a worker assignment is created.
+
 - Finance can approve discounts and write-offs against a named original charge, export the resulting credits and record their downstream application. Each approval consumes the remaining balance on that charge.
 
 - Allow prose-only progress PRs to complete CI with whitespace validation and a secret scan of all fetched Git history.

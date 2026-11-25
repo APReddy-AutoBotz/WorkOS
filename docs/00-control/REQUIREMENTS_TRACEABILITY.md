@@ -860,3 +860,7 @@ WOS-INV-001 and WOS-INV-004. Migrations 123 and 124 bind each request to an expo
 WOS-RPT-007, WOS-INV-004 and WOS-NFR-DAT-007. T&M and milestone engagement and portfolio reconciliation includes signed issued corrections, attributed to the original charge. The existing billing reconciliation and milestone invoice journeys follow confirmed credits through report control totals.
 
 WOS-APR-005 and WOS-INT-002. A versioned timesheet approval policy can remind the current approver once before each pending stage deadline. The reminder links to the original action-required event and retains an independent receipt and acknowledgment. The real-clock work approval journey exercises early suppression, concurrent collection, recipient isolation, rendering and acknowledgement.
+
+### Assignment creation approval
+
+WOS-RES-008 extends the existing assignment policy with optional creation approval. Migration 127 preserves existing proposals. The assignment creation PostgreSQL and browser journeys cover the populated upgrade, direct-write rejection, named decisions and atomic creation of the first assignment version.
