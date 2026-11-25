@@ -1,4 +1,4 @@
-import {fixedFeeLine,retainerInvoiceEvidence,serviceUnitInvoiceEvidence,servicePeriodInvoiceEvidence} from './invoiceDrafts';
+import {correctionEvidence,fixedFeeLine,retainerInvoiceEvidence,serviceUnitInvoiceEvidence,servicePeriodInvoiceEvidence} from './invoiceDrafts';
 import { milestoneInvoiceEvidence, milestoneEvidenceMatches } from './milestoneInvoiceContracts';
 import { z } from 'zod';
 import {
@@ -139,13 +139,6 @@ const standardSource=sourceBase.refine((v) => {
     }
   });
 const negativeMoney=z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).refine(v=>/[1-9]/.test(v));
-const correctionEvidence=z.object({
-  adjustmentKind:z.enum(['Discount','Write-off']).optional(),approvedBalanceBefore:money.optional(),
-  sourceVersion:z.literal(1),reviewId:uuid,policyId:uuid,requestId:uuid,decisionId:uuid,
-  originalSourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT']),originalEventId:uuid,originalEventVersion:z.literal(1),
-  originalItemId:uuid,originalItemVersion:z.literal(1),originalLineId:uuid,originalBatchId:uuid,artifactId:uuid,
-  artifactSha256:hash,confirmationId:uuid.nullable(),currency:z.string().regex(/^[A-Z]{3}$/),originalAmount:money,amount:negativeMoney,
-}).strict();
 const correctionLine=tmLine.extend({snapshotId:z.null(),sourceType:z.literal('FULL_LINE_REVERSAL'),amount:negativeMoney,evidence:correctionEvidence});
 const correctionSource=sourceBase.extend({sourceType:z.literal('FULL_LINE_REVERSAL'),periodBasis:z.literal('ELIGIBLE_DATE'),
   total:negativeMoney,lines:z.array(correctionLine).min(1).max(50)}).refine(v=>{

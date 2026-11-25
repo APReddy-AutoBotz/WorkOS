@@ -1765,6 +1765,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             assert.equal((await body(await confirmedCredit,201)).confirmation.total,receipt.amount);
             await exportUi.getByRole('button',{name:'Check exported credits'}).click();
             await creditLink.filter({hasText:'Downstream application attested'}).waitFor();
+            const signedReport = wait(requester.p, route + '/reconciliation');
+            await reconUi.getByRole('button', {name: 'Load billing reconciliation'}).click();
+            const report = await body(signedReport);
+            await reconUi.getByText(receipt.itemId, {exact: false}).first().waitFor();
+            assert.equal(report.exceptionCount, 0);
+            const creditRow = report.items.find(item => item.itemId === receipt.itemId);
+            assert.equal(creditRow.snapshotId, reconciliation.items[0].snapshotId);
+            assert.equal('-' + canonicalHours(creditRow.amount.slice(1)), receipt.amount);
+            assert(creditRow.amount.startsWith('-'));
+            assert.deepEqual(report.controls.find(row => row.boundary === 'MANUALLY_CONFIRMED_LINE'),
+              {currency: creditRow.currency, boundary: 'MANUALLY_CONFIRMED_LINE', lineCount: 2, amount: '0'});
             assert.deepEqual(ok(await request(pricingPath,{identity:ids.requester})).pricing,pricing);
             const consumed=ok(await request(poPath,{identity:ids.requester})).commitment;
             assert.deepEqual([consumed.committed,consumed.consumed,consumed.remaining,consumed.warning],['0','80.0000','20.0000',true]);

@@ -856,3 +856,5 @@ WOS-APR-005. Migration 121 and the overdue worker retain elapsed stage deadlines
 ### Discounts and write-offs against an original charge
 
 WOS-INV-001 and WOS-INV-004. Migrations 123 and 124 bind each request to an exported line and artifact, require independent approval under a policy enabled for adjustments, enforce the charge balance at final approval and issue one signed register item per approved decision. The existing commercial drafting journey exercises competing approvals, coexistence with a full reversal, and issuance replay. Migration 125 preserves the eligibility event type on each invoice line. The journey reserves two approved credits against one charge, approves their batch, exports both signed CSV lines, records downstream confirmation and reconciles the confirmed amounts.
+
+WOS-RPT-007, WOS-INV-004 and WOS-NFR-DAT-007. T&M and milestone engagement and portfolio reconciliation includes signed issued corrections, attributed to the original charge. The existing billing reconciliation and milestone invoice journeys follow confirmed credits through report control totals.

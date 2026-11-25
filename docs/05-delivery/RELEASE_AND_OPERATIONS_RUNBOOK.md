@@ -923,3 +923,5 @@ For governed timesheets, set the optional time allowed per stage in the approval
 ### Scoped bulk timesheet approval
 
 Timesheet bulk approval uses the same scoped decision API as individual review. Admins, Country Directors, Project Managers and Team Leads with approval permission can preview submitted rows. If a reporting relationship changes before confirmation, inspect the per-item outcomes. A denied row that has left the reviewer’s scope appears without its worker name. Reload current records before retrying an unacknowledged decision.
+
+In T&M and milestone billing reconciliation, a released, reserved, exported or confirmed credit contributes its signed amount at the applicable boundary. The portfolio date filter uses the eligibility date of each charge or credit. A selected period may contain a credit for an earlier charge. A zero net total can include multiple records. Use the count and item-level lineage to inspect them.

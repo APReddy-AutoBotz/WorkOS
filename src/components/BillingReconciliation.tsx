@@ -364,7 +364,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                     <span>
                       {item.currency} {item.amount} · {item.status} · item {item.itemId} v{item.itemVersion} ·
                       event {item.eventId} v{item.eventVersion} · source{' '}
-                      {item.sourceType === 'MILESTONE_ACCEPTANCE' ? item.milestoneId : item.snapshotId} ·
+                      {'milestoneId' in item ? item.milestoneId ?? item.snapshotId : item.snapshotId} ·
                       eligibility approval {item.eligibilityApprovalId} · decision{' '}
                       {item.eligibilityDecisionId}
                     </span>

@@ -1081,7 +1081,14 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         await reconciliationUi.getByRole('button', { name: 'Load billing reconciliation' }).click();
         const reconciled = await (await loaded).json();
         assert.equal(reconciled.exceptionCount, 0);
-        const [row] = reconciled.items;
+        assert.equal(reconciled.items.length, 2);
+        const row = reconciled.items.find(item => item.sourceType === 'MILESTONE_ACCEPTANCE');
+        const signed = reconciled.items.find(item => item.sourceType === 'FULL_LINE_REVERSAL');
+        assert.equal(signed.milestoneId, milestone.id);
+        assert.equal(signed.itemId, issued.itemId);
+        assert.equal(signed.confirmationId, recovered.id);
+        assert.equal(signed.history.length, 3);
+        assert(signed.controlOk);
         assert.equal(row.artifactId, artifact.id);
         assert.equal(row.snapshotId, null);
         assert.equal(row.eligibilityApprovalId, created.id);
@@ -1102,8 +1109,9 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
           const control = reconciled.controls.find(
             (x) => x.currency === row.currency && x.boundary === boundary,
           );
-          assert.equal(control.lineCount, 1);
-          assert.equal(control.amount, '125.15');
+          const historical = boundary === 'HISTORICAL_RELEASED_LINE';
+          assert.equal(control.lineCount, historical ? 4 : 2);
+          assert.equal(control.amount, historical ? '-250.3' : '0');
         }
         await reconciliationUi.getByLabel('Report export reason').fill('Synthetic reconciled milestone');
         const download = page.waitForEvent('download');
@@ -1211,11 +1219,13 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         assert.equal(combined.exceptionCount, 0);
         assert.deepEqual(
           combined.controls.find((x) => x.boundary === 'REGISTER_ITEM'),
-          { currency: 'USD', boundary: 'REGISTER_ITEM', lineCount: 2, amount: '150.15' },
+          credit.serverDate === eligibleDate
+            ? { currency: 'USD', boundary: 'REGISTER_ITEM', lineCount: 3, amount: '25' }
+            : { currency: 'USD', boundary: 'REGISTER_ITEM', lineCount: 2, amount: '150.15' },
         );
         assert.equal(
           combined.controls.find((x) => x.boundary === 'MANUALLY_CONFIRMED_LINE').amount,
-          '125.15',
+          credit.serverDate === eligibleDate ? '0' : '125.15',
         );
         const portfolioExportPath = drafts + '/reconciliation/portfolio/exports',
           portfolioCommand = {
@@ -1234,8 +1244,10 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         );
         assert.deepEqual(race.map((x) => x.status).sort(), [201, 409]);
         const combinedCsv = race.find((x) => x.status === 201).body.csv;
-        assert.ok(combinedCsv.includes('"USD","REGISTER_ITEM","2","150.15"'));
-        assert.ok(combinedCsv.includes('"USD","MANUALLY_CONFIRMED_LINE","1","125.15"'));
+        for (const boundary of ['REGISTER_ITEM','MANUALLY_CONFIRMED_LINE']) {
+          const control = combined.controls.find(x => x.boundary === boundary && x.currency === 'USD');
+          assert.ok(combinedCsv.includes(`"USD","${boundary}","${control.lineCount}","${control.amount}"`));
+        }
         await pool.query(
           "update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'",
         );
