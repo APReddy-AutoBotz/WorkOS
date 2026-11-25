@@ -37,3 +37,5 @@ Canonical identity correction before publication: the first unpublished candidat
 ### Escalation recipient for timed stages
 
 When adopting a timed policy, an administrator can select an escalation recipient. Policy adoption checks that the account is active in the legal entity and has inbox and employee access covering the selected workers. The selected account is retained with that policy version. This setting confers no authority to decide the stage. Automatic overdue delivery remains pending. Application rollback can restore the prior editor, but a prior application that does not understand this field must not process policies that use it.
+
+The API worker checks elapsed stage deadlines every 30 seconds and retains one breach per instance and stage. It derives the start and decision times from immutable stage history, so a restart can recover a stage decided after its deadline. Stages decided by their deadline are excluded. Detection evidence is stored in `work_approval_overdue_stages`; recipient delivery is a subsequent operation.

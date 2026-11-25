@@ -1,3 +1,4 @@
+import {collectOverdueWorkStages} from '../server/modules/approvals/overdue-work.mjs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import {startFixtureServer} from './support/compiled-fixture-server.mjs';
@@ -44,7 +45,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await config.getByRole('button', { name: 'Add approval stage', exact: true }).click();
             await config.getByLabel('Stage 2 account', { exact: true }).selectOption(identities.second.id);
             await config.getByLabel('Stage 2 role', { exact: true }).selectOption('Admin');
-            await config.getByLabel('Time allowed per approval stage (minutes, optional)').fill('90');
+            const observeDeadline=process.argv.includes('--observe-deadline'), minutes=observeDeadline?1:90;
+            await config.getByLabel('Time allowed per approval stage (minutes, optional)').fill(String(minutes));
             await config.getByLabel('Escalation recipient (optional)').selectOption(identities.second.id);
             await config.getByLabel('Template locale', { exact: true }).fill('en-GB');
             for (const [t, label] of definition.templates.map((t, i) => [t, ['Action request', 'Correction', 'Completion'][i]])) {
@@ -85,7 +87,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                 assert.equal(report.status, 200);
                 return Date.parse(report.body.rows.find(row => row.entity_id === timesheetId).due_at);
             };
-            assert.equal(await reportedDeadline(), instance.created_at.getTime() + 90 * 60_000);
+            assert.equal(await reportedDeadline(), instance.created_at.getTime() + minutes * 60_000);
+            const observed=()=>pool.query('select stage,due_at from work_approval_overdue_stages where instance_id=$1 order by stage',[instance.id]);
+            assert.equal((await observed()).rowCount,0);
+            await assert.rejects(pool.query('insert into work_approval_overdue_stages(instance_id,stage,due_at) select instance_id,stage,due_at from work_approval_timed_stages where instance_id=$1',[instance.id]),{code:'WGA05'});
+            if (observeDeadline) {
+                const deadline=await reportedDeadline();
+                // Exercise the production worker on a real elapsed deadline only in the clock rehearsal.
+                await w.waitForTimeout(Math.max(0,deadline-Date.now())+10);
+                await Promise.all([collectOverdueWorkStages(pool),collectOverdueWorkStages(pool)]);
+                assert.deepEqual((await observed()).rows,[{stage:0,due_at:new Date(deadline)}]);
+            }
             assert(instance);
             assert.equal(instance.requester_user_id, identities.first.id);
             const panel = p => p.getByRole('region', { name: 'Governed work approval inbox', exact: true }), load = async (p) => { const q = panel(p); await q.getByLabel('Approval instance reference', { exact: true }).fill(instance.id); await q.getByRole('button', { name: 'Load current work approval', exact: true }).click(); await q.getByRole('article', { name: 'Current governed work approval', exact: true }).waitFor(); return q; }, decide = async (p, reason, decision = 'Approve') => { const q = panel(p); await q.getByLabel('Work approval decision reason', { exact: true }).fill(reason); const r = p.waitForResponse(r => new URL(r.url()).pathname === api + '/instances/' + instance.id + '/decisions' && r.request().method() === 'POST'); await q.getByRole('button', { name: decision + ' current work stage', exact: true }).click(); return r; };
@@ -95,7 +107,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await load(stale);
             assert.equal((await decide(a, 'Synthetic stage one approval')).status(), 201);
             const transition = (await pool.query('select created_at from work_approval_transitions where instance_id=$1 and sequence=1', [instance.id])).rows[0];
-            assert.equal(await reportedDeadline(), transition.created_at.getTime() + 90 * 60_000);
+            assert.equal(await reportedDeadline(), transition.created_at.getTime() + minutes * 60_000);
             await ap.getByRole('article', { name: 'Recorded work stage receipt', exact: true }).waitFor();
             assert.equal((await pool.query('select status from timesheets where id=$1', [timesheetId])).rows[0].status, 'Submitted');
             assert.equal((await decide(stale, 'Synthetic stale first-stage attempt')).status(), 409);
