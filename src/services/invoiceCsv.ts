@@ -3,7 +3,7 @@ import { verifyMilestoneInvoiceCsv,verifyRetainerInvoiceCsv,verifyServiceInvoice
 import { validInvoiceConfirmationCommand, validConfirmationTotal } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
-import { canonicalHours } from '../../shared/work-hours.mjs';
+import { canonicalHours, compareHours } from '../../shared/work-hours.mjs';
 import { api, ApiClientError } from './apiClient';
 import { captureRateContext } from './rateCandidates';
 import { hasRatePermission, isRateContextCurrent, type RateContext } from './rateCandidates';
@@ -536,7 +536,7 @@ const correctionEvidence=z.object({
     artifactId:uuid,artifactSha256:hash,reserved:z.boolean()}).strict()).min(1).max(50),
 }).strict();
 export type CorrectionEvidence=z.infer<typeof correctionEvidence>;
-const creditLink=z.object({applicationAttested:z.boolean(),originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
+const creditLink=z.object({kind:z.enum(['Discount','Write-off']).optional(),applicationAttested:z.boolean(),originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
 export type CreditExportLink=z.infer<typeof creditLink>;
 const exactProduct = z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,8})?$/);
 const linePricing = z.object({
@@ -587,7 +587,7 @@ export const invoiceCsv = {
     const raw=await call('GET','/batches/'+original.id+'/exported-credits'+(after?'?after='+after:''),c,'view');
     const result=z.object({...envelope,originalBatchId:uuid,nextAfter:uuid.nullable(),lines:z.array(creditLink).max(50)}).strict().safeParse(raw);
     if(!result.success || result.data.originalBatchId!==original.id || result.data.lines.some(x=>x.originalArtifactId!==original.artifactId ||
-      !original.lines.some(l=>l.lineId===x.originalLineId && l.currency===x.currency && x.amount==='-'+l.amount)))return bad();
+      !original.lines.some(l=>l.lineId===x.originalLineId && l.currency===x.currency && (x.kind ? compareHours(x.amount.slice(1),l.amount)<=0 : x.amount==='-'+l.amount))))return bad();
     return result.data;
   },
   correctionEvidence: async (item:IssuedCredit,engagementId:string,ctx:RateContext) => {

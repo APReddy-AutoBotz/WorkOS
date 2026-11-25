@@ -729,12 +729,12 @@ const verifyCommercialDrafting = async reversalScenario => {
       }[sourceType];
       const countKey=sourceType==='FIXED_FEE_INSTALLMENT'?'installments':'charges';
       const chargeReport='/api/v1/invoice-drafts/reconciliation/'+reportPath+'?engagementId='+engagementId;
-      const checkChargeBalance=async status=>{
+      const checkChargeBalance=async (status,creditCount=1)=>{
         const result=await apiRequest(chargeReport,{identity:finance});
         assert.equal(result.status,200,JSON.stringify(result.body));
         const charge={currency:a.currency,status:'Confirmed',[countKey]:1,credits:0,gross:amount,adjustments:'0',net:amount};
-        const credit={currency:a.currency,status,[countKey]:0,credits:1,gross:'0',adjustments:'-'+amount,net:'-'+amount};
-        const expected=status==='Confirmed'?[{...charge,credits:1,adjustments:'-'+amount,net:'0'}]:status?[credit,charge]:[charge];
+        const credit={currency:a.currency,status,[countKey]:0,credits:creditCount,gross:'0',adjustments:'-'+amount,net:'-'+amount};
+        const expected=status==='Confirmed'?[{...charge,credits:creditCount,adjustments:'-'+amount,net:'0'}]:status?[credit,charge]:[charge];
         assert.deepEqual(result.body.balances,expected);
         const details=await apiRequest(chargeReport+'&controls=1',{identity:finance});
         assert.equal(details.status,200,JSON.stringify(details.body));
@@ -745,7 +745,7 @@ const verifyCommercialDrafting = async reversalScenario => {
             ['Source','Eligibility event','Register item'].includes(boundary)
             || ['Current occupancy','Current line','Batch membership'].includes(boundary) && status!=='Available'
             || boundary==='Exported line' && status==='Exported');
-          const count=includesCredit ? 2 : 1;
+          const count=includesCredit ? 1+creditCount : 1;
           return {currency:a.currency,boundary,expected:count,observed:count,amount:includesCredit ? '0' : amount,exceptions:0};
         });
         assert.deepEqual(details.body.controls,[...activeControls,{
@@ -862,6 +862,7 @@ const verifyCommercialDrafting = async reversalScenario => {
           const remainder=await submitAdjustment('Write-off','1500');
           assert.equal((await finish(remainder)).status,201);
           const approved=[results[0].status===201?discount:writeOff,remainder];
+          const itemIds=[];
           for(const [index,id] of approved.entries()){
             const path=requestPaths.get(id)+'/eligibility';
             const inspected=await apiRequest(path,{identity:finance});
@@ -873,12 +874,46 @@ const verifyCommercialDrafting = async reversalScenario => {
             const issue=()=>apiRequest(path,{method:'POST',identity:finance,body});
             const issued=await issue();
             assert.equal(issued.status,201,JSON.stringify(issued.body));
+            itemIds.push(issued.body.receipt.itemId);
             assert.equal((await issue()).body.replayed,true);
             const retained=await pool.query('select source_type,billing_evidence from billing_eligibility_events where id=$1',[issued.body.receipt.eventId]);
             assert.equal(retained.rows[0].source_type,'CHARGE_ADJUSTMENT');
             assert.equal(retained.rows[0].billing_evidence.originalLineId,lineId);
             assert.equal(retained.rows[0].billing_evidence.adjustmentKind,id===discount?'Discount':'Write-off');
           }
+          await csvDesk.getByRole('button',{name:'View issued credits'}).click();
+          for(const item of itemIds) await csvDesk.getByLabel('Select credit '+item).check();
+          await csvDesk.getByLabel('Correction batch reason').fill('Apply both approved adjustments');
+          const reservePath=csv+'/batches/'+batchId+'/correction-drafts';
+          const saving=csvBrowser.page.waitForResponse(r=>r.url().endsWith(reservePath) && r.request().method()==='POST');
+          await csvDesk.getByRole('button',{name:'Reserve selected credits'}).click();
+          const saved=await saving;
+          assert.equal(saved.status(),201,await saved.text());
+          const correction=(await saved.json()).receipt;
+          assert.equal(correction.total,'-3500');
+          const checked=(response,expected=201)=>{assert.equal(response.status,expected,JSON.stringify(response.body));return response.body;};
+          const source=checked(await act('/sources/'+correction.batchId,finance),200).batch;
+          assert.deepEqual(source.lines.map(l=>l.evidence.originalLineId),[lineId,lineId]);
+          const approval=checked(await act('/requests',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),
+            batchId:correction.batchId,expectedPolicyId:policyId,expectedLineCount:2,expectedLineageHash:source.lineageHash,
+            reason:'Review signed adjustment batch'})).approval;
+          for(const [n,who,key] of [[0,identities.manager,reviewerKey],[1,alias,secondKey]])
+            checked(await act('/instances/'+approval.id+'/decisions',who,{expectedOwnerKey:key,requestId:crypto.randomUUID(),
+              expectedSequence:n,decision:'Approved',reason:'Verified partial charge evidence'}));
+          const reviewed=checked(await apiRequest(csv+'/batches/'+correction.batchId,{identity:finance}),200).batch;
+          const artifact=checked(await sendExport({...exportCmd,requestId:crypto.randomUUID(),batchId:correction.batchId,
+            approvalId:approval.id,finalTransitionId:reviewed.finalTransitionId,lineageHash:reviewed.lineageHash,
+            schemaVersion:'workos.invoice-credit-csv/1',expectedLineCount:2,expectedTotal:'-3500'})).artifact;
+          assert.equal(artifact.total,'-3500');
+          const lines=Buffer.from(artifact.payloadBase64,'base64').toString('utf8').trimEnd().split('\r\n').slice(1).map(line=>line.split(','));
+          assert.deepEqual(lines.map(l=>l[10]).sort(),['-1500','-2000']);
+          assert.deepEqual(lines.map(l=>l[15]),[lineId,lineId]);
+          checked(await attest({...attestationRequest,requestId:crypto.randomUUID(),batchId:correction.batchId,artifactId:artifact.id,
+            artifactSha256:artifact.sha256,total:'-3500',reference:'Synthetic applied adjustments',reason:'Matched posted partial credits'}));
+          const links=checked(await apiRequest(csv+'/batches/'+batchId+'/exported-credits',{identity:finance}),200).lines;
+          await checkChargeBalance('Confirmed',2);
+          assert.equal(links.length,2);
+          assert(links.every(link=>link.applicationAttested && link.kind && link.originalLineId===lineId && link.sha256===artifact.sha256));
           assert.equal((await apiRequest(reversalPath,{identity:finance})).body.chargeBalance.remaining,'0');
         }
         const stageWorker=(await pool.query('select employee_record_id from users where id=$1',[alias.id])).rows[0].employee_record_id;

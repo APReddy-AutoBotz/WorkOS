@@ -149,6 +149,7 @@ const expected = [
   '122_wos05_overdue_delivery',
   '123_wos06_named_charge_adjustments',
   '124_wos06_adjustment_eligibility',
+  '125_wos06_adjustment_batch_lineage',
 ];
 
 export function expectedMigrationsFrom(first) {

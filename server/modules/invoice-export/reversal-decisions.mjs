@@ -13,7 +13,7 @@ async function inspect(c, r, write) {
   const { rows } = await c.query(
     `select s.id,s.policy_id as "policyId",p.definition->'stages' as stages,s.request_id as "requestId",
       l.batch_id as "batchId",l.id as "lineId",l.item_id as "itemId",l.source_type as "sourceType",l.currency,
-      r.adjustment_kind as kind,trim_scale(coalesce(r.requested_amount,l.amount))::text amount,r.reason as "requestReason",a.id as "artifactId",a.sha256,
+      to_jsonb(r)->>'adjustment_kind' as kind,trim_scale(coalesce((to_jsonb(r)->>'requested_amount')::numeric,l.amount))::text amount,r.reason as "requestReason",a.id as "artifactId",a.sha256,
       cf.id as "confirmationId",cf.external_reference as "externalReference",
       reversal_review_actor_visible(s.id,$4,$5,true) as "deciderAuthority"
      from invoice_reversal_reviews s join invoice_batch_approval_policies p on p.id=s.policy_id

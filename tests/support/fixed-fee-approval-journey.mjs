@@ -87,7 +87,7 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
         const before=await evidence();
         assert.equal(before.length,1);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('098_wos06_fixed_fee_credit_corrections'));
-        assert.deepEqual(await evidence(),before);
+        assert.deepEqual(await evidence(),before.map(row => ({...row,line:{...row.line,eligibility_source_type:'FIXED_FEE_INSTALLMENT'}})));
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
         return {...delivery,batchId:batch.id,lineId:line.line.id,policyId:policy.id};
       }

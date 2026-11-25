@@ -14,6 +14,7 @@ export function renderCreditCsv(batch){
     return 'b64:'+btoa(String.fromCharCode(...new TextEncoder().encode(id)));
   });
   const rows=[header],first=batch.lines[0];
+  const originalEvents = new Map();
   for(const [index,l] of batch.lines.entries()){
     if(![l.lineId,l.itemId,l.eventId,l.decisionId,l.originalBatchId,l.originalArtifactId,l.originalLineId,l.originalEventId].every(x=>typeof x==='string'&&uuid.test(x))
       || l.sequence!==index+1 || l.itemVersion!==1 || l.eventVersion!==1 || l.originalItemVersion!==1
@@ -21,10 +22,13 @@ export function renderCreditCsv(batch){
       || !/^[A-Z]{3}$/.test(l.currency) || !/^-(?:0|[1-9]\d{0,15})(?:\.\d{0,3}[1-9])?$/.test(l.amount) || !/[1-9]/.test(l.amount)
       || !/^[a-f0-9]{64}$/.test(l.originalArtifactSha256) || l.originalBatchId!==first.originalBatchId || l.originalArtifactId!==first.originalArtifactId
       || l.originalArtifactSha256!==first.originalArtifactSha256 || l.originalBatchId===batch.batchId) invalid();
+    const previousEvent = originalEvents.get(l.originalLineId);
+    if (previousEvent && previousEvent !== l.originalEventId) invalid();
+    originalEvents.set(l.originalLineId,l.originalEventId);
     rows.push([CREDIT_CSV_SCHEMA,batch.batchId,l.lineId,l.sequence,l.itemId,l.itemVersion,l.eventId,l.eventVersion,l.eligibleDate,l.currency,l.amount,
       l.decisionId,l.originalBatchId,l.originalArtifactId,l.originalArtifactSha256,l.originalLineId,l.originalEventId,l.originalItemVersion,batch.periodStart,batch.periodEnd,...dimensions].join(','));
   }
-  for(const field of ['lineId','itemId','eventId','originalLineId','decisionId']){
+  for(const field of ['lineId','itemId','eventId','decisionId']){
     if(new Set(batch.lines.map(x=>x[field])).size!==batch.lines.length)invalid();
   }
   return {text:rows.join('\r\n')+'\r\n',lineCount:batch.lines.length,currency:batch.currency,

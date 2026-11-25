@@ -9,14 +9,16 @@ const command = z.object({
 }).strict();
 const fail = (statusCode, message) => Object.assign(new Error(message), {statusCode, code:'REVERSAL_ELIGIBILITY'});
 
-export function registerReversalEligibility(router, { path, handle, inspect, envelope, audit }) {
+export function registerReversalEligibility(router, { path, handle, inspect, envelope, audit, partial = false }) {
   const route = path + '/eligibility';
+  // Full reversals remain available on databases predating partial adjustments.
+  const sourceFunction = partial ? 'invoice_credit_source' : 'full_line_reversal_source';
   const load = async (c,r,write) => {
     const { existing, row } = await inspect(c,r,write,write ? 'issue-reversal' : 'reversal');
     if (!existing) throw fail(404,'Reversal request unavailable.');
     const source = (await c.query(
       `select s.id as "reviewId",v.final_decision as "decisionId",v.original_event as "originalEventId",v.confirmation as "confirmationId",
-        v.currency,trim_scale(v.amount)::text amount from invoice_reversal_reviews s cross join lateral invoice_credit_source(s.id) v
+        v.currency,trim_scale(v.amount)::text amount from invoice_reversal_reviews s cross join lateral ${sourceFunction}(s.id) v
         where s.request_id=$1 and s.organization_id=$2 and s.legal_entity_id=$3`,[existing.id,row.organization_id,row.legal_entity_id],
     )).rows[0] ?? null;
     const receipt = source ? (await c.query(
@@ -54,7 +56,7 @@ export function registerReversalEligibility(router, { path, handle, inspect, env
     await c.query(`insert into billing_eligibility_events(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,source_type,
       version,eligible_on,currency,amount,billing_evidence,actor_id,active_role,operation_id,reverses_event_id,reversal_decision_id)
       select $1,organization_id,legal_entity_id,client_id,contract_id,engagement_id,case when evidence ? 'adjustmentKind' then 'CHARGE_ADJUSTMENT' else 'FULL_LINE_REVERSAL' end,1,$2,currency,amount,evidence,
-      $3,$4,$5,original_event,final_decision from invoice_credit_source($6)`,
+      $3,$4,$5,original_event,final_decision from ${sourceFunction}($6)`,
       [eventId,d.eligibleOn,r.user.sub,r.user.activeRole,r.operationId,source.reviewId]);
     const itemId=(await c.query('select id from approved_unbilled_items where event_id=$1',[eventId])).rows[0].id;
     await audit(c,r,{module:'Invoice Corrections',action:existing.kind?'Issue Charge Adjustment':'Issue Full Line Reversal',entityType:'Billing Eligibility Event',entityId:eventId,

@@ -59,7 +59,7 @@ export function registerCorrectionDrafts(router,{handle,authorize,batch,envelope
           exists(select 1 from invoice_draft_occupancies o where o.item_id=i.id and o.item_version=i.version) as occupied
         from approved_unbilled_items i join billing_eligibility_events ev on ev.id=i.event_id
         where i.organization_id=$1 and i.legal_entity_id=$2 and ev.billing_evidence->>'originalBatchId'=$3
-        and i.id=any($4::uuid[]) and i.source_type='FULL_LINE_REVERSAL' order by i.id`,[ctx.organizationId,ctx.legalEntityId,orig.id,itemIds])).rows;
+        and i.id=any($4::uuid[]) and i.source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT') order by i.id`,[ctx.organizationId,ctx.legalEntityId,orig.id,itemIds])).rows;
       if(rows.length!==itemIds.length) throw fail(409,'Selected credits unavailable for this export.');
       if(rows.some(row=>row.occupied)) throw fail(409,'A selected credit already belongs to a correction batch. Reload the register.');
       const dates=rows.map(x=>x.eligible_on).sort();

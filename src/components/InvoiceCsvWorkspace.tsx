@@ -370,7 +370,7 @@ const InvoiceCsvEngagement = ({
               <details><summary>Credit evidence</summary><dl>
                 <dt>Eligibility event</dt><dd>{row.eventId}</dd>
                 <dt>Original eligibility event</dt><dd>{row.originalEventId}</dd>
-                <dt>Final reversal decision</dt><dd>{row.decisionId}</dd>
+                <dt>Final credit decision</dt><dd>{row.decisionId}</dd>
               </dl></details></td><td>{row.correctionBatchId ? <>{row.correctionState} · {row.correctionBatchId}
               <button type="button" disabled={busy || !!pending} onClick={()=>void run(async c=>{
                 setEvidence(null);
@@ -378,7 +378,7 @@ const InvoiceCsvEngagement = ({
               })}>Inspect correction draft</button>
               {(row.correctionState==='Draft' || row.correctionState==='Approved') && hasRatePermission('commercial.invoice_drafts.cancel') && <button type="button" disabled={busy || !!pending || creditReason.trim().length<3}
                 onClick={()=>changeReservation(row.batchId,row.correctionBatchId!,row.correctionState==='Approved'?'Approved':'Draft')}>Cancel correction batch</button>}</>
-              : !row.kind && hasRatePermission('commercial.invoice_drafts.own') ? <label><input type="checkbox" checked={chosen.some(x=>x.itemId===row.itemId)}
+              : hasRatePermission('commercial.invoice_drafts.own') ? <label><input type="checkbox" checked={chosen.some(x=>x.itemId===row.itemId)}
                 disabled={busy || !!pending || (chosen.length>0 && chosen[0].batchId!==row.batchId)}
                 onChange={e=>setChosen(e.target.checked?[...chosen,row]:chosen.filter(x=>x.itemId!==row.itemId))}/>Select credit {row.itemId}</label> : 'Available'}
             </td></tr>)}</tbody>
@@ -582,7 +582,7 @@ function ExportedCredits({original,run,disabled}:{key?:string;original:InvoiceCs
   });
   return <section aria-label="Exported credits against original lines">
     <button type="button" disabled={disabled} onClick={()=>load(null)}>Check exported credits</button>
-    {links && (links.length ? <ul>{links.map(l=><li key={l.lineId}>{l.currency} {l.amount} · original line {l.originalLineId}
+    {links && (links.length ? <ul>{links.map(l=><li key={l.lineId}>{l.kind && l.kind+' '}{l.currency} {l.amount} · original line {l.originalLineId}
       {' · credit batch '}{l.batchId} · credit artifact {l.artifactId} · SHA-256 {l.sha256} · {l.applicationAttested ? 'Downstream application attested' : 'Awaiting downstream attestation'}</li>)}</ul> : <p>No exported credits on this page.</p>)}
     {next && <button type="button" disabled={disabled} onClick={()=>load(next)}>Next exported credits</button>}
   </section>;

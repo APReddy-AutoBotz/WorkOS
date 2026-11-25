@@ -90,7 +90,7 @@ export async function readChargeControls(client, scope, engagementId, source, ra
         item.id as item_id, item.version=ev.version as item_matches,
         occ.line_id as occupied, l.id as line_id, l.amount as line_amount,l.currency as line_currency,
         l.event_id=ev.id and l.item_version=item.version and l.billing_evidence=ev.billing_evidence
-          and l.source_type=ev.source_type and l.batch_id=occ.batch_id as line_matches,
+          and l.eligibility_source_type=ev.source_type and l.batch_id=occ.batch_id as line_matches,
         b.id as batch_id,b.currency as batch_currency,
         art.id as artifact_id, art.total=bc.line_total and art.line_count=bc.line_count
           and art.currency=ev.currency and art.sha256=encode(digest(art.payload,'sha256'),'hex') as artifact_matches,
@@ -108,7 +108,7 @@ export async function readChargeControls(client, scope, engagementId, source, ra
       left join invoice_draft_lines l on l.id=occ.line_id and l.item_id=item.id
         and l.organization_id=$1 and l.legal_entity_id=$2
       left join invoice_draft_batches b on b.id=occ.batch_id and b.organization_id=$1
-        and b.legal_entity_id=$2 and b.engagement_id=ev.engagement_id and b.source_type=ev.source_type
+        and b.legal_entity_id=$2 and b.engagement_id=ev.engagement_id and b.source_type=l.source_type
         and not exists(select 1 from invoice_draft_cancellations x where x.batch_id=b.id)
       left join batch_controls bc on bc.batch_id=occ.batch_id
       left join invoice_csv_artifacts art on art.batch_id=occ.batch_id and art.organization_id=$1 and art.legal_entity_id=$2
@@ -130,7 +130,7 @@ export async function readChargeControls(client, scope, engagementId, source, ra
     union all
     select ev.currency,'Released historical line',case when l.currency=ev.currency then l.amount end,
       cancelled.id is not null and l.amount=ev.amount and l.currency=ev.currency
-        and l.event_id=ev.id and l.source_type=ev.source_type and l.billing_evidence=ev.billing_evidence
+        and l.event_id=ev.id and l.eligibility_source_type=ev.source_type and l.billing_evidence=ev.billing_evidence
     from population ev join approved_unbilled_items item on item.event_id=ev.id
       and item.organization_id=$1 and item.legal_entity_id=$2
     join invoice_draft_lines l on l.item_id=item.id and l.item_version=item.version
