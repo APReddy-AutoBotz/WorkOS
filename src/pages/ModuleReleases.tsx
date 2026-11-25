@@ -3,7 +3,7 @@ import {Link, Navigate} from 'react-router-dom';
 import {api, getOrganizationScope, getToken} from '../services/apiClient';
 import {authService} from '../services/authService';
 import {hasPermission} from '../services/permissions';
-import {applyTeamsRelease} from '../config/featureFlags';
+import {applyModuleReleases, type ReleasedModule} from '../config/featureFlags';
 
 type Decision = {revision:number; enabled:boolean; evidence:string; activated_at:string; owner_id:string; module:string};
 type ReleaseState = {environment:string; decisions:Decision[]};
@@ -25,7 +25,9 @@ function ReleaseForm({organizationId,legalEntityId}:{organizationId:string;legal
   const [reload,setReload] = useState(0);
   const active = useRef(false);
   const token = getToken();
-  const decision = state?.decisions.find(item => item.module === 'teams');
+  const [module,setModule] = useState<ReleasedModule>('teams');
+  const decision = state?.decisions.find(item => item.module === module);
+  const label = module === 'teams' ? 'Teams' : 'Entra administration';
   const path = '/api/v1/organization-setup/module-releases';
   useEffect(() => {
     active.current = true;
@@ -44,12 +46,13 @@ function ReleaseForm({organizationId,legalEntityId}:{organizationId:string;legal
     setSaving(true);
     setMessage('');
     try {
-      const receipt = await api.requestWithContext<Decision>('PUT',path+'/teams',{
+      const receipt = await api.requestWithContext<Decision>('PUT',path+'/'+module,{
         enabled:!decision?.enabled, expectedRevision:decision?.revision ?? 0, evidence:evidence.trim(),
       },{scope,token});
       if (!active.current || token !== getToken() || organizationId !== getOrganizationScope()?.organizationId) return;
-      applyTeamsRelease(organizationId,receipt.enabled);
-      setState({...state,decisions:[receipt]});
+      const decisions = [...state.decisions.filter(item => item.module !== module),receipt];
+      applyModuleReleases(organizationId,Object.fromEntries(decisions.map(item => [item.module,item.enabled])));
+      setState({...state,decisions});
       setEvidence('');
       setMessage('Release decision saved.');
     } catch (error) {
@@ -61,12 +64,16 @@ function ReleaseForm({organizationId,legalEntityId}:{organizationId:string;legal
   return <section className="space-y-4 rounded-xl border bg-white p-6">
     <h1 className="text-xl font-bold">Module release settings</h1>
     {state && <>
-      <p>Teams is <strong>{decision?.enabled ? 'enabled' : 'disabled'}</strong> for {organizationId} in {state.environment}.</p>
-      {decision?.enabled && <Link className="underline" to="/integrations/teams">Open Teams mapping</Link>}
+      <label htmlFor="release-module">Module</label>
+      <select id="release-module" value={module} disabled={saving} onChange={event=>{
+        setModule(event.target.value as ReleasedModule); setEvidence(''); setMessage('');
+      }}><option value="teams">Teams</option><option value="entra">Entra administration</option></select>
+      <p>{label} is <strong>{decision?.enabled ? 'enabled' : 'disabled'}</strong> for {organizationId} in {state.environment}.</p>
+      {decision?.enabled && <Link className="underline" to={module === 'teams' ? '/integrations/teams' : '/integrations/identity'}>Open {module === 'teams' ? 'Teams mapping' : 'identity mapping'}</Link>}
       {decision && <p>Last decision by {decision.owner_id} on {new Date(decision.activated_at).toLocaleString()}. {decision.evidence}</p>}
       <label className="block">Release evidence<textarea className="input-field" maxLength={1000} value={evidence}
         disabled={saving} onChange={event=>setEvidence(event.target.value)}/></label>
-      <button className="btn-primary" disabled={saving || !evidence.trim()} onClick={save}>{decision?.enabled ? 'Disable Teams' : 'Enable Teams'}</button>
+      <button className="btn-primary" disabled={saving || !evidence.trim()} onClick={save}>{(decision?.enabled ? 'Disable ' : 'Enable ')+label}</button>
     </>}
     <button className="btn-secondary" disabled={saving} onClick={()=>{setMessage('');setReload(i=>i+1);}}>Reload decision</button>
     <p role="status">{message || (!state ? 'Loading release settingsâ€¦' : '')}</p>

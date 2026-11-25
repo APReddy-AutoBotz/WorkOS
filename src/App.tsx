@@ -6,7 +6,7 @@ import { authService } from './services/authService';
 import { getOrganizationScope } from './services/apiClient';
 import { canOpenAuditWithoutOrganizationScope, hasRouteRole, ROUTE_ROLES } from './services/accessControl';
 import { UserRole } from './types';
-import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled, teamsReleasePending } from './config/featureFlags';
+import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled, moduleReleasePending } from './config/featureFlags';
 import { RuntimeTerminology } from './config/RuntimeTerminology';
 import { OrganizationScopeGate } from './components/auth/OrganizationScopeGate';
 
@@ -86,7 +86,7 @@ const FeatureRoute = ({
   flag: EnterpriseFeatureFlag;
   roles: readonly UserRole[];
 }) => {
-  if (flag === 'teams' && teamsReleasePending()) return <p role="status">Loading Teams release settings…</p>;
+  if ((flag === 'teams' || flag === 'entra') && moduleReleasePending()) return <p role="status">Loading module release settings…</p>;
   if (!isEnterpriseFeatureEnabled(flag)) {
     return <Navigate to="/governance/brd-traceability" replace />;
   }

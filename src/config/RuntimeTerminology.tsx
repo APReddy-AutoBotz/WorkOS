@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { applyPersistedTerminology, applyRuntimeBrand } from './productConfig';
-import {applyTeamsRelease} from './featureFlags';
+import {applyModuleReleases} from './featureFlags';
 import { api, getOrganizationScope, getToken } from '../services/apiClient';
 import { authService } from '../services/authService';
 import { getEffectivePermissions } from '../services/permissions';
 
-type TerminologyResponse = { releases?: {teams: boolean}; terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
+type TerminologyResponse = { releases?: {teams?: boolean; entra?: boolean}; terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
 const runtimeContext = () => {
   const user = authService.getCurrentUser();
   return JSON.stringify([user?.id, user?.employeeId, user?.role, user?.permissionRole,
@@ -22,11 +22,11 @@ export const loadRuntimeTerminology = async (
   const scope = getOrganizationScope();
   const owned = () => isCurrent() && owner === runtimeContext();
   if (!authenticated) {
-    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); applyTeamsRelease(undefined,false); }
+    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); applyModuleReleases(undefined,{}); }
     return owned();
   }
   if (!getOrganizationScope()) {
-    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); applyTeamsRelease(undefined,false); }
+    if (owned()) { applyPersistedTerminology({}); applyRuntimeBrand(); applyModuleReleases(undefined,{}); }
     return owned();
   }
   try {
@@ -34,12 +34,12 @@ export const loadRuntimeTerminology = async (
     if (!owned()) return false;
     applyPersistedTerminology(result.terms || {});
     applyRuntimeBrand(result.brand);
-    applyTeamsRelease(scope?.organizationId,result.releases?.teams === true);
+    applyModuleReleases(scope?.organizationId,result.releases ?? {});
   } catch {
     if (!owned()) return false;
     applyPersistedTerminology({});
     applyRuntimeBrand();
-    applyTeamsRelease(scope?.organizationId,false);
+    applyModuleReleases(scope?.organizationId,{});
   }
   return true;
 };
