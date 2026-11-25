@@ -150,6 +150,7 @@ const expected = [
   '123_wos06_named_charge_adjustments',
   '124_wos06_adjustment_eligibility',
   '125_wos06_adjustment_batch_lineage',
+  '126_wos05_stage_reminders',
 ];
 
 export function expectedMigrationsFrom(first) {

@@ -831,7 +831,7 @@ WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment
 
 ### Governed work approval deadlines
 
-WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Pre-deadline reminders remain open. Mandatory overdue delivery is covered below.
+WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Pre-deadline reminders and mandatory overdue delivery are covered below.
 
 ### Scoped bulk timesheet approval
 
@@ -858,3 +858,5 @@ WOS-APR-005. Migration 121 and the overdue worker retain elapsed stage deadlines
 WOS-INV-001 and WOS-INV-004. Migrations 123 and 124 bind each request to an exported line and artifact, require independent approval under a policy enabled for adjustments, enforce the charge balance at final approval and issue one signed register item per approved decision. The existing commercial drafting journey exercises competing approvals, coexistence with a full reversal, and issuance replay. Migration 125 preserves the eligibility event type on each invoice line. The journey reserves two approved credits against one charge, approves their batch, exports both signed CSV lines, records downstream confirmation and reconciles the confirmed amounts.
 
 WOS-RPT-007, WOS-INV-004 and WOS-NFR-DAT-007. T&M and milestone engagement and portfolio reconciliation includes signed issued corrections, attributed to the original charge. The existing billing reconciliation and milestone invoice journeys follow confirmed credits through report control totals.
+
+WOS-APR-005 and WOS-INT-002. A versioned timesheet approval policy can remind the current approver once before each pending stage deadline. The reminder links to the original action-required event and retains an independent receipt and acknowledgment. The real-clock work approval journey exercises early suppression, concurrent collection, recipient isolation, rendering and acknowledgement.

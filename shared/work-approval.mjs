@@ -16,6 +16,11 @@ export const validWorkApprovalPolicy = d => {
             if (!Number.isInteger(d.stageDueMinutes) || d.stageDueMinutes < 1 || d.stageDueMinutes > 2147483647) return false;
             keys.push('stageDueMinutes');
         }
+        if (Object.hasOwn(d,'reminderLeadMinutes')) {
+            if (!Number.isInteger(d.reminderLeadMinutes) || d.reminderLeadMinutes < 1 ||
+                !Number.isInteger(d.stageDueMinutes) || d.reminderLeadMinutes >= d.stageDueMinutes) return false;
+            keys.push('reminderLeadMinutes');
+        }
         if (Object.hasOwn(d,'escalationUserId')) {
             if (!Object.hasOwn(d,'stageDueMinutes') || !approvalUuid(d.escalationUserId)) return false;
             keys.push('escalationUserId');
