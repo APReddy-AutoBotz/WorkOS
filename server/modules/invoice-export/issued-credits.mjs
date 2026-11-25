@@ -21,7 +21,7 @@ export function registerIssuedCredits(router, { handle, authorize, envelope }) {
     if (engagement.model === 'milestone') await assertCommercialAuthority(client, req, 'commercial.milestone_billing.view');
     const credits = (await client.query(
       `select item.id as "itemId", credit.id as "eventId", credit.eligible_on::text as "eligibleOn",
-        credit.currency,trim_scale(credit.amount)::text amount, original.id as "originalEventId",
+        credit.billing_evidence->>'adjustmentKind' as kind,credit.currency,trim_scale(credit.amount)::text amount, original.id as "originalEventId",
         line.id as "lineId", line.batch_id as "batchId", credit.reversal_decision_id as "decisionId", occ.batch_id as "correctionBatchId", case when occ.batch_id is not null then invoice_batch_governed_state(occ.batch_id) end as "correctionState"
        from billing_eligibility_events credit
        join approved_unbilled_items item on item.event_id=credit.id and item.source_type=credit.source_type
@@ -29,13 +29,13 @@ export function registerIssuedCredits(router, { handle, authorize, envelope }) {
        join billing_eligibility_events original on original.id=credit.reverses_event_id
        join invoice_draft_lines line on line.id=(credit.billing_evidence->>'originalLineId')::uuid and line.event_id=original.id
        where credit.organization_id=$1 and credit.legal_entity_id=$2 and credit.engagement_id=$3
-         and credit.source_type='FULL_LINE_REVERSAL' and ($6::uuid is null or item.id>$6)
+         and credit.source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT') and ($6::uuid is null or item.id>$6)
          and not exists(select 1 from invoice_draft_lines member where member.batch_id=line.batch_id
            and invoice_source_line_visible($1,$2,member.batch_id,member.item_id,$4,$5) is not true)
        order by item.id limit 51`,
       [organizationId,legalEntityId,engagementId,req.user.sub,req.user.activeRole,after ?? null],
     )).rows;
     const page = credits.slice(0,50);
-    return { ...await envelope(client,req), engagementId, credits:page, nextAfter:credits.length>50 ? page.at(-1).itemId : null };
+    return { ...await envelope(client,req), engagementId, credits:page.map(({kind,...credit})=>kind?{...credit,kind}:credit), nextAfter:credits.length>50 ? page.at(-1).itemId : null };
   }));
 }

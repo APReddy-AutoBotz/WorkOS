@@ -852,3 +852,7 @@ WOS-RPT-007. The portfolio report accepts an eligible date range for registered 
 WOS-APR-005 and WOS-INT-002. Timed timesheet policies retain an optional escalation recipient. The existing approval browser journey records that choice, and PostgreSQL acceptance rejects adoption when the recipient cannot see all selected workers. Migration 122 records mandatory in-app delivery attempts and acknowledgements. The real-clock approval journey verifies a temporarily unavailable escalation recipient, atomic retry, recipient-only visibility and acknowledgement.
 
 WOS-APR-005. Migration 121 and the overdue worker retain elapsed stage deadlines once, including late decisions between scans. The existing approval browser journey checks premature writes are rejected. Its optional real-clock rehearsal uses a one-minute stage and concurrent discovery calls.
+
+### Discounts and write-offs against an original charge
+
+WOS-INV-001 and WOS-INV-004. Migrations 123 and 124 bind each request to an exported line and artifact, require independent approval under a policy enabled for adjustments, enforce the charge balance at final approval and issue one signed register item per approved decision. The existing commercial drafting journey exercises competing approvals, coexistence with a full reversal, and issuance replay. Downstream correction-batch export and confirmation for partial credits remain open.

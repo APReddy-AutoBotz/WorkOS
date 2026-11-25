@@ -13,7 +13,7 @@ async function inspect(c, r, write) {
   const { rows } = await c.query(
     `select s.id,s.policy_id as "policyId",p.definition->'stages' as stages,s.request_id as "requestId",
       l.batch_id as "batchId",l.id as "lineId",l.item_id as "itemId",l.source_type as "sourceType",l.currency,
-      trim_scale(l.amount)::text amount,r.reason as "requestReason",a.id as "artifactId",a.sha256,
+      r.adjustment_kind as kind,trim_scale(coalesce(r.requested_amount,l.amount))::text amount,r.reason as "requestReason",a.id as "artifactId",a.sha256,
       cf.id as "confirmationId",cf.external_reference as "externalReference",
       reversal_review_actor_visible(s.id,$4,$5,true) as "deciderAuthority"
      from invoice_reversal_reviews s join invoice_batch_approval_policies p on p.id=s.policy_id
@@ -65,7 +65,7 @@ export function registerReversalDecisions(router, { handle, requirePermission, a
     const decisionId = randomUUID(), sequence = d.expectedSequence + 1;
     await c.query('insert into invoice_reversal_decisions(id,review_id,sequence,decision,actor_id,active_role,reason,confirmation_id,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9)',
       [decisionId,review.id,sequence,d.decision,r.user.sub,r.user.activeRole,d.reason,d.confirmationId,r.operationId]);
-    await audit(c, r, { module: 'Invoice Corrections', action: 'Decide Full Line Reversal', entityType: 'Invoice Reversal Decision',
+    await audit(c, r, { module: 'Invoice Corrections', action: review.kind ? 'Decide Charge Adjustment' : 'Decide Full Line Reversal', entityType: 'Invoice Reversal Decision',
       entityId: decisionId,reason:d.reason,newValue:{reviewId:review.id,sequence,decision:d.decision,confirmationId:d.confirmationId},
       details:'Recorded an independent reversal decision against the inspected export.' });
     return { status:201,body:{ review: await inspect(c,r,false), replayed:false } };

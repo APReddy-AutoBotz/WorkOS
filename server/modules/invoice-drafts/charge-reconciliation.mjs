@@ -1,6 +1,6 @@
 const chargePopulation = `where ev.organization_id=$1 and ev.legal_entity_id=$2 and ($3::text is null or ev.engagement_id=$3)
         and ($5::date is null or ev.eligible_on between $5 and $6)
-        and (ev.source_type=$4 or (ev.source_type='FULL_LINE_REVERSAL' and exists(
+        and (ev.source_type=$4 or (ev.source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT') and exists(
           select 1 from billing_eligibility_events original where original.id=ev.reverses_event_id
             and original.source_type=$4 and original.organization_id=ev.organization_id
             and original.legal_entity_id=ev.legal_entity_id and original.engagement_id=ev.engagement_id
@@ -34,9 +34,9 @@ export async function readChargeBalances(client, scope, engagementId, source, mo
       ${chargePopulation}
     )
     select currency,status,count(*) filter(where source_type=$4)::int as charges,
-      count(*) filter(where source_type='FULL_LINE_REVERSAL')::int as credits,
+      count(*) filter(where source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT'))::int as credits,
       trim_scale(coalesce(sum(amount) filter(where source_type=$4),0))::text as gross,
-      trim_scale(coalesce(sum(amount) filter(where source_type='FULL_LINE_REVERSAL'),0))::text as adjustments,
+      trim_scale(coalesce(sum(amount) filter(where source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT')),0))::text as adjustments,
       trim_scale(sum(amount))::text as net
     from register group by currency,status order by currency,case status
       when 'Available' then 1 when 'Reserved' then 2 when 'Exported' then 3 else 4 end`,args);
@@ -98,7 +98,7 @@ export async function readChargeControls(client, scope, engagementId, source, ra
           and cf.total=art.total and cf.currency=art.currency as confirmation_matches
       from population ev
       left join lateral ${chargeSources[source]} charge on ev.source_type=$4
-      left join lateral full_line_reversal_source(case when ev.source_type='FULL_LINE_REVERSAL'
+      left join lateral invoice_credit_source(case when ev.source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT')
         then (ev.billing_evidence->>'reviewId')::uuid end) credit on credit.final_decision=ev.reversal_decision_id
         and credit.original_event=ev.reverses_event_id and credit.organization_id=$1
         and credit.legal_entity_id=$2 and credit.engagement_id=ev.engagement_id

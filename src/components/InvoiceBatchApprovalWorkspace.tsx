@@ -91,6 +91,7 @@ const InvoiceApprovalEngagement = ({
     [locale, setLocale] = useState(''),
     [completion, setCompletion] = useState(''),
     [fullLineReversals, setFullLineReversals] = useState(false),
+    [namedChargeAdjustments, setNamedChargeAdjustments] = useState(false),
     [stages, setStages] = useState([{ userId: '', role: '' }]),
     [templates, setTemplates] = useState<Template[]>(events.map((key) => ({ key, subject: '', body: '' }))),
     [policyReason, setPolicyReason] = useState(''),
@@ -130,6 +131,7 @@ const InvoiceApprovalEngagement = ({
     setLocale('');
     setCompletion('');
     setFullLineReversals(false);
+    setNamedChargeAdjustments(false);
     setStages([{ userId: '', role: '' }]);
     setTemplates(events.map((key) => ({ key, subject: '', body: '' })));
     setPolicyReason('');
@@ -292,8 +294,8 @@ const InvoiceApprovalEngagement = ({
     canDecide = ['approvals.view', 'commercial.invoice_approval.decide'].every(hasRatePermission),
     chosen = inspected?.approval;
   const configure = () => {
-    if (fullLineReversals && new Set(stages.map(s => s.userId.trim().toLowerCase())).size !== stages.length) {
-      setNotice('Choose a different reviewer for each full-line reversal stage.');
+    if ((fullLineReversals || namedChargeAdjustments) && new Set(stages.map(s => s.userId.trim().toLowerCase())).size !== stages.length) {
+      setNotice('Choose a different reviewer for each correction review stage.');
       return;
     }
     const definition = {
@@ -303,6 +305,7 @@ const InvoiceApprovalEngagement = ({
       locale,
       templates,
       completionInApp: completion === 'yes',
+      ...(namedChargeAdjustments ? { namedChargeAdjustments:true } : {}),
       ...(fullLineReversals ? { fullLineReversals: true } : {}),
     };
     if (
@@ -402,6 +405,7 @@ const InvoiceApprovalEngagement = ({
                 {policies.map((p) => (
                   <li key={p.id}>
                     Version {p.sequence} · effective {p.effectiveFrom} UTC
+                    {(p.definition as { namedChargeAdjustments?: boolean }).namedChargeAdjustments && ' · discounts and write-offs enabled'}
                     {(p.definition as { fullLineReversals?: boolean }).fullLineReversals && ' · full-line reversals enabled'}
                   </li>
                 ))}
@@ -443,6 +447,10 @@ const InvoiceApprovalEngagement = ({
               <label>
                 <input type="checkbox" checked={fullLineReversals} onChange={e => setFullLineReversals(e.target.checked)} />
                 Use these named review stages for full-line reversal requests
+              </label>
+              <label>
+                <input type="checkbox" checked={namedChargeAdjustments} onChange={e => setNamedChargeAdjustments(e.target.checked)} />
+                Use these named review stages for discounts and write-offs
               </label>
               {stages.map((stage, i) => (
                 <div key={i}>

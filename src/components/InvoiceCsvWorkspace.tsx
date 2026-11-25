@@ -365,7 +365,7 @@ const InvoiceCsvEngagement = ({
         {credits && (credits.length ? <table>
           <caption>Issued credits for this engagement</caption>
           <thead><tr><th>Eligibility date</th><th>Credit</th><th>Original batch</th><th>Original line</th><th>Register item</th><th>Correction batch</th></tr></thead>
-          <tbody>{credits.map(row=><tr key={row.itemId}><td>{row.eligibleOn}</td><td>{row.currency} {row.amount}</td>
+          <tbody>{credits.map(row=><tr key={row.itemId}><td>{row.eligibleOn}</td><td>{row.kind} {row.currency} {row.amount}</td>
             <td>{row.batchId}</td><td>{row.lineId}</td><td><span>{row.itemId}</span>
               <details><summary>Credit evidence</summary><dl>
                 <dt>Eligibility event</dt><dd>{row.eventId}</dd>
@@ -378,7 +378,7 @@ const InvoiceCsvEngagement = ({
               })}>Inspect correction draft</button>
               {(row.correctionState==='Draft' || row.correctionState==='Approved') && hasRatePermission('commercial.invoice_drafts.cancel') && <button type="button" disabled={busy || !!pending || creditReason.trim().length<3}
                 onClick={()=>changeReservation(row.batchId,row.correctionBatchId!,row.correctionState==='Approved'?'Approved':'Draft')}>Cancel correction batch</button>}</>
-              : hasRatePermission('commercial.invoice_drafts.own') ? <label><input type="checkbox" checked={chosen.some(x=>x.itemId===row.itemId)}
+              : !row.kind && hasRatePermission('commercial.invoice_drafts.own') ? <label><input type="checkbox" checked={chosen.some(x=>x.itemId===row.itemId)}
                 disabled={busy || !!pending || (chosen.length>0 && chosen[0].batchId!==row.batchId)}
                 onChange={e=>setChosen(e.target.checked?[...chosen,row]:chosen.filter(x=>x.itemId!==row.itemId))}/>Select credit {row.itemId}</label> : 'Available'}
             </td></tr>)}</tbody>

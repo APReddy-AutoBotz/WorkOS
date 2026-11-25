@@ -11,7 +11,8 @@ import {
 // independently establish current authority, retained source, and scope.
 export const validInvoiceBatchApprovalPolicy = (definition) => {
   if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return false;
-  const { fullLineReversals, ...d } = definition;
+  const { fullLineReversals, namedChargeAdjustments, ...d } = definition;
+  if (Object.hasOwn(definition, 'namedChargeAdjustments') && namedChargeAdjustments !== true) return false;
   if (Object.hasOwn(definition, 'fullLineReversals') && fullLineReversals !== true) return false;
   if (
     !approvalKeys(d, ['entityType', 'engagementId', 'stages', 'locale', 'templates', 'completionInApp']) ||
@@ -22,7 +23,7 @@ export const validInvoiceBatchApprovalPolicy = (definition) => {
   const { entityType: _entity, engagementId: _engagement, ...shared } = d;
   return (
     validWorkApprovalPolicy({ ...shared, entityType: 'Timesheet', workerIds: [] }) &&
-    (!fullLineReversals || new Set(d.stages.map(s => s.userId.toLowerCase())).size === d.stages.length) &&
+    (!(fullLineReversals || namedChargeAdjustments) || new Set(d.stages.map(s => s.userId.toLowerCase())).size === d.stages.length) &&
     d.templates.every((t) =>
       [t.subject, t.body].every((s) => !s.includes('{{decisionReason}}') && !s.includes('{{workerCode}}')),
     )

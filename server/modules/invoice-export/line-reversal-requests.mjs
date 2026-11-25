@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { workApprovalOwner } from '../approvals/work-approval-service.mjs';
 
 const uuid = z.string().uuid();
-const params = z.object({ batchId: uuid, lineId: uuid });
+const params = z.object({ batchId: uuid, lineId: uuid, adjustmentId: uuid.optional() });
 const command = z.object({
   expectedOwnerKey: z.string().regex(/^[a-f0-9]{64}$/),
   artifactId: uuid,
@@ -13,11 +13,17 @@ const command = z.object({
   inspectedState: z.enum(['Exported', 'Billed/Confirmed']),
   reason: z.string().trim().min(3).max(1000),
 }).strict();
+const adjustmentCommand = command.extend({
+  kind: z.enum(['Discount','Write-off']),
+  amount: z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{0,3}[1-9])?$/).refine(value => /[1-9]/.test(value)),
+});
 const fail = (statusCode, message) => Object.assign(new Error(message), { statusCode, code: 'INVOICE_REVERSAL_REQUEST' });
 const fields = 'id,line_id as "lineId",artifact_id as "artifactId",confirmation_id as "confirmationId",reason,actor_id as "actorId",active_role as "activeRole",created_at as "createdAt"';
 
 export function registerLineReversalRequests(router, { handle, authorize, batch, envelope, audit }) {
   const path = '/batches/:batchId/lines/:lineId/reversal-request';
+  const partialPath = '/batches/:batchId/lines/:lineId/adjustments/:adjustmentId';
+  const adjustmentFields = fields + ',adjustment_kind as kind,trim_scale(requested_amount)::text as amount';
   const inspect = async (c, r, write, kind = 'reversal') => {
     if (!params.safeParse(r.params).success || Object.keys(r.query).length) throw fail(400, 'Select a valid exported line.');
     await authorize(c, r, kind);
@@ -30,28 +36,27 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
       [row.id],
     )).rows[0];
     if (!artifact) throw fail(409, 'The retained artifact is unavailable.');
-    const existing = (await c.query('select ' + fields + ' from invoice_line_reversal_requests where line_id=$1', [r.params.lineId])).rows[0] ?? null;
-    return { row, artifact, existing };
+    const existing = (r.params.adjustmentId
+      ? await c.query('select ' + adjustmentFields + ' from invoice_line_reversal_requests where line_id=$1 and id=$2 and adjustment_kind is not null', [r.params.lineId,r.params.adjustmentId])
+      : await c.query('select ' + fields + ' from invoice_line_reversal_requests where line_id=$1 and adjustment_kind is null', [r.params.lineId])).rows[0] ?? null;
+    return { row, artifact, existing, currency: row.currency };
   };
   registerReversalEligibility(router, { path, handle, inspect, envelope, audit });
   registerReversalReview(router, { path, handle, inspect, envelope, audit });
+  registerReversalEligibility(router, { path: partialPath, handle, inspect, envelope, audit });
+  registerReversalReview(router, { path: partialPath, handle, inspect, envelope, audit });
   router.get(path, handle(false, async (c, r) => {
     const { existing } = await inspect(c, r, false);
     const { rows } = await c.query(
-      `select l.currency, trim_scale(l.amount - coalesce(approved.total, 0))::text as remaining
+      `select l.currency, trim_scale(remaining_invoice_charge(l.id))::text as remaining
        from invoice_draft_lines l
-       left join lateral (
-         select sum(-credit.amount) as total from invoice_line_reversal_requests req
-         join invoice_reversal_reviews review on review.request_id=req.id
-         cross join lateral full_line_reversal_source(review.id) credit
-         where req.line_id=l.id
-       ) approved on true
        where l.id=$1 and l.batch_id=$2 and l.amount>0`,
       [r.params.lineId, r.params.batchId],
     );
-    return { ...(await envelope(c, r)), request: existing, chargeBalance: rows[0] ?? null };
+    const adjustments = (await c.query('select ' + adjustmentFields + ' from invoice_line_reversal_requests where line_id=$1 and adjustment_kind is not null order by created_at,id',[r.params.lineId])).rows;
+    return { ...(await envelope(c, r)), request: existing, ...(adjustments.length ? {adjustments} : {}), chargeBalance: rows[0] ?? null };
   }));
-  router.get(path + '/review-route', handle(false, async (c, r) => {
+  router.get([path + '/review-route', partialPath + '/review-route'], handle(false, async (c, r) => {
     const { row, existing } = await inspect(c, r, false);
     if (!existing) throw fail(404, 'Record the reversal request before inspecting its review route.');
     const context = await envelope(c, r);
@@ -62,7 +67,7 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
       [row.organization_id, row.legal_entity_id, row.engagement_id, context.serverDate],
     )).rows[0];
     const base = { ...context, requestId: existing.id, lineId: existing.lineId };
-    if (policy?.definition.fullLineReversals !== true)
+    if (policy?.definition[existing.kind ? 'namedChargeAdjustments' : 'fullLineReversals'] !== true)
       return { ...base, route: { status: 'NO_REVERSAL_POLICY' } };
     const stages = policy.definition.stages;
     const eligible = (await c.query(
@@ -82,27 +87,28 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
     if (!independent) return { ...base, route: { status: 'REVIEWERS_UNAVAILABLE' } };
     return { ...base, route: { status: 'AVAILABLE', policyId: policy.id, effectiveFrom: policy.effectiveFrom, stages } };
   }));
-  router.post(path, handle(true, async (c, r) => {
-    const parsed = command.safeParse(r.body);
+  router.post([path,partialPath], handle(true, async (c, r) => {
+    const partial = Boolean(r.params.adjustmentId);
+    const parsed = (partial ? adjustmentCommand : command).safeParse(r.body);
     if (!parsed.success) throw fail(400, 'Supply the inspected export and a reason.');
     const d = parsed.data;
     if (d.expectedOwnerKey !== workApprovalOwner(r)) throw fail(409, 'The account or scope changed.');
-    const { row, artifact, existing } = await inspect(c, r, true);
+    const { row, artifact, existing, currency } = await inspect(c, r, true);
     if (d.artifactId !== artifact.id || d.sha256 !== artifact.sha256) throw fail(409, 'Inspect the retained artifact again.');
     if (existing) {
-      if (existing.actorId !== r.user.sub || existing.activeRole !== r.user.activeRole || existing.reason !== d.reason ||
+      if ((partial && (existing.kind !== d.kind || existing.amount !== d.amount)) || existing.actorId !== r.user.sub || existing.activeRole !== r.user.activeRole || existing.reason !== d.reason ||
           (existing.confirmationId ? 'Billed/Confirmed' : 'Exported') !== d.inspectedState)
-        throw fail(409, 'A full reversal was already requested. Read the recorded request.');
+        throw fail(409, 'A different request was already recorded.');
       return { ...(await envelope(c, r)), request: existing, replayed: true };
     }
     const currentState = artifact.confirmation ? 'Billed/Confirmed' : 'Exported';
     if (currentState !== d.inspectedState) throw fail(409, 'The billing state changed. Inspect the batch again.');
     const request = (await c.query(
-      'insert into invoice_line_reversal_requests(id,organization_id,legal_entity_id,line_id,artifact_id,confirmation_id,actor_id,active_role,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning ' + fields,
-      [randomUUID(), row.organization_id, row.legal_entity_id, r.params.lineId, artifact.id, artifact.confirmation, r.user.sub, r.user.activeRole, d.reason, r.operationId],
+      'insert into invoice_line_reversal_requests(id,organization_id,legal_entity_id,line_id,artifact_id,confirmation_id,actor_id,active_role,reason,operation_id,adjustment_kind,requested_amount)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning ' + (partial ? adjustmentFields : fields),
+      [r.params.adjustmentId ?? randomUUID(), row.organization_id, row.legal_entity_id, r.params.lineId, artifact.id, artifact.confirmation, r.user.sub, r.user.activeRole, d.reason, r.operationId, d.kind ?? null,d.amount ?? null],
     )).rows[0];
-    await audit(c, r, { module: 'Invoice Corrections', action: 'Request Full Line Reversal', entityType: 'Invoice Line Reversal Request',
-      entityId: request.id, reason: d.reason, newValue: { requestId: request.id, lineId: request.lineId, artifactId: artifact.id, confirmationId: artifact.confirmation, batchId: row.id, sha256: artifact.sha256 }, details: 'Finance requested review of the full exported line.' });
+    await audit(c, r, { module: 'Invoice Corrections', action: partial ? 'Request Charge Adjustment' : 'Request Full Line Reversal', entityType: 'Invoice Line Reversal Request',
+      entityId: request.id, reason: d.reason, newValue: { requestId: request.id, lineId: request.lineId, artifactId: artifact.id, confirmationId: artifact.confirmation, batchId: row.id, sha256: artifact.sha256, ...(partial ? {kind:d.kind,amount:d.amount,currency} : {}) }, details: 'Finance requested independent review of the exported charge.' });
     return { ...(await envelope(c, r)), request, replayed: false };
   }));
 }

@@ -1563,7 +1563,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           assert.equal(reversalNotice.kind, 'invoice-reversal-review');
           assert.equal(reversalNotice.eventKey, 'approval.action_required');
           const reversalCard = inboxUi.getByRole('article', { name: 'Governed notification ' + reversalNotice.id });
-          await reversalCard.getByText(/Full-line reversal review/).waitFor();
+          await reversalCard.getByText(/Invoice correction review/).waitFor();
           const reversalRead = wait(ownerUi.p, work + '/inbox/' + reversalNotice.id + '/read', 'POST');
           await reversalCard.getByRole('button', { name: /read/i }).click();
           assert.ok((await body(reversalRead)).notification.readAt);
