@@ -824,7 +824,7 @@ WOS-COM-009 and WOS-RPT-004. The commercial drafting PostgreSQL/browser journey 
 
 WOS-COM-009, WOS-RPT-004, WOS-INT-002 and WOS-INT-005. Migration 113 retains explicit assignments, observed quantities, notice policies, attempts and acknowledgements. The retainer PostgreSQL journey verifies concurrent overconsumption detection. The commercial browser journey exercises expiry before first use, a shared version, duplicate roles, missing assignments, retry and access revocation.
 
-WOS-OPS-007 covers the progress-document CI path in `.github/workflows/workos-ci.yml`. The release runbook describes its scope and full-validation fallback.
+WOS-OPS-007 covers the progress-document CI path in `.github/workflows/workos-ci.yml`. The pinned Gitleaks CLI scans all fetched refs for every event. The release runbook describes the scope and full-validation fallback.
 
 
 WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment and migration 115 for managed-service recipient-policy authority. The existing service margin API journey exercises policy authorization, current recipients, replay and immutable history. Migration 116 retains month-end breaches and enforces the complete recipient set on dispatch. The existing service-effort acceptance exercises failed delivery, concurrent replay, current-scope denial and recipient acknowledgement through the inbox.
