@@ -10,6 +10,7 @@ export const createLeaveRouter = ({
   requireDatabase,
   requireAuth,
   requirePermission,
+  requireLeaveRelease,
   buildEmployeeScopeWhere,
   audit,
   getBusinessLeaveDays,
@@ -25,14 +26,14 @@ export const createLeaveRouter = ({
       || ![run, buildEmployeeScopeWhere, audit, getBusinessLeaveDays, getLeaveYear,
         ensureLeaveBalanceForRequest, refreshLeaveBalancesForEmployee, upsertApprovalRecord,
         decideApprovalRecord].every(value => typeof value === 'function')
-      || ![requireDatabase, requireAuth, requirePermission].every(value => typeof value === 'function')) {
+      || ![requireDatabase, requireAuth, requirePermission, requireLeaveRelease].every(value => typeof value === 'function')) {
     throw new TypeError('Leave routes require a database, identity guards, scope resolver, leave services, and audit writer.');
   }
 
   const approvalOptions={buildEmployeeScopeWhere,audit,getBusinessLeaveDays,getLeaveYear,ensureLeaveBalanceForRequest,refreshLeaveBalancesForEmployee,upsertApprovalRecord,decideApprovalRecord,fetchUserAuthRowByWhere,getEffectivePermissionsForUser};
   const approvalError=(res,error)=>{if(String(error.code).startsWith('LEAVE_APPROVAL_')){res.status(error.statusCode||409).json({error:error.message,code:error.code});return true;}if(['LGA01','LGA02','LGA03','LGA04','40001','40P01'].includes(error.code)){res.status(409).json({error:'Leave source or current approval authority changed. Inspect history before retrying.',code:'LEAVE_APPROVAL_CONFLICT'});return true;}return false;};
   const router = Router();
-  router.get('/v1/leave-calendar/workers/:id/period', requireDatabase, requireAuth, requirePermission('leave.self_service'), async(req,res)=>{
+  router.get('/v1/leave-calendar/workers/:id/period', requireDatabase, requireAuth, requirePermission('leave.self_service'), requireLeaveRelease, async(req,res)=>{
     let c;try{c=await pool.connect();await c.query('begin isolation level repeatable read');const q=z.object({startsOn:z.string(),endsOn:z.string()}).strict().safeParse(req.query);if(!q.success){await c.query('rollback');res.status(400).json({error:'Choose explicit leave dates.'});return;}const computed=await quoteCalendarLeave(c,req,req.params.id,q.data.startsOn,q.data.endsOn,buildEmployeeScopeWhere,getBusinessLeaveDays);await c.query('commit');res.json({contractVersion:'calendar-leave/1',organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,quote:computed.quote});}catch(e){if(c)await c.query('rollback').catch(()=>{});if(!calendarLeaveError(res,e))res.status(e.statusCode||503).json({error:'Calendar leave quote could not be confirmed. Reload explicitly.'});}finally{c?.release();}
   });
   router.get('/v1/leave-calendar/requests/:id/history',requireDatabase,requireAuth,requirePermission('leave.self_service'),async(req,res)=>{
@@ -46,11 +47,11 @@ export const createLeaveRouter = ({
     group by lp.id
   `;
 
-  router.get('/leave/types', requireDatabase, requireAuth, requirePermission('leave.self_service'), (_req, res) => {
+  router.get('/leave/types', requireDatabase, requireAuth, requirePermission('leave.self_service'), requireLeaveRelease, (_req, res) => {
     run(res, 'select * from leave_types order by active desc, name');
   });
 
-  router.post('/leave/types', requireDatabase, requireAuth, requirePermission('leave.admin'), async (req, res) => {
+  router.post('/leave/types', requireDatabase, requireAuth, requirePermission('leave.admin'), requireLeaveRelease, async (req, res) => {
     const schema = z.object({
       id: z.string().optional(),
       code: z.string().min(1),
@@ -97,11 +98,11 @@ export const createLeaveRouter = ({
     }
   });
 
-  router.get('/leave/policies', requireDatabase, requireAuth, requirePermission('leave.self_service'), (_req, res) => {
+  router.get('/leave/policies', requireDatabase, requireAuth, requirePermission('leave.self_service'), requireLeaveRelease, (_req, res) => {
     run(res, `${leavePolicySelect} order by lp.status desc, lp.name`);
   });
 
-  router.post('/leave/policies', requireDatabase, requireAuth, requirePermission('leave.admin'), async (req, res) => {
+  router.post('/leave/policies', requireDatabase, requireAuth, requirePermission('leave.admin'), requireLeaveRelease, async (req, res) => {
     const schema = z.object({
       id: z.string().optional(),
       name: z.string().min(1),
@@ -174,7 +175,7 @@ export const createLeaveRouter = ({
     }
   });
 
-  router.post('/holiday-calendars', requireDatabase, requireAuth, requirePermission('leave.admin'), async (req, res) => {
+  router.post('/holiday-calendars', requireDatabase, requireAuth, requirePermission('leave.admin'), requireLeaveRelease, async (req, res) => {
     const schema = z.object({
       id: z.string().optional(),
       name: z.string().min(1),
@@ -233,7 +234,7 @@ export const createLeaveRouter = ({
     }
   });
 
-  router.get('/leave/balances', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
+  router.get('/leave/balances', requireDatabase, requireAuth, requirePermission('leave.self_service'), requireLeaveRelease, async (req, res) => {
     const params = [];
     const where = buildEmployeeScopeWhere(req, params, 'e');
     await run(res, `
@@ -246,7 +247,7 @@ export const createLeaveRouter = ({
     `, params);
   });
 
-  router.post('/leave/balances', requireDatabase, requireAuth, requirePermission('leave.admin'), async (req, res) => {
+  router.post('/leave/balances', requireDatabase, requireAuth, requirePermission('leave.admin'), requireLeaveRelease, async (req, res) => {
     const schema = z.object({
       id: z.string().optional(),
       employee_id: z.string().min(1),
@@ -340,7 +341,7 @@ export const createLeaveRouter = ({
     }
   });
 
-  router.get('/leave/requests', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
+  router.get('/leave/requests', requireDatabase, requireAuth, requirePermission('leave.self_service'), requireLeaveRelease, async (req, res) => {
     const params = [];
     const where = buildEmployeeScopeWhere(req, params, 'e');
     await run(res, `
@@ -354,7 +355,7 @@ export const createLeaveRouter = ({
     `, params);
   });
 
-  router.post('/leave/requests', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
+  router.post('/leave/requests', requireDatabase, requireAuth, requirePermission('leave.self_service'), requireLeaveRelease, async (req, res) => {
     const schema = z.object({
       employee_id: z.string().min(1),
       leave_type_id: z.string().min(1),
@@ -466,7 +467,7 @@ export const createLeaveRouter = ({
     }
   });
 
-  router.patch('/leave/requests/:id', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
+  router.patch('/leave/requests/:id', requireDatabase, requireAuth, requirePermission('leave.self_service'), requireLeaveRelease, async (req, res) => {
     const schema = z.object({
       leave_type_id: z.string().min(1),
       start_date: z.string().min(10),
@@ -583,7 +584,7 @@ export const createLeaveRouter = ({
     }
   });
 
-  router.patch('/leave/requests/:id/cancel', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
+  router.patch('/leave/requests/:id/cancel', requireDatabase, requireAuth, requirePermission('leave.self_service'), requireLeaveRelease, async (req, res) => {
     const schema = z.object({
       comments: z.string().optional(),
     });
@@ -652,7 +653,7 @@ export const createLeaveRouter = ({
     }
   });
 
-  router.patch('/leave/requests/:id/status', requireDatabase, requireAuth, requirePermission('leave.approve'), async (req, res) => {
+  router.patch('/leave/requests/:id/status', requireDatabase, requireAuth, requirePermission('leave.approve'), requireLeaveRelease, async (req, res) => {
     const schema = z.object({
       status: z.enum(['Approved', 'Rejected', 'Cancelled']),
       comments: z.string().optional(),

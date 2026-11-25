@@ -13,9 +13,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
   await migrateCommercialDatabase(pool); const fx = await seedWorkApproval(pool), { today, identities: ids } = fx, paths = stagedLeavePaths(today);
   // Same existing synthetic self-service capability as calendar-leave acceptance.
   await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Employee','leave.self_service',true)on conflict(role_name,permission_key)do update set enabled=true");
-  await withCommercialApi({ databaseUrl, identities: ids, timeZone: 'Pacific/Kiritimati' }, async ({ request, tokenFor, baseUrl: apiUrl }) => {
+  await withCommercialApi({enableLeave:true,  databaseUrl, identities: ids, timeZone: 'Pacific/Kiritimati' }, async ({ request, tokenFor, baseUrl: apiUrl }) => {
     await configureStagedLeave(request, fx);
-    const fixtureServer = await startFixtureServer({root, fixtures:['configured-leave'], apiUrl, publicEnv:{VITE_FEATURE_LEAVE:'true'}});
+    const fixtureServer = await startFixtureServer({root, fixtures:['configured-leave'], apiUrl});
     let browser;
     try {
       const origin = fixtureServer.url, errors = [], external = [];

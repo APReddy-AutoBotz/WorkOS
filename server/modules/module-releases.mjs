@@ -15,10 +15,10 @@ export function releaseEnvironment() {
   return name;
 }
 
-const moduleNames = {teams:'Teams', entra:'Entra administration', planning:'Planning workspace', notifications:'Notification center'};
+const moduleNames = {teams:'Teams', entra:'Entra administration', planning:'Planning workspace', notifications:'Notification center', leave:'Leave'};
 
 export async function effectiveReleases(client, organizationId) {
-  const states = {teams:false, entra:false, planning:false, notifications:false};
+  const states = Object.fromEntries(Object.keys(moduleNames).map(module => [module,false]));
   const {rows} = await client.query(`select distinct on (module) module, enabled from module_release_decisions
     where organization_id=$1 and environment=$2 order by module, revision desc`, [organizationId,releaseEnvironment()]);
   for (const row of rows) if (Object.hasOwn(states,row.module)) states[row.module] = row.enabled;

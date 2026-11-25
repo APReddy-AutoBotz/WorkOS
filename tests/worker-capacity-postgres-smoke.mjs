@@ -34,7 +34,7 @@ await withCommercialDatabase(async({pool})=>withPreCommercialMigrations(async ro
 }));
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  assert.equal((await migrateCommercialDatabase(pool)).status.isCurrent,true);await assertPrecision(pool);const{identities,today,monday,dates,calendarId}=await seedCapacity(pool),path=prefix+f.ownerId;
- await withCommercialApi({databaseUrl,identities},async({request})=>{
+ await withCommercialApi({enableLeave:true, databaseUrl,identities},async({request})=>{
   const period=(from=monday,to=dates[4],options={})=>request(path+'/period?'+new URLSearchParams({startsOn:from,endsOn:to}),options),profiles=()=>request(path+'/profiles'),adopt=(expectedLatestId=null,effectiveFrom=monday,def=definition,options={})=>request(path+'/profiles',{method:'POST',body:{expectedLatestId,effectiveFrom,definition:def,reason:'Synthetic explicit capacity adoption'},...options}),retain=(result,options={})=>request(path+'/evidence',{method:'POST',body:{startsOn:result.startsOn,endsOn:result.endsOn,expectedSourceToken:result.sourceToken,reason:'Synthetic retained capacity'},...options});
   assert.equal((await request(path+'/profiles',{authenticated:false})).status,401);assert.equal((await request(path+'/profiles',{identity:identities.denied})).status,404);assert.equal((await request(prefix+f.otherOwnerId+'/profiles')).status,404);assert.equal((await request(path+'/profiles',{scope:{organizationId:f.organizationId,legalEntityId:f.otherLegalEntityId}})).status,403);
   let r=(await period()).body.result;assert.equal(r.status,'unavailable');assert.equal(r.totals.availableHoursExact,null);assert.deepEqual(r.reasonCodes,['CAPACITY_PROFILE_NOT_ADOPTED']);assert.equal((await profiles()).body.latest,null);

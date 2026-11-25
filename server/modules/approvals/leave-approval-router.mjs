@@ -4,6 +4,7 @@ import {validLeaveApprovalPolicy} from '../../../shared/leave-approval.mjs';
 import {workApprovalScope as scope,workApprovalFail as fail} from './work-approval-service.mjs';
 import {leaveDecisionPermissions,leaveApprovalActor,leavePolicyView,setLeaveApprovalContext,scopedLeaveApproval,leaveApprovalView,decideLeaveApproval} from './leave-approval-service.mjs';
 export const registerLeaveApprovalRoutes=(router,o,{config,handle,parse,uuid,hash,date,reason})=>{
+ router.use('/leave',o.requireLeaveRelease);
  const read=o.requirePermission('leave.self_service'),decide=leaveDecisionPermissions.map(o.requirePermission),admin=o.requirePermission('leave.admin');
  router.get('/leave/choices',...config,admin,read,handle(false,async(c,req)=>{
   const q=parse(z.object({afterWorker:z.string().min(1).max(200).optional(),afterUser:uuid.optional()}).strict(),req.query),p=[],where=o.buildEmployeeScopeWhere(req,p,'e');p.push(q.afterWorker??null);

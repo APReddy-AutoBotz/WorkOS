@@ -3,7 +3,7 @@ import {Link, Navigate} from 'react-router-dom';
 import {api, getOrganizationScope, getToken} from '../services/apiClient';
 import {authService} from '../services/authService';
 import {hasPermission} from '../services/permissions';
-import {applyModuleReleases, type ReleasedModule} from '../config/featureFlags';
+import {applyModuleReleases, type EnterpriseFeatureFlag} from '../config/featureFlags';
 
 type Decision = {revision:number; enabled:boolean; evidence:string; activated_at:string; owner_id:string; module:string};
 type ReleaseState = {environment:string; decisions:Decision[]};
@@ -11,9 +11,10 @@ type ReleaseState = {environment:string; decisions:Decision[]};
 const modules = {
   teams:{label:'Teams', link:'Teams mapping', path:'/integrations/teams'},
   entra:{label:'Entra administration', link:'identity mapping', path:'/integrations/identity'},
+  leave:{label:'Leave', link:'leave administration', path:'/leave/admin'},
   notifications:{label:'Notification center', link:'notification center', path:'/notifications'},
   planning:{label:'Planning workspace', link:'planning workspace', path:'/planning'},
-} satisfies Record<ReleasedModule,{label:string; link:string; path:string}>;
+} satisfies Record<EnterpriseFeatureFlag,{label:string; link:string; path:string}>;
 
 export function ModuleReleases() {
   const user = authService.getCurrentUser();
@@ -32,7 +33,7 @@ function ReleaseForm({organizationId,legalEntityId}:{organizationId:string;legal
   const [reload,setReload] = useState(0);
   const active = useRef(false);
   const token = getToken();
-  const [module,setModule] = useState<ReleasedModule>('teams');
+  const [module,setModule] = useState<EnterpriseFeatureFlag>('teams');
   const decision = state?.decisions.find(item => item.module === module);
   const {label, link, path:modulePath} = modules[module];
   const path = '/api/v1/organization-setup/module-releases';
@@ -73,7 +74,7 @@ function ReleaseForm({organizationId,legalEntityId}:{organizationId:string;legal
     {state && <>
       <label htmlFor="release-module">Module</label>
       <select id="release-module" value={module} disabled={saving} onChange={event=>{
-        setModule(event.target.value as ReleasedModule); setEvidence(''); setMessage('');
+        setModule(event.target.value as EnterpriseFeatureFlag); setEvidence(''); setMessage('');
       }}>{Object.entries(modules).map(([key,item]) => <option key={key} value={key}>{item.label}</option>)}</select>
       <p>{label} is <strong>{decision?.enabled ? 'enabled' : 'disabled'}</strong> for {organizationId} in {state.environment}.</p>
       {decision?.enabled && <Link className="underline" to={modulePath}>Open {link}</Link>}

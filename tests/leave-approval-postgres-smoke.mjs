@@ -19,7 +19,7 @@ await withCommercialDatabase(async({pool})=>{
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);const fx=await seedWorkApproval(pool),{today,identities:ids}=fx;
  await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Employee','leave.self_service',true)on conflict(role_name,permission_key)do update set enabled=true");
- await withCommercialApi({databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s),timeZone:'Pacific/Kiritimati'},async({request})=>{
+ await withCommercialApi({enableLeave:true, databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s),timeZone:'Pacific/Kiritimati'},async({request})=>{
   const release = await request('/api/organization-setup/module-releases/teams',{method:'PUT',body:{enabled:true,expectedRevision:0,evidence:'Synthetic staged leave notification delivery'}});
   assert.equal(release.status,201,JSON.stringify(release.body));
   const preferences=await request('/api/organization-setup/module-releases/notifications',{method:'PUT',body:{enabled:true,expectedRevision:0,evidence:'Synthetic leave delivery preferences'}});

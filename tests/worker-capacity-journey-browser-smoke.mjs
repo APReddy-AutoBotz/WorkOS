@@ -9,7 +9,7 @@ import {seedCapacity,approveCapacityLeave,rejectCalendarHolidayAndRetainLegacyFi
 const root=fileURLToPath(new URL('../',import.meta.url)),path='/api/v1/worker-capacity/workers/'+f.ownerId;
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);const{identities,monday,dates}=await seedCapacity(pool);
- await withCommercialApi({databaseUrl,identities},async({baseUrl:apiUrl,tokenFor,request})=>{
+ await withCommercialApi({enableLeave:true, databaseUrl,identities},async({baseUrl:apiUrl,tokenFor,request})=>{
   const demandId=randomUUID(),demandTitle='Synthetic capacity-backed demand';assert.equal((await request('/api/v1/resource-demand/demands/'+demandId+'/versions',{method:'POST',body:{projectId:f.projectId,expectedLatestId:null,definition:{title:demandTitle,role:'Synthetic capacity role',startsOn:monday,endsOn:dates[4],quantityUnit:'hours',quantityExact:'20',status:'Open',criteria:{skill:null,proficiency:null,certification:null},note:null},assignmentRefs:[],reason:'Synthetic demand integration'}})).status,201);
   const fixtureServer = await startFixtureServer({root, fixtures: ['worker-capacity'], apiUrl});let browser;
   try{
