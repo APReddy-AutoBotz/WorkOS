@@ -61,7 +61,9 @@ export const scopedWorkApproval = async (c, req, id, o, lock = false, includeSou
             workApprovalFail('WORK_APPROVAL_SOURCE_UNAVAILABLE', 'Retained source identity does not match the instance.');
         source = { weekEnding: captured.header.weekEnding, totalHoursExact: canonicalHours(captured.header.totalHours), billableHoursExact: canonicalHours(captured.header.billableHours), currentHeaderStatus: header.status, isCurrentSubmission: latest?.id === i.submission_id, entries: captured.submission.entries.map(e => ({ id: e.entryId, date: e.workDate, workType: e.workType, projectId: e.projectId ?? null, clientName: e.clientName ?? null, category: e.category ?? null, categoryCode: e.categoryCode ?? null, hoursExact: canonicalHours(e.hours), billable: e.billable, remark: e.remark ?? null, evidenceUrl: e.evidenceUrl ?? null, workReference: e.workReference ?? null })) };
     }
-    const overdueDeliveries=includeSource ? (await c.query(`select d.stage,d.due_at as "dueAt",
+    const hasOverdueDelivery = includeSource && policy.definition.stageDueMinutes != null
+      && (await c.query("select to_regclass('public.work_approval_overdue_attempts') is not null as available")).rows[0].available;
+    const overdueDeliveries=hasOverdueDelivery ? (await c.query(`select d.stage,d.due_at as "dueAt",
       coalesce(last.attempt,0) as attempts,case when last.attempt is null then 'Pending'
         when last.failure is not null then 'Recipient unavailable' else 'Delivered' end as status
       from work_approval_overdue_stages d left join lateral(select a.attempt,a.failure from work_approval_overdue_attempts a
