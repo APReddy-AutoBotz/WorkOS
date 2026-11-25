@@ -86,7 +86,7 @@ export function applyRuntimeBrand(brand: RuntimeBrand = {}) {
   const icon = document.querySelector<HTMLLinkElement>('#workos-favicon');
   if (icon) {
     icon.removeAttribute('type');
-    icon.href = brand.faviconUrl || '/workos-mark.svg';
+    icon.href = brand.faviconUrl || deploymentBrand.logoUrl;
   }
 }
 export const productConfig = Object.freeze({
