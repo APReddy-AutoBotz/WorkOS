@@ -205,9 +205,14 @@ export const ApprovalsWorkspace = () => {
   }, [pending]);
 
   const decide = async (record: ApprovalRecord, status: 'Approved' | 'Rejected') => {
-    const comments = status === 'Rejected' ? 'Rejected from shared approval workspace.' : undefined;
+    const reason = status === 'Rejected' ? window.prompt('Enter the reason for rejecting this approval.') : undefined;
+    if (reason === null) return;
+    if (reason !== undefined && !reason.trim()) {
+      setNotice('Enter a rejection reason before submitting the decision.');
+      return;
+    }
     try {
-      await approvalService.decide(record.id, status, comments);
+      await approvalService.decide(record.id, status, reason?.trim());
       setNotice(`${status} ${record.entityType} approval.`);
       await refresh();
     } catch (error) {
