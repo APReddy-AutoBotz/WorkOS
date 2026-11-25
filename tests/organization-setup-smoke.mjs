@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {syntheticCredential, syntheticDatabaseUrl} from './support/synthetic-values.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from '../server/worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, canTransitionReportingPeriod, normalizeReportingDate, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
@@ -155,11 +157,12 @@ const identitySecretKey = ['ENTRA', 'CLIENT', 'SECRET'].join('_');
 const secureTestOrigin = ['https:/', '/setup.test'].join('');
 const productionEnvironment = {
   NODE_ENV: 'production', APP_MODE: 'production', LOCAL_LOGIN_ENABLED: 'false',
-  DATABASE_URL: 'postgresql://localhost/workos_test', APP_URL: secureTestOrigin,
-  IDENTITY_PROVIDER: 'entra', ENTRA_TENANT_ID: 'synthetic-tenant', ENTRA_CLIENT_ID: 'synthetic-client',
+  DATABASE_URL: syntheticDatabaseUrl('localhost', 'workos_test'), APP_URL: secureTestOrigin,
+  IDENTITY_PROVIDER: 'entra', ENTRA_TENANT_ID: randomUUID(), ENTRA_CLIENT_ID: randomUUID(),
   ENTRA_REDIRECT_URI: `${secureTestOrigin}/api/auth/entra/callback`,
-  [sessionSecretKey]: 'synthetic-non-default-value', [identitySecretKey]: 'synthetic-value',
+  [sessionSecretKey]: syntheticCredential(), [identitySecretKey]: syntheticCredential(),
 };
+assert.equal(productionReadinessFromEnvironment({...productionEnvironment, RESET_DEMO_DATA: 'true'}), false, 'setup must reject demo reset just as production startup does');
 const completeSetupFacts = Object.fromEntries(REQUIRED_SETUP_CHECKS.map(key => [key, true]));
 assert.equal(productionReadinessFromEnvironment(productionEnvironment), true, 'safe production controls must satisfy production readiness');
 assert.equal(buildSetupReadiness(completeSetupFacts, productionEnvironment).ready, true, 'all server facts can make a synthetic scope ready');

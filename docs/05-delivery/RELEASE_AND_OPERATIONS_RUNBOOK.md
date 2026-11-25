@@ -204,7 +204,7 @@ The repository provides a Node 22 production image and a PostgreSQL Compose prof
 
 ### Production environment reference
 
-The production profile reads the following values from `.env.production`. Secret values stay in the deployment environment and must never be copied into logs or support tickets. Values marked required are enforced by the production startup validator or Compose interpolation. The Entra fields are mandatory for production and must identify a real configured application; format validation cannot prove that the provider will accept its credentials.
+The production profile reads the following values from `.env.production`. Secret values stay in the deployment environment and must never be copied into logs or support tickets. The guided setup production check uses the startup validator and requires local login to be disabled. Values marked required are enforced by the production startup validator or Compose interpolation. The Entra fields are mandatory for production and must identify a real configured application; format validation cannot prove that the provider will accept its credentials.
 
 | Variable | Purpose | Sensitivity | Required | Allowed values |
 |---|---|---|---|---|
