@@ -6,12 +6,16 @@ import {createServer} from 'node:https';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
-import pg from 'pg';
+import {withCommercialDatabase, migrateCommercialDatabase} from './support/commercial-drafting-test.mjs';
 import {syntheticCredential, rejectedConfigurationValues} from './support/synthetic-values.mjs';
 
-const {Pool} = pg;
-const databaseUrl = String(process.env.DATABASE_URL || '').trim();
-assert.ok(databaseUrl, 'DATABASE_URL is required for production identity acceptance');
+const adminDatabaseUrl = String(process.env.DATABASE_URL || '').trim();
+assert.ok(adminDatabaseUrl, 'DATABASE_URL is required for production identity acceptance');
+
+await withCommercialDatabase(verifyProductionIdentity, adminDatabaseUrl);
+
+async function verifyProductionIdentity({pool, databaseUrl}) {
+  await migrateCommercialDatabase(pool);
 
 const hasSetCookie = (headers, expectedName) => {
   const values = typeof headers.getSetCookie === 'function'
@@ -323,7 +327,6 @@ const assertCallbackRejected = async ({name, claimOverrides, expectedLocation = 
 
 const results = [];
 let productionChild = null;
-const pool = new Pool({connectionString: databaseUrl, ssl: undefined});
 
 try {
   results.push(await assertStartupFailure({
@@ -666,6 +669,11 @@ try {
     await pool.query(`insert into role_permissions(role_name,permission_key,enabled) values ('Admin',$1,true)
       on conflict(role_name,permission_key) do update set enabled=true`, [key]);
   }
+  const activation = await fetchWithTimeout(`${serviceOrigin}/api/organization-setup/module-releases/entra`, {
+    method:'PUT', headers:{cookie:issuedSession,'content-type':'application/json'},
+    body:JSON.stringify({enabled:true,expectedRevision:0,evidence:'Synthetic identity administration acceptance'}),
+  }, 2000);
+  assert.equal(activation.status,201,'Authorize Entra administration before clearing a retained binding');
   const clearProfile=(await pool.query(`select employee_id,name,email,designation,department,country,primary_country_director_id
     from employees where id=$1`,[syntheticEmployee.rows[0].id])).rows[0];
   const clearBinding=await fetchWithTimeout(`${serviceOrigin}/api/employees`,{method:'POST',headers:{cookie:issuedSession,'content-type':'application/json'},
@@ -714,11 +722,6 @@ try {
     'the copied signed-provider cookie must be rejected after logout');
   assert.equal((await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers: {authorization: `Bearer ${providerSessionBody.token}`}})).status, 401,
     'the refreshed signed-provider token must be rejected after logout');
-
-  await pool.query('delete from identity_provider_links where employee_id=$1', [syntheticEmployee.rows[0].id]);
-  await pool.query("delete from users where username = 'synthetic-user'");
-  await pool.query('delete from employees where id=$1', [syntheticEmployee.rows[0].id]);
-  await pool.query("delete from country_directors where id='synthetic-login-director'");
 
   const discoveryRequestsBeforeOutage = discoveryRequests;
   discoveryUnavailable = true;
@@ -795,7 +798,6 @@ try {
   productionOutputForCallback = () => '';
   await closeDiscovery();
   await terminate(productionChild);
-  await pool.end();
   rmSync(certificateDirectory, {recursive: true, force: true});
 }
 
@@ -807,3 +809,4 @@ const report = {
 const evidencePath = String(process.env.WOS_PRODUCTION_IDENTITY_EVIDENCE || '').trim();
 if (evidencePath) writeFileSync(evidencePath, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(report, null, 2));
+}
