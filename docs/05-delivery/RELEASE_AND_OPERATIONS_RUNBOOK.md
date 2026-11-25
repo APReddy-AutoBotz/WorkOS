@@ -945,3 +945,7 @@ In Approvals, adopt an effective leave policy for the selected workers and name 
 For job role definition changes, an authorized deployment auditor can inspect the creation, edit or deactivation under `RoleDefinition` in deployment audit history. Application rollback preserves recorded events.
 
 Manual import/export history and its audit record commit together. Look up the returned history ID under `ImportExportLog` in the selected entity's audit history. A failed history acknowledgement after a CSV download means the recording outcome needs checking before retry. Roll back the server and frontend together to restore the previous two-request flow.
+
+### Optional module release history
+
+The API records Teams release decisions for the authenticated organization. Set WORKOS_RELEASE_ENVIRONMENT to a stable lowercase environment name when staging and production use the same application mode. It defaults to APP_MODE. The releases.manage permission is assigned to Admin by migration 129. Preserve decision and audit rows on rollback. If reverting to a version predating release enforcement, keep Teams routes and provider delivery offline until the release controls are restored. In Governance Settings, open Manage module releases, inspect the organization, environment and current Teams state, enter the evidence, and select Enable Teams or Disable Teams. The same packaged frontend reads the decision after login. Disabling Teams blocks its mapping and action APIs and optional Teams notification delivery. In-app notices keep their own routing.

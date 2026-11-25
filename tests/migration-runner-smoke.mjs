@@ -4591,6 +4591,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       && !JSON.stringify(identityUpsertEvents.rows).includes('scope-a-provider-updated@example.test'),
     'integration provenance payloads must not duplicate external identifiers already held in the protected identity-link row');
 
+    for (const [org,owner] of [['org-default',actorId],['org-scope-beta',multiScopeActorId]]) {
+      await pool.query(`insert into module_release_decisions(organization_id,environment,module,revision,enabled,evidence,owner_id)
+        values($1,'test','teams',1,true,'Synthetic scoped integration fixture',$2)`,[org,owner]);
+    }
     const teamsAResponse = await postScopedJson('/api/integrations/teams-user-links', token, 'org-default', 'legal-default', {
       employee_id: employeeA.id,
       teams_user_id: 'scope-a-teams-user',

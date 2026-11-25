@@ -75,6 +75,7 @@ import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/e
 import {createIdentityAccessMiddleware, readCookie, sessionEntraGroups} from './modules/identity-access/middleware.mjs';
 import {assignEmployeeRoles, assertCredentialTarget, assertSecurityAdministrator, synchronizeEntraBinding} from './modules/identity-access/administration.mjs';
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
+import {teamsReleased} from './modules/module-releases.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
 import {createOrganizationAuditRouter} from './modules/audit/organization-audit-router.mjs';
@@ -253,6 +254,7 @@ const permissionDefinitions = [
   [deploymentAuditPermissionKey, 'Admin', 'Deployment Audit View', true],
   [organizationAuditPermissionKey, 'Admin', 'Organization Audit View', true],
   ['settings.manage', 'Admin', 'Governance Settings', false],
+  ['releases.manage', 'Admin', 'Manage module releases', true],
   ['periods.financial_reopen','Admin','Reopen Financial Periods',false],
   ['permissions.manage', 'Admin', 'Permission Settings', true],
 ];
@@ -1164,6 +1166,9 @@ const sendNotification = async (client, req, {
   if (preference?.in_app) channelSet.add('InApp');
   if (preference?.email) channelSet.add('Email');
   if (preference?.teams) channelSet.add('Teams');
+  if (channelSet.has('Teams') && !await teamsReleased(client,recipient?.organization_id)) {
+    channelSet.delete('Teams');
+  }
   const deliveryResults = [];
 
   for (const deliveryChannel of channelSet) {
@@ -3863,7 +3868,16 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
   }
 });
 
-app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), (req, res) => {
+const requireTeamsRelease = async (req,res,next) => {
+  try {
+    if (await teamsReleased(pool,req.organizationScope.organizationId)) return next();
+    return res.status(403).json({error:'Teams is disabled for this organization and environment',code:'MODULE_DISABLED'});
+  } catch (error) {
+    return next(error);
+  }
+};
+
+app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), requireTeamsRelease, (req, res) => {
   run(res, `
     select tul.*, e.name as employee_name
     from teams_user_links tul
@@ -3873,7 +3887,7 @@ app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requ
   `, [req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
 });
 
-app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), async (req, res) => {
+app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), requireTeamsRelease, async (req, res) => {
   const schema = z.object({
     id: z.string().optional(),
     employee_id: z.string().min(1),
@@ -3950,7 +3964,7 @@ app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, req
   }
 });
 
-app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), async (req, res) => {
+app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), requireTeamsRelease, async (req, res) => {
   const schema = z.object({
     entity_type: z.enum(['ApprovalRecord', 'LeaveRequest', 'Timesheet', 'PortalLink']),
     entity_id: z.string().min(1),
@@ -4009,7 +4023,7 @@ app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, 
   }
 });
 
-app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), async (req, res) => {
+app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), requireTeamsRelease, async (req, res) => {
   const schema = z.object({ comments: z.string().optional() });
   const parsed = schema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -4116,7 +4130,7 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
   }
 });
 
-app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), async (req, res) => {
+app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), requireTeamsRelease, async (req, res) => {
   const schema = z.object({
     recipient_employee_id: z.string().min(1),
     title: z.string().min(1).default('Configured product action required'),

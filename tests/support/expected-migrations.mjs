@@ -153,6 +153,7 @@ const expected = [
   '126_wos05_stage_reminders',
   '127_wos05_assignment_creation_approvals',
   '128_wos05_configured_leave_stages',
+  '129_wos02_module_release_decisions',
 ];
 
 export function expectedMigrationsFrom(first) {

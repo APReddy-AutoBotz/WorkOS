@@ -1,3 +1,4 @@
+import {teamsReleased} from '../module-releases.mjs';
 import {Router} from 'express';
 import {z} from 'zod';
 import {safeNotificationMetadata, safeNotificationProvider} from './delivery-diagnostics.mjs';
@@ -232,6 +233,10 @@ export const createNotificationRouter = ({
         await client.query('rollback');
         res.status(403).json({ error: 'Notification test recipient is outside active-role data scope' });
         return;
+      }
+      if (parsed.data.channels.includes('Teams') && !await teamsReleased(client, targetEmployee.organization_id)) {
+        await client.query('rollback');
+        return res.status(403).json({error:'Teams is disabled for this organization and environment',code:'MODULE_DISABLED'});
       }
       const event = await sendNotification(client, req, {
         recipientEmployeeId: targetEmployee.id,
