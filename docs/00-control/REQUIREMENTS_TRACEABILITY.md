@@ -823,3 +823,5 @@ WOS-COM-009 and WOS-RPT-004. The commercial drafting PostgreSQL/browser journey 
 WOS-COM-009, WOS-RPT-004, WOS-INT-002 and WOS-INT-005. Migration 113 retains explicit assignments, observed quantities, notice policies, attempts and acknowledgements. The retainer PostgreSQL journey verifies concurrent overconsumption detection. The commercial browser journey exercises expiry before first use, a shared version, duplicate roles, missing assignments, retry and access revocation.
 
 WOS-CORE-005 and WOS-IAM-010. Deployment-wide job role definition saves record the actor and before/after values in the same transaction as the change. The existing migration-runner API journey covers create, edit, blocked deactivation, successful deactivation and scoped audit visibility.
+
+WOS-CORE-005. The manual import/export history API creates one scoped audit event in the same transaction as the history row. The existing two-alias API fixture verifies the persisted actor, role, scope and generated ID, and checks rollback on audit failure. Report export browser journeys exercise the single request.

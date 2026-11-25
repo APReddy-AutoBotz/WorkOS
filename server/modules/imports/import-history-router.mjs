@@ -1,3 +1,4 @@
+import {recordAuditEvent} from '../audit/audit-record.mjs';
 import {Router} from 'express';
 import {z} from 'zod';
 import {importErrorRowSchema} from './import-error-provenance.mjs';
@@ -49,8 +50,11 @@ export const createImportHistoryRouter = ({
       res.status(400).json({ error: parsed.error.flatten() });
       return;
     }
+    let client;
     try {
-      const result = await pool.query(`
+      client = await pool.connect();
+      await client.query('begin');
+      const result = await client.query(`
         insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         returning id, operation, channel, file_name, status, total_rows, valid_rows, error_rows,
@@ -68,10 +72,26 @@ export const createImportHistoryRouter = ({
         req.organizationScope.organizationId,
         req.organizationScope.legalEntityId,
       ]);
+      const [row] = result.rows;
+      await recordAuditEvent(client, req, {
+        action: row.operation,
+        module: 'Import / Export',
+        entityType: 'ImportExportLog',
+        entityId: row.id,
+        details: 'Recorded scoped import/export history',
+        newValue: {
+          channel: row.channel, fileName: row.file_name, status: row.status,
+          totalRows: row.total_rows, validRows: row.valid_rows, errorRows: row.error_rows,
+        },
+      });
+      await client.query('commit');
       res.json(result.rows);
     } catch (error) {
+      if (client) await client.query('rollback').catch(logError);
       logError(error);
       res.status(500).json({error: 'Database operation failed'});
+    } finally {
+      client?.release();
     }
   });
   return router;

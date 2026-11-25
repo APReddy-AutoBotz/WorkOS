@@ -44,7 +44,7 @@ window.fetch = async (url, init = {}) => {
 resetBackendCheck();
 api.postWithScope = async (path, body, expectedScope) => {
   writes.push(copy({path, body, scope: expectedScope}));
-  if (path === '/api/import-export-logs') return {
+  if (path === '/api/import-export-logs') return [{
     id: `synthetic-export-${writes.length}`,
     operation: body.operation,
     channel: body.channel,
@@ -55,7 +55,7 @@ api.postWithScope = async (path, body, expectedScope) => {
     error_rows: body.errorRows,
     user_name: 'Synthetic Export Actor',
     created_at: '2026-10-20T00:00:00Z',
-  };
+  }];
   if (path === '/api/audit-events') return {id: `synthetic-audit-${writes.length}`};
   throw new Error('Unexpected synthetic write target');
 };
