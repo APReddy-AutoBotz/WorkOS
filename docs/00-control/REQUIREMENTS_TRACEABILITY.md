@@ -829,3 +829,5 @@ WOS-RPT-007 and WOS-INV-008. Fixed-fee engagement reconciliation compares pinned
 ### Retainer and managed-service billing reconciliation
 
 WOS-RPT-007 and WOS-INV-008. The commercial drafting journey follows registered retainer periods, managed-service periods and managed-service units alongside their full-line credits. The engagement report compares pinned source amounts, current and released lines, exports and confirmations using the source's existing billing permission.
+
+WOS-RPT-007. The portfolio report accepts an eligible date range for registered fixed-fee installments, retainer periods, managed-service units or managed-service periods. The commercial drafting journey exercises the source permissions, signed balances, portfolio controls and audited CSV download.

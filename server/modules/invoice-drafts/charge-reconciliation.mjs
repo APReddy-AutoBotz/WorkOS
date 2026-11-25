@@ -1,4 +1,5 @@
-const chargePopulation = `where ev.organization_id=$1 and ev.legal_entity_id=$2 and ev.engagement_id=$3
+const chargePopulation = `where ev.organization_id=$1 and ev.legal_entity_id=$2 and ($3::text is null or ev.engagement_id=$3)
+        and ($5::date is null or ev.eligible_on between $5 and $6)
         and (ev.source_type=$4 or (ev.source_type='FULL_LINE_REVERSAL' and exists(
           select 1 from billing_eligibility_events original where original.id=ev.reverses_event_id
             and original.source_type=$4 and original.organization_id=ev.organization_id
@@ -7,11 +8,13 @@ const chargePopulation = `where ev.organization_id=$1 and ev.legal_entity_id=$2 
 
 // Classify each immutable register item once using its current occupancy.
 // Cancelled batches have already released their occupancy. Credits retain their sign.
-export async function readChargeBalances(client, scope, engagementId, source, model) {
-  const args = [...scope, engagementId, source];
-  const engagement = await client.query(
+export async function readChargeBalances(client, scope, engagementId, source, model, range=null) {
+  const args = [...scope,engagementId,source,range?.start ?? null,range?.end ?? null];
+  if (engagementId!==null) {
+    const engagement = await client.query(
     "select id from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3 and model=$4", [...scope,engagementId,model]);
-  if (!engagement.rowCount) return null;
+    if (!engagement.rowCount) return null;
+  }
 
   const {rows} = await client.query(`
     with register as (
@@ -59,14 +62,14 @@ const chargeSources = {
     join commercial_contract_versions v on v.id=s.version_id and v.contract_id=s.contract_id
       and v.organization_id=s.organization_id and v.legal_entity_id=s.legal_entity_id
     cross join lateral jsonb_array_elements(v.service_dimensions) unit
-    where s.organization_id=$1 and s.legal_entity_id=$2 and s.engagement_id=$3 and s.contract_id=ev.contract_id
+    where s.organization_id=$1 and s.legal_entity_id=$2 and s.engagement_id=ev.engagement_id and s.contract_id=ev.contract_id
       and s.id=(ev.billing_evidence->>'evidenceId')::uuid and r.id=ev.service_review_id and unit->>'code'=s.dimension_code)`,
   MANAGED_SERVICE_PERIOD: `(select r.amount,r.currency from commercial_service_period_reviews r
     where r.organization_id=$1 and r.legal_entity_id=$2 and r.contract_id=ev.contract_id
       and r.id=ev.service_period_review_id and r.decision='Approved')`,
 };
 
-export async function readChargeControls(client, scope, engagementId, source) {
+export async function readChargeControls(client, scope, engagementId, source, range=null) {
   const {rows} = await client.query(`
     with population as (
       select ev.* from billing_eligibility_events ev ${chargePopulation}
@@ -98,14 +101,14 @@ export async function readChargeControls(client, scope, engagementId, source) {
       left join lateral full_line_reversal_source(case when ev.source_type='FULL_LINE_REVERSAL'
         then (ev.billing_evidence->>'reviewId')::uuid end) credit on credit.final_decision=ev.reversal_decision_id
         and credit.original_event=ev.reverses_event_id and credit.organization_id=$1
-        and credit.legal_entity_id=$2 and credit.engagement_id=$3
+        and credit.legal_entity_id=$2 and credit.engagement_id=ev.engagement_id
       left join approved_unbilled_items item on item.event_id=ev.id and item.source_type=ev.source_type
         and item.organization_id=$1 and item.legal_entity_id=$2
       left join invoice_draft_occupancies occ on occ.item_id=item.id and occ.item_version=item.version
       left join invoice_draft_lines l on l.id=occ.line_id and l.item_id=item.id
         and l.organization_id=$1 and l.legal_entity_id=$2
       left join invoice_draft_batches b on b.id=occ.batch_id and b.organization_id=$1
-        and b.legal_entity_id=$2 and b.engagement_id=$3 and b.source_type=ev.source_type
+        and b.legal_entity_id=$2 and b.engagement_id=ev.engagement_id and b.source_type=ev.source_type
         and not exists(select 1 from invoice_draft_cancellations x where x.batch_id=b.id)
       left join batch_controls bc on bc.batch_id=occ.batch_id
       left join invoice_csv_artifacts art on art.batch_id=occ.batch_id and art.organization_id=$1 and art.legal_entity_id=$2
@@ -140,6 +143,6 @@ export async function readChargeControls(client, scope, engagementId, source) {
       count(observed)::int as observed,trim_scale(coalesce(sum(observed),0))::text as amount,
       count(*) filter(where matches is not true)::int as exceptions
     from checks group by currency,boundary order by currency,min(array_position(
-      array['Source','Eligibility event','Register item','Current occupancy','Current line','Batch membership','Exported line','Confirmed line','Released historical line'],boundary))`, [...scope,engagementId,source]);
+      array['Source','Eligibility event','Register item','Current occupancy','Current line','Batch membership','Exported line','Confirmed line','Released historical line'],boundary))`, [...scope,engagementId,source,range?.start ?? null,range?.end ?? null]);
   return rows;
 }

@@ -768,6 +768,9 @@ const verifyCommercialDrafting = async reversalScenario => {
       {
         await assertSourceAccessDenied(chargeReport);
         await assertSourceAccessDenied(chargeReport+'&controls=1');
+        await assertSourceAccessDenied('/api/v1/invoice-drafts/reconciliation/portfolio?'+new URLSearchParams({
+          start:'2000-01-01',end:today,source:reportPath,
+        }));
       }
       await csvDesk.getByLabel('Invoice export engagement').selectOption(engagementId);
       await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
@@ -920,6 +923,25 @@ const verifyCommercialDrafting = async reversalScenario => {
           const controls=report.getByRole('table',{name:label+' reconciliation controls by currency'});
           const confirmed=controls.getByRole('row').filter({hasText:'Confirmed line'});
           assert.deepEqual(await confirmed.getByRole('cell').allTextContents(),[a.currency,'Confirmed line','2','2','0','0']);
+          await report.getByLabel('Eligible from').fill('2000-01-01');
+          await report.getByLabel('Eligible through').fill(today);
+          await report.getByLabel('Portfolio sources').selectOption(reportPath);
+          await report.getByRole('button',{name:'Load portfolio reconciliation'}).click();
+          const summary=report.getByRole('region',{name:'Portfolio reconciliation results'});
+          const portfolioConfirmed=summary.getByRole('row').filter({hasText:'confirmed line'});
+          await portfolioConfirmed.waitFor();
+          assert.deepEqual(await portfolioConfirmed.getByRole('cell').allTextContents(),[a.currency,'2','2','0','0']);
+          await summary.getByLabel('Portfolio export reason').fill('Reconcile accepted charges and credits');
+          const downloaded=csvBrowser.page.waitForResponse(r=>r.url().endsWith('/reconciliation/portfolio/exports') && r.request().method()==='POST');
+          await summary.getByRole('button',{name:'Download audited portfolio CSV'}).click();
+          const exportedReport=await downloaded;
+          assert.equal(exportedReport.status(),201,await exportedReport.text());
+          const download=await exportedReport.json();
+          assert.equal(download.source,reportPath);
+          assert.match(download.csv,/expected_records/);
+          assert.match(download.csv,/Confirmed credits/);
+          assert.equal((await pool.query("select new_value->>'artifactSha256' hash from audit_logs where entity_id=$1 and action='Export Portfolio Billing Reconciliation'",[download.requestId])).rows[0].hash,download.sha256);
+
         }
         assert.equal(ok(await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:finance}),200).confirmation.id,receipt.id);
         const csvText=Buffer.from(creditArtifact.payloadBase64,'base64').toString('utf8');
