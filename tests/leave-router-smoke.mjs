@@ -53,6 +53,8 @@ const pool = {
     return {
       async query(sql, params = []) {
         transactionQueries.push({sql, params});
+        if (sql.startsWith('select pg_advisory_lock(') || sql.startsWith('select pg_advisory_unlock(')) return {rows: []};
+        if (sql.includes('from leave_approval_instances') || sql.includes('from leave_selected_approval_policy')) return {rows: [], rowCount: 0};
         if (['begin', 'commit', 'rollback'].includes(sql)) return {rows: []};
         if (sql.includes('from users') && sql.includes('for share')) return {rows:[{employee_record_id:'employee-row-1',employee_id:'SYNTHETIC-1'}]};
         if (sql.includes('select id,employee_id,case when')) return {rows:[{id:'employee-row-1',employee_id:'SYNTHETIC-1',director_id:null}]};
