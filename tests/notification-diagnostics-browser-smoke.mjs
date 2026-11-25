@@ -13,7 +13,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   await pool.query("insert into notification_events(id,recipient_employee_id,event_type,title,body)values($1,$2,'SyntheticDiagnostic','Synthetic notice','Synthetic body')",[id,worker]);
   await pool.query("insert into notification_delivery_attempts(id,notification_id,channel,provider,status,response_metadata)values($1,$1,$2,'mock',$3,$4)",[id,channel,status,JSON.stringify({error:'synthetic-private-browser-diagnostic',statusCode:503})]);
  }
- await withCommercialApi({databaseUrl,identities},async({baseUrl,tokenFor})=>{
+ await withCommercialApi({databaseUrl,identities},async({baseUrl,tokenFor,request})=>{
+  const release=await request('/api/organization-setup/module-releases/notifications',{method:'PUT',body:{enabled:true,expectedRevision:0,evidence:'Synthetic browser diagnostics'}});
+  assert.ok([200,201].includes(release.status));
   const fixtureServer = await startFixtureServer({root, fixtures: ['notification-diagnostics'], apiUrl: baseUrl, publicEnv: {VITE_APP_MODE: 'production', VITE_ALLOW_TEST_FALLBACK: 'false'}});
   let browser;
   try {

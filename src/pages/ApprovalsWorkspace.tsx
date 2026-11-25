@@ -1,6 +1,7 @@
 import {isEnterpriseFeatureEnabled} from '../config/featureFlags';
 import {GovernedLeaveApprovals} from '../components/GovernedLeaveApprovals';
 import { AssignmentCreationApprovals } from '../components/AssignmentCreationApprovals';
+import {ReviewedApprovalBatch} from '../components/ReviewedApprovalBatch';
 import {MaterialAssignmentApprovals} from '../components/MaterialAssignmentApprovals';
 import {WorkPeriodNoticeProducer} from '../components/WorkPeriodNoticeProducer';
 import {GovernedWorkApprovals} from '../components/GovernedWorkApprovals';
@@ -254,7 +255,7 @@ export const ApprovalsWorkspace = () => {
 
   return (
     <div className="space-y-6 pb-12">
-      <MaterialAssignmentApprovals/><AssignmentCreationApprovals/>{isEnterpriseFeatureEnabled('leave') && <GovernedLeaveApprovals/>}<GovernedWorkApprovals/><WorkPeriodNoticeProducer/>
+      <ReviewedApprovalBatch/><MaterialAssignmentApprovals/><AssignmentCreationApprovals/>{isEnterpriseFeatureEnabled('leave') && <GovernedLeaveApprovals/>}<GovernedWorkApprovals/><WorkPeriodNoticeProducer/>
       <PageHeader
         title="Approvals Inbox"
         subtitle="Shared approval inbox, approval history, delegations, and SLA governance."
