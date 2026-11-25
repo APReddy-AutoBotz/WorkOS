@@ -896,7 +896,7 @@ The API worker polls every 30 seconds and schedules each governed retainer versi
 
 ## CI for progress updates
 
-PRs targeting main that only modify existing text in the changelog, implementation status, or enterprise delivery roadmap run a whitespace check and the full-history secret scan. Other PR changes, main pushes and manual runs select the application and deployment suite. Use a manual run to obtain full evidence for a release revision. Revert the workflow change to restore full application validation on every eligible progress PR.
+PRs targeting main that only modify existing text in the changelog, implementation status, or enterprise delivery roadmap run a whitespace check and the full-history secret scan. Other PR changes, main pushes and manual runs select the application and deployment suite. The secret job checks for a complete clone and runs the checksum-pinned Gitleaks release against all fetched refs, including merge changes. Earlier green PR scans from the Gitleaks action covered the PR commit range. Use a manual run to obtain full evidence for a release revision. Revert the workflow change to restore full application validation on every eligible progress PR.
 
 The full suite installs the lockfile-selected Chromium build and attempts a headless launch on the pinned Ubuntu runner. A failed launch triggers Playwright's OS dependency installer before the role journeys run.
 
