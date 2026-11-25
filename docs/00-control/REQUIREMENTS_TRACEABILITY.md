@@ -831,3 +831,5 @@ WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute dead
 ### Scoped bulk timesheet approval
 
 WOS-APR-008. The timesheet bulk action requires a configured approval role and the existing approval permission. The timesheet export and approval browser journey changes one reporting relationship after a Team Lead previews two rows, then verifies the HTTP denial and both stored outcomes.
+
+WOS-APR-005 and WOS-INT-002. Timed timesheet policies retain an optional escalation recipient. The existing approval browser journey records that choice, and PostgreSQL acceptance rejects adoption when the recipient cannot see all selected workers. Automatic overdue delivery is tracked separately from policy adoption.

@@ -1,3 +1,4 @@
+import { workApprovalRecipientScope } from './work-approval-service.mjs';
 import {retainerRiskInboxRows} from '../commercial-drafting/retainer-risk-inbox.mjs';
 import {purchaseOrderRiskInboxRows} from '../commercial-drafting/purchase-order-risk-inbox.mjs';
 import {fixedFeeRiskInboxRows} from '../commercial-drafting/fixed-fee-risk-inbox.mjs';
@@ -117,6 +118,8 @@ export const createWorkApprovalRouter = options => {
             workApprovalFail('WORK_APPROVAL_POLICY_SCOPE', 'Every selected worker must be in the current authorized scope.', 403);
         for (const stage of d.definition.stages)
             await workApprovalActor(c, req, stage, null, options);
+        if (d.definition.escalationUserId)
+            await workApprovalRecipientScope(c,req,d.definition.escalationUserId,d.definition.workerIds,options);
         await setWorkApprovalContext(c, req);
         const id = randomUUID(), saved = (await c.query("insert into work_approval_policy_versions(id,organization_id,legal_entity_id,sequence,effective_from,policy_version,definition,actor_id,active_role,reason)values($1,$2,$3,$4,$5,'work-approval/1',$6,$7,$8,$9)returning *,effective_from::text", [id, ...workApprovalScope(req), (latest?.sequence ?? 0) + 1, d.effectiveFrom, JSON.stringify(d.definition), req.user.sub, req.user.activeRole, d.reason])).rows[0];
         for (const t of d.definition.templates)

@@ -15,6 +15,10 @@ export const validWorkApprovalPolicy = d => {
             if (!Number.isInteger(d.stageDueMinutes) || d.stageDueMinutes < 1 || d.stageDueMinutes > 2147483647) return false;
             keys.push('stageDueMinutes');
         }
+        if (Object.hasOwn(d,'escalationUserId')) {
+            if (!Object.hasOwn(d,'stageDueMinutes') || !approvalUuid(d.escalationUserId)) return false;
+            keys.push('escalationUserId');
+        }
         return approvalKeys(d, keys) && d.entityType === 'Timesheet' && Array.isArray(d.workerIds) && d.workerIds.length >= 0 && d.workerIds.length <= 200 && d.workerIds.every((v, i) => approvalText(v) && (!i || compareCapabilityIds(d.workerIds[i - 1], v) < 0)) && Array.isArray(d.stages) && d.stages.length >= 1 && d.stages.length <= 10 && d.stages.every(s => approvalKeys(s, ['userId', 'role']) && approvalUuid(s.userId) && approvalText(s.role, 100)) && typeof d.locale === 'string' && Intl.getCanonicalLocales(d.locale)[0] === d.locale && Array.isArray(d.templates) && d.templates.length === 3 && d.templates.every(validApprovalTemplate) && new Set(d.templates.map(t => t.key)).size === 3 && typeof d.completionInApp === 'boolean';
     }
     catch {

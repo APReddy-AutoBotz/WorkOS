@@ -19,6 +19,7 @@ export type WorkApprovalDefinition = {
     locale: string;
     completionInApp: boolean;
     stageDueMinutes?: number;
+    escalationUserId?: string;
     templates: Array<{
         key: string;
         subject: string;

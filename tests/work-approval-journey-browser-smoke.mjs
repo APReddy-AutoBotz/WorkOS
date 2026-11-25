@@ -45,6 +45,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await config.getByLabel('Stage 2 account', { exact: true }).selectOption(identities.second.id);
             await config.getByLabel('Stage 2 role', { exact: true }).selectOption('Admin');
             await config.getByLabel('Time allowed per approval stage (minutes, optional)').fill('90');
+            await config.getByLabel('Escalation recipient (optional)').selectOption(identities.second.id);
             await config.getByLabel('Template locale', { exact: true }).fill('en-GB');
             for (const [t, label] of definition.templates.map((t, i) => [t, ['Action request', 'Correction', 'Completion'][i]])) {
                 await config.getByLabel(label + ' title', { exact: true }).fill(t.subject);
@@ -54,7 +55,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await config.getByLabel('Policy adoption reason', { exact: true }).fill('Synthetic browser explicit staged policy');
             const adoption = a.waitForResponse(r => new URL(r.url()).pathname === api + '/policies' && r.request().method() === 'POST');
             await config.getByRole('button', { name: 'Record prospective work approval policy', exact: true }).click();
-            assert.equal((await adoption).status(), 201);
+            const adopted=await adoption;
+            assert.equal(adopted.status(),201,await adopted.text());
+            assert.equal((await adopted.json()).policy.definition.escalationUserId,identities.second.id);
             await config.getByRole('article', { name: 'Work approval policy 1', exact: true }).waitFor();
             // Named Employee enters past work in daily capture, submits the same header from weekly capture.
             await w.goto(url);
