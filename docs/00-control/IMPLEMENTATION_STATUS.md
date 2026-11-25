@@ -2,7 +2,7 @@
 
 ## Delivery acceleration
 
-The WOS-OPS-007 candidate scopes application validation for progress-only PRs. Buyer acceptance and release evidence still use the full release path.
+The WOS-OPS-007 candidate scopes application validation for progress-only PRs. The previous Gitleaks action scanned a PR commit range on pull requests. Its green PR checks establish evidence for that range only. The candidate explicitly scans all fetched refs, including merge changes. Buyer acceptance and release evidence still use the full release path.
 
 ## Utilization evidence
 

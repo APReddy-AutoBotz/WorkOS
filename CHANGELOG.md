@@ -4,7 +4,7 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
-- Allow prose-only progress PRs to complete CI with whitespace validation and the separate secret scan.
+- Allow prose-only progress PRs to complete CI with whitespace validation and a secret scan of all fetched Git history.
 
 - Corrected forecast pressure and project allocation indicators for out-of-term projects and missing capacity.
 
