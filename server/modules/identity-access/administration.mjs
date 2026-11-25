@@ -1,3 +1,4 @@
+import {moduleReleased} from '../module-releases.mjs';
 import {sessionEntraGroups} from './middleware.mjs';
 
 const denied = message => Object.assign(new Error(message), {statusCode: 403, code: 'IDENTITY_ADMINISTRATION_REQUIRED'});
@@ -91,6 +92,10 @@ export const synchronizeEntraBinding = async (client, req, {
     throw denied('Identity integration authority is required to change a login binding.');
   }
   await assertSecurityAdministrator(client, req, getPermissions);
+  if (!await moduleReleased(client, req.organizationScope.organizationId, 'entra')) {
+    throw Object.assign(new Error('Entra administration is disabled for this organization and environment.'),
+      {statusCode:403, code:'MODULE_DISABLED'});
+  }
   if (after) {
     await client.query(`insert into identity_provider_links(id,employee_id,provider,provider_subject,status)
       values ('identity-link-'||gen_random_uuid()::text,$1,'entra',$2,'Linked')

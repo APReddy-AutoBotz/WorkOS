@@ -8,25 +8,29 @@ const readFlag = (viteKey: string, serverKey: string) => {
   return ['true', '1', 'yes', 'on'].includes(String(value).trim().toLowerCase());
 };
 
-let teamsDecision: {organizationId: string; enabled: boolean} | undefined;
+export type ReleasedModule = 'teams' | 'entra';
+type ReleaseState = Partial<Record<ReleasedModule,boolean>>;
+let releaseDecision: {organizationId:string; states:ReleaseState} | undefined;
 
-export function applyTeamsRelease(organizationId: string | undefined, enabled: boolean) {
-  teamsDecision = organizationId ? {organizationId, enabled} : undefined;
+export function applyModuleReleases(organizationId:string | undefined, states:ReleaseState) {
+  releaseDecision = organizationId ? {organizationId, states} : undefined;
 }
 
-export function teamsReleasePending() {
+export function moduleReleasePending() {
   const org = getOrganizationScope()?.organizationId;
-  return !isDemoFallbackAllowed() && Boolean(org) && teamsDecision?.organizationId !== org;
+  return !isDemoFallbackAllowed() && Boolean(org) && releaseDecision?.organizationId !== org;
+}
+
+function enabled(module:ReleasedModule) {
+  if (isDemoFallbackAllowed()) return readFlag('VITE_FEATURE_'+module.toUpperCase(),'FEATURE_'+module.toUpperCase());
+  return releaseDecision?.organizationId === getOrganizationScope()?.organizationId && releaseDecision?.states[module] === true;
 }
 
 export const enterpriseFeatureFlags: Record<EnterpriseFeatureFlag, boolean> = {
   leave: readFlag('VITE_FEATURE_LEAVE', 'FEATURE_LEAVE'),
   notifications: readFlag('VITE_FEATURE_NOTIFICATIONS', 'FEATURE_NOTIFICATIONS'),
-  get teams() {
-    if (isDemoFallbackAllowed()) return readFlag('VITE_FEATURE_TEAMS', 'FEATURE_TEAMS');
-    return teamsDecision?.organizationId === getOrganizationScope()?.organizationId && teamsDecision?.enabled === true;
-  },
-  entra: readFlag('VITE_FEATURE_ENTRA', 'FEATURE_ENTRA'),
+  get teams() { return enabled('teams'); },
+  get entra() { return enabled('entra'); },
   planning: readFlag('VITE_FEATURE_PLANNING', 'FEATURE_PLANNING'),
 };
 

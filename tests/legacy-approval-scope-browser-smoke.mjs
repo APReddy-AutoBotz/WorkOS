@@ -80,6 +80,19 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
    await page.goto(origin+'/integrations/teams');
    await page.waitForURL('**/governance/brd-traceability');
+   await page.goto(origin+'/admin/module-releases');
+   await page.getByLabel('Module',{exact:true}).selectOption('entra');
+   await evidence.fill('Synthetic Entra administration handover');
+   await page.getByRole('button',{name:'Enable Entra administration',exact:true}).click();
+   await page.getByRole('link',{name:'Open identity mapping'}).click();
+   await page.getByRole('heading',{name:'Identity Mapping',exact:true}).waitFor();
+   await page.goto(origin+'/admin/module-releases');
+   await page.getByLabel('Module',{exact:true}).selectOption('entra');
+   await evidence.fill('Synthetic rollback of Entra administration');
+   await page.getByRole('button',{name:'Disable Entra administration',exact:true}).click();
+   await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
+   await page.goto(origin+'/integrations/identity');
+   await page.waitForURL('**/governance/brd-traceability');
    console.log('Real approval workspace: invalid participant role displays server refusal with zero writes; corrected delegation saves once and displays acknowledgement.');
   }finally{await browser?.close();await fixtureServer.close();}
  });

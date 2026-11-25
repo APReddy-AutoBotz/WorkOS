@@ -92,12 +92,28 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     result=await save({...profile,entra_object_id:'synthetic-attacker-subject'});
     assert.equal(result.status,403,JSON.stringify(result.body));
     assert.equal((await pool.query('select entra_object_id from employees where id=$1',[employeeId])).rows[0].entra_object_id,null);
+    const mappingPath = '/api/integrations/entra-role-mappings';
+    const releasePath = '/api/organization-setup/module-releases/entra';
+    assert.equal((await request(mappingPath)).body.code,'MODULE_DISABLED');
+    const release = (enabled,expectedRevision) => request(releasePath,{method:'PUT',body:{
+      enabled, expectedRevision, evidence:'Synthetic identity administration review',
+    }});
+    assert.equal((await release(true,0)).status,201);
     result=await request('/api/integrations/identity-links',{method:'POST',identity:identities.reader,body:{employee_id:employeeId,provider_subject:'synthetic-attacker-subject'}});
     assert.equal(result.status,403,JSON.stringify(result.body));
     result=await request('/api/integrations/entra-role-mappings',{method:'POST',identity:identities.reader,body:{group_id:'synthetic-elevation',group_name:'Synthetic group',role_name:'Admin'}});
     assert.equal(result.status,403,JSON.stringify(result.body));
     result=await request('/api/integrations/entra-role-mappings',{method:'POST',identity:identities.manager,body:{group_id:'synthetic-approved',group_name:'Synthetic group',role_name:'Employee'}});
     assert.equal(result.status,200,JSON.stringify(result.body));
+    assert.equal((await release(false,1)).status,201);
+    assert.equal((await request(mappingPath)).body.code,'MODULE_DISABLED');
+    assert.equal((await request('/api/auth/me')).status,200);
+    const blockedBinding = await save({...profile,entra_object_id:'synthetic-disabled-binding'},identities.manager);
+    assert.equal(blockedBinding.status,403);
+    assert.equal(blockedBinding.body.code,'MODULE_DISABLED');
+    assert.equal((await pool.query('select entra_object_id from employees where id=$1',[employeeId])).rows[0].entra_object_id,null);
+    assert.equal((await release(true,2)).status,201);
+
     const importRow={employeeId:profile.employee_id,name:profile.name,email:profile.email,primaryCountryDirectorId:profile.primary_country_director_id};
     result=await request('/api/imports/employees/apply',{method:'POST',identity:identities.reader,body:{fileName:'synthetic.csv',rows:[{...importRow,roles:'Employee'}]}});
     assert.equal(result.status,403,JSON.stringify(result.body));
