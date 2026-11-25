@@ -831,7 +831,7 @@ WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment
 
 ### Governed work approval deadlines
 
-WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Approval reminder and escalation delivery remain open.
+WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Pre-deadline reminders remain open. Mandatory overdue delivery is covered below.
 
 ### Scoped bulk timesheet approval
 
@@ -846,3 +846,9 @@ WOS-RPT-007 and WOS-INV-008. Fixed-fee engagement reconciliation compares pinned
 WOS-RPT-007 and WOS-INV-008. The commercial drafting journey follows registered retainer periods, managed-service periods and managed-service units alongside their full-line credits. The engagement report compares pinned source amounts, current and released lines, exports and confirmations using the source's existing billing permission.
 
 WOS-RPT-007. The portfolio report accepts an eligible date range for registered fixed-fee installments, retainer periods, managed-service units or managed-service periods. The commercial drafting journey exercises the source permissions, signed balances, portfolio controls and audited CSV download.
+
+### Mandatory overdue timesheet notices
+
+WOS-APR-005 and WOS-INT-002. Timed timesheet policies retain an optional escalation recipient. The existing approval browser journey records that choice, and PostgreSQL acceptance rejects adoption when the recipient cannot see all selected workers. Migration 122 records mandatory in-app delivery attempts and acknowledgements. The real-clock approval journey verifies a temporarily unavailable escalation recipient, atomic retry, recipient-only visibility and acknowledgement.
+
+WOS-APR-005. Migration 121 and the overdue worker retain elapsed stage deadlines once, including late decisions between scans. The existing approval browser journey checks premature writes are rejected. Its optional real-clock rehearsal uses a one-minute stage and concurrent discovery calls.

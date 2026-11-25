@@ -31,6 +31,12 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const policy = await adoptStagedPolicy(request, identities, today);
         assert.equal((await request('/api/timesheets/' + legacy.body.id + '/status', { method: 'PATCH', body: { status: 'Approved' } })).status, 200, 'already submitted work stays unadopted legacy');
         const own = await readApprovalOwner(request, identities.manager), get = async (id, identity = identities.manager) => request(base + '/instances/' + id, { identity }), decide = async (v, identity, decision = 'Approved', key = randomUUID(), reason = 'Synthetic staged decision', extra = {}) => request(base + '/instances/' + v.id + '/decisions', { method: 'POST', identity, body: { expectedOwnerKey: identity === identities.manager ? own : await readApprovalOwner(request, identity), expectedSourceToken: v.sourceToken, expectedSequence: v.state.sequence, requestId: key, decision, reason, ...extra } }), header = async (id) => (await pool.query('select * from timesheets where id=$1', [id])).rows[0], counts = async () => (await pool.query('select(select count(*)from work_approval_instances)i,(select count(*)from work_approval_transitions)t,(select count(*)from work_approval_events)e,(select count(*)from work_approval_recipients)r,(select count(*)from work_submission_decisions)d')).rows[0];
+        const wrongRecipient=await request(base+'/policies',{method:'POST',body:{
+            expectedOwnerKey:own,expectedLatestId:policy.id,effectiveFrom:next,reason:'Check recipient worker scope',
+            definition:{...stagedDefinition(identities),stageDueMinutes:90,escalationUserId:identities.first.id},
+        }});
+        assert.equal(wrongRecipient.status,409,JSON.stringify(wrongRecipient.body));
+        assert.equal((await pool.query('select count(*)::int n from work_approval_policy_versions')).rows[0].n,1);
         const canonicalPolicy = stagedDefinition(identities);
         canonicalPolicy.stages[0].userId = 'ABCDEF01-1111-4111-8111-111111111111';
         const badCase = await request(base + '/policies', { method: 'POST', body: { expectedOwnerKey: own, expectedLatestId: policy.id, effectiveFrom: next, definition: canonicalPolicy, reason: 'Synthetic noncanonical account input' } });
