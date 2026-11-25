@@ -135,6 +135,7 @@ const run = async (res, sql, params = []) => {
 };
 const audit = async (client, req, event) => auditEvents.push({client, actor: req.user, event});
 const leaveRouter = createLeaveRouter({
+  requireLeaveRelease:(_req,_res,next)=>next(),
   pool,
   run,
   requireDatabase,

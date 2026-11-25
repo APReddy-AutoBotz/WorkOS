@@ -8,8 +8,7 @@ const readFlag = (viteKey: string, serverKey: string) => {
   return ['true', '1', 'yes', 'on'].includes(String(value).trim().toLowerCase());
 };
 
-export type ReleasedModule = 'teams' | 'entra' | 'planning' | 'notifications';
-type ReleaseState = Partial<Record<ReleasedModule,boolean>>;
+export type ReleaseState = Partial<Record<EnterpriseFeatureFlag,boolean>>;
 let releaseDecision: {organizationId:string; states:ReleaseState} | undefined;
 
 export function applyModuleReleases(organizationId:string | undefined, states:ReleaseState) {
@@ -21,13 +20,13 @@ export function moduleReleasePending() {
   return !isDemoFallbackAllowed() && Boolean(org) && releaseDecision?.organizationId !== org;
 }
 
-function enabled(module:ReleasedModule) {
+function enabled(module:EnterpriseFeatureFlag) {
   if (isDemoFallbackAllowed()) return readFlag('VITE_FEATURE_'+module.toUpperCase(),'FEATURE_'+module.toUpperCase());
   return releaseDecision?.organizationId === getOrganizationScope()?.organizationId && releaseDecision?.states[module] === true;
 }
 
 export const enterpriseFeatureFlags: Record<EnterpriseFeatureFlag, boolean> = {
-  leave: readFlag('VITE_FEATURE_LEAVE', 'FEATURE_LEAVE'),
+  get leave() { return enabled('leave'); },
   get notifications() { return enabled('notifications'); },
   get teams() { return enabled('teams'); },
   get entra() { return enabled('entra'); },

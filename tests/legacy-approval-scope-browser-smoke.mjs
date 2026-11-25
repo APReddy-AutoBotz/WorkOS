@@ -52,48 +52,29 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
    await page.goto(origin+'/integrations/teams');
    await page.waitForURL('**/governance/brd-traceability');
-   await page.goto(origin+'/admin/module-releases');
-   await page.getByLabel('Module',{exact:true}).selectOption('entra');
-   await evidence.fill('Synthetic Entra administration handover');
-   await page.getByRole('button',{name:'Enable Entra administration',exact:true}).click();
-   await page.getByRole('link',{name:'Open identity mapping'}).click();
-   await page.getByRole('heading',{name:'Identity Mapping',exact:true}).waitFor();
-   await page.goto(origin+'/admin/module-releases');
-   await page.getByLabel('Module',{exact:true}).selectOption('entra');
-   await evidence.fill('Synthetic rollback of Entra administration');
-   await page.getByRole('button',{name:'Disable Entra administration',exact:true}).click();
-   await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
-   await page.goto(origin+'/integrations/identity');
-   await page.waitForURL('**/governance/brd-traceability');
-   await page.goto(origin+'/admin/module-releases');
-   await page.getByLabel('Module',{exact:true}).selectOption('planning');
-   await evidence.fill('Synthetic planning review');
-   await page.getByRole('button',{name:'Enable Planning workspace',exact:true}).click();
-   await page.getByRole('link',{name:'Open planning workspace'}).click();
-   await page.getByRole('heading',{name:'Planning Workspace',exact:true}).waitFor();
-   await page.goto(origin+'/admin/module-releases');
-   await page.getByLabel('Module',{exact:true}).selectOption('planning');
-   await evidence.fill('Synthetic planning rollback');
-   await page.getByRole('button',{name:'Disable Planning workspace',exact:true}).click();
-   await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
-   await page.goto(origin+'/planning');
-   await page.waitForURL('**/governance/brd-traceability');
+   for (const [module,label,link,heading,path] of [
+     ['entra','Entra administration','Open identity mapping','Identity Mapping','/integrations/identity'],
+     ['planning','Planning workspace','Open planning workspace','Planning Workspace','/planning'],
+     ['notifications','Notification center','Open notification center','Notifications','/notifications'],
+     ['leave','Leave','Open leave administration','Leave Administration','/leave/admin'],
+   ]) {
+     await page.goto(origin+'/admin/module-releases');
+     await page.getByLabel('Module',{exact:true}).selectOption(module);
+     await evidence.fill('Synthetic activation of '+label);
+     await page.getByRole('button',{name:'Enable '+label,exact:true}).click();
+     await page.getByRole('link',{name:link,exact:true}).click();
+     await page.getByRole('heading',{name:heading,level:1,exact:true}).waitFor();
+     await page.goto(origin+'/admin/module-releases');
+     await page.getByLabel('Module',{exact:true}).selectOption(module);
+     await evidence.fill('Synthetic rollback of '+label);
+     await page.getByRole('button',{name:'Disable '+label,exact:true}).click();
+     await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
+     await page.goto(origin+path);
+     await page.waitForURL('**/governance/brd-traceability');
+   }
    await page.getByRole('link',{name:'Allocation Control',exact:true}).first().click();
    await page.waitForURL('**/allocations');
    await page.getByRole('heading',{name:'Allocation Control',level:1}).waitFor();
-   await page.goto(origin+'/admin/module-releases');
-   await page.getByLabel('Module',{exact:true}).selectOption('notifications');
-   await evidence.fill('Synthetic notification operations review');
-   await page.getByRole('button',{name:'Enable Notification center',exact:true}).click();
-   await page.getByRole('link',{name:'Open notification center'}).click();
-   await page.getByRole('heading',{name:'Notifications',level:1}).waitFor();
-   await page.goto(origin+'/admin/module-releases');
-   await page.getByLabel('Module',{exact:true}).selectOption('notifications');
-   await evidence.fill('Synthetic rollback of notification preferences');
-   await page.getByRole('button',{name:'Disable Notification center',exact:true}).click();
-   await page.getByRole('status').filter({hasText:'Release decision saved.'}).waitFor();
-   await page.goto(origin+'/notifications');
-   await page.waitForURL('**/governance/brd-traceability');
    await page.goto(origin+'/approvals');
    await page.getByLabel('Delegator',{exact:true}).waitFor();
    console.log('Real approval workspace: invalid participant role displays server refusal with zero writes; corrected delegation saves once and displays acknowledgement.');

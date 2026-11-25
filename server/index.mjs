@@ -75,7 +75,7 @@ import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/e
 import {createIdentityAccessMiddleware, readCookie, sessionEntraGroups} from './modules/identity-access/middleware.mjs';
 import {assignEmployeeRoles, assertCredentialTarget, assertSecurityAdministrator, synchronizeEntraBinding} from './modules/identity-access/administration.mjs';
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
-import {moduleReleased} from './modules/module-releases.mjs';
+import {effectiveReleases, moduleReleased} from './modules/module-releases.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
 import {createOrganizationAuditRouter} from './modules/audit/organization-audit-router.mjs';
@@ -1114,7 +1114,8 @@ const notificationProviderForChannel = (channel) => {
 const fetchNotificationRecipient = async (client, recipientEmployeeId) => {
   if (!recipientEmployeeId) return null;
   const result = await client.query(`
-    select e.*, tul.teams_user_id as linked_teams_user_id, tul.teams_upn, tul.teams_tenant_id
+    select e.*, tul.teams_user_id as linked_teams_user_id, tul.teams_upn, tul.teams_tenant_id,
+      to_regclass('module_release_decisions') is not null as release_settings_available
     from employees e
     left join teams_user_links tul on tul.employee_id = e.id and tul.status = 'Linked'
     where e.id = $1 or e.employee_id = $1
@@ -1159,7 +1160,9 @@ const sendNotification = async (client, req, {
   const event = eventResult.rows[0];
 
   const recipient = await fetchNotificationRecipient(client, recipientEmployeeId);
-  const preferencesEnabled = recipient?.id && await moduleReleased(client,recipient.organization_id,'notifications');
+  // On pre-129 schemas the core notice is still delivered with workflow defaults.
+  const releases = recipient?.release_settings_available ? await effectiveReleases(client,recipient.organization_id) : {};
+  const preferencesEnabled = releases.notifications === true;
   const preference = preferencesEnabled
     ? (await client.query('select * from notification_preferences where employee_id = $1 and event_type = $2', [recipient.id, eventType])).rows[0]
     : null;
@@ -1167,7 +1170,7 @@ const sendNotification = async (client, req, {
   if (preference?.in_app) channelSet.add('InApp');
   if (preference?.email) channelSet.add('Email');
   if (preference?.teams) channelSet.add('Teams');
-  if (channelSet.has('Teams') && !await moduleReleased(client,recipient?.organization_id,'teams')) {
+  if (!releases.teams) {
     channelSet.delete('Teams');
   }
   const deliveryResults = [];
@@ -3387,7 +3390,17 @@ const ensureLeaveBalanceForRequest = async (client, employee, leaveTypeId, year,
   return { leaveType, policy, balance };
 };
 
+const requireModuleRelease = module => async (req,res,next) => {
+  try {
+    if (await moduleReleased(pool,req.organizationScope.organizationId,module)) return next();
+    return res.status(403).json({error:`${module} is disabled for this organization and environment`,code:'MODULE_DISABLED'});
+  } catch (error) {
+    return next(error);
+  }
+};
+
 app.use('/api', createLeaveRouter({
+  requireLeaveRelease:requireModuleRelease('leave'),
   pool,
   run,
   requireDatabase,
@@ -3524,6 +3537,10 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     }
 
     if (approval.entity_type === 'LeaveRequest') {
+      if (!await moduleReleased(client,req.organizationScope.organizationId,'leave')) {
+        await client.query('rollback');
+        return res.status(403).json({error:'Leave is disabled for this organization and environment',code:'MODULE_DISABLED'});
+      }
       if (!req.user.permissions.includes('leave.approve')) { await client.query('rollback'); res.status(403).json({error:'Insufficient permission privileges'}); return; }
       await assertLegacyLeaveApproval(client,approval.entity_id);
       const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [approval.entity_id])).rows[0];
@@ -3607,15 +3624,6 @@ app.get('/api/reports/approval-sla', requireDatabase, requireAuth, requirePermis
     res.status(500).json({ error: 'Approval SLA report failed' });
   }
 });
-
-const requireModuleRelease = module => async (req,res,next) => {
-  try {
-    if (await moduleReleased(pool,req.organizationScope.organizationId,module)) return next();
-    return res.status(403).json({error:`${module} is disabled for this organization and environment`,code:'MODULE_DISABLED'});
-  } catch (error) {
-    return next(error);
-  }
-};
 
 const notificationRouter = createNotificationRouter({
   requireNotificationRelease:requireModuleRelease('notifications'),
@@ -6490,7 +6498,7 @@ registerOrganizationSetupRoutes({
 const workHistoryRouter=createWorkHistoryRouter({pool,requireDatabase,requireAuth,requirePermission});
 app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
-app.use('/api/v1/work-approvals',createWorkApprovalRouter({pool,requireDatabase,requireAuth,requirePermission,...workApprovalOptions}));
+app.use('/api/v1/work-approvals',createWorkApprovalRouter({requireLeaveRelease:requireModuleRelease('leave'),pool,requireDatabase,requireAuth,requirePermission,...workApprovalOptions}));
 app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,getSetting,audit,recordAllocationChangeApproval}));
 app.use('/api/v1/native-forecast',createNativeForecastRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,audit}));

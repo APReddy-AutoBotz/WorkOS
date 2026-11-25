@@ -86,7 +86,7 @@ const FeatureRoute = ({
   flag: EnterpriseFeatureFlag;
   roles: readonly UserRole[];
 }) => {
-  if ((flag !== 'leave') && moduleReleasePending()) return <p role="status">Loading module release settings…</p>;
+  if (moduleReleasePending()) return <p role="status">Loading module release settings…</p>;
   if (!isEnterpriseFeatureEnabled(flag)) {
     return <Navigate to="/governance/brd-traceability" replace />;
   }

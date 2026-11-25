@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { applyPersistedTerminology, applyRuntimeBrand } from './productConfig';
-import {applyModuleReleases} from './featureFlags';
+import {applyModuleReleases, type ReleaseState} from './featureFlags';
 import { api, getOrganizationScope, getToken } from '../services/apiClient';
 import { authService } from '../services/authService';
 import { getEffectivePermissions } from '../services/permissions';
 
-type TerminologyResponse = { releases?: {teams?: boolean; entra?: boolean; planning?: boolean; notifications?: boolean}; terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
+type TerminologyResponse = { releases?: ReleaseState; terms?: Record<string, unknown>; brand?: Parameters<typeof applyRuntimeBrand>[0] };
 const runtimeContext = () => {
   const user = authService.getCurrentUser();
   return JSON.stringify([user?.id, user?.employeeId, user?.role, user?.permissionRole,
