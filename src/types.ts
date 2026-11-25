@@ -302,6 +302,7 @@ export interface LeaveBalance {
 }
 
 export interface LeaveRequest {
+  approvalInstanceId?: string;
   id: string;
   employeeId: string;
   employeeName?: string;

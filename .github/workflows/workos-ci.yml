@@ -114,7 +114,9 @@ jobs:
         run: npm run test:legacy-timesheet-delegation
 
       - name: Verify calendar leave intake and decisions in PostgreSQL
-        run: npm run test:calendar-leave-postgres
+        run: |
+          npm run test:calendar-leave-postgres
+          npm run test:leave-approval-postgres
 
       - name: Native percentage forecast PostgreSQL acceptance
         run: npm run test:native-forecast-postgres
@@ -242,7 +244,9 @@ jobs:
         run: npm run test:legacy-approval-browser
 
       - name: Verify calendar leave browser journey
-        run: npm run test:calendar-leave-journey
+        run: |
+          npm run test:calendar-leave-journey
+          npm run test:leave-approval-journey
 
       - name: Native percentage forecast planner browser acceptance
         run: npm run test:native-forecast-journey

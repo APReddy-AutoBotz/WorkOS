@@ -864,3 +864,7 @@ WOS-APR-005 and WOS-INT-002. A versioned timesheet approval policy can remind th
 ### Assignment creation approval
 
 WOS-RES-008 extends the existing assignment policy with optional creation approval. Migration 127 preserves existing proposals. The assignment creation PostgreSQL and browser journeys cover the populated upgrade, direct-write rejection, named decisions and atomic creation of the first assignment version.
+
+### Configured leave stages
+
+WOS-APR-001, WOS-APR-002, WOS-APR-003, WOS-APR-006 and WOS-INT-002. Migration 128 pins each governed leave revision to an effective policy. The leave approval database and browser journeys cover intermediate and final decisions, an edited source, recipient acknowledgements, leave balances and restoration of availability after cancellation. Timed leave reminders and delegation are tracked separately.
