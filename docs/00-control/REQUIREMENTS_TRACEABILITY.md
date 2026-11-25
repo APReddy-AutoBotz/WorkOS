@@ -868,3 +868,7 @@ WOS-RES-008 extends the existing assignment policy with optional creation approv
 ### Configured leave stages
 
 WOS-APR-001, WOS-APR-002, WOS-APR-003, WOS-APR-006 and WOS-INT-002. Migration 128 pins each governed leave revision to an effective policy. The leave approval database and browser journeys cover intermediate and final decisions, an edited source, recipient acknowledgements, leave balances and restoration of availability after cancellation. Timed leave reminders and delegation are tracked separately.
+
+### WOS-ORG-007 release decisions
+
+Migration 129 and the organization setup API retain the approving account, deployment environment, evidence, UTC instant, state and revision for Teams release decisions. The PostgreSQL journey covers permission and scope checks, concurrent-version protection, replay and organization-scoped audit. Runtime enforcement and the administrator screen are pending.

@@ -935,3 +935,7 @@ Enable creation approval in the scoped assignment policy and select the workers 
 ### Configured leave approval
 
 In Approvals, adopt an effective leave policy for the selected workers and name the stage reviewers. Reviewers open the current request revision. Only the final approval changes the leave balance and availability. An edit restarts review on a new revision. For rollback, retain migration 128 and the application version capable of resolving pending stages. Disable prospective routing using a new policy with an empty worker selection.
+
+### Optional module release history
+
+The API records Teams release decisions for the authenticated organization. Set WORKOS_RELEASE_ENVIRONMENT to a stable lowercase environment name when staging and production use the same application mode. It defaults to APP_MODE. The releases.manage permission is assigned to Admin by migration 129. Preserve decision and audit rows on rollback. The staged implementation still requires runtime enforcement before buyer activation.

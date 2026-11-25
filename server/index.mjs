@@ -253,6 +253,7 @@ const permissionDefinitions = [
   [deploymentAuditPermissionKey, 'Admin', 'Deployment Audit View', true],
   [organizationAuditPermissionKey, 'Admin', 'Organization Audit View', true],
   ['settings.manage', 'Admin', 'Governance Settings', false],
+  ['releases.manage', 'Admin', 'Manage module releases', true],
   ['periods.financial_reopen','Admin','Reopen Financial Periods',false],
   ['permissions.manage', 'Admin', 'Permission Settings', true],
 ];

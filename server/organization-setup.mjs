@@ -1,3 +1,4 @@
+import {registerModuleReleaseRoutes} from './modules/module-releases.mjs';
 import { registerFinancialPeriodRoutes } from './modules/financial-periods.mjs';
 import {asyncHandler} from './api/async-handler.mjs';
 import {lockCommercialLifecycle} from './modules/commercial-drafting/project-mutation.mjs';
@@ -173,6 +174,8 @@ export const registerOrganizationSetupRoutes = ({
       next(error);
     }
   }));
+
+  registerModuleReleaseRoutes(router, {pool, requirePermission, audit});
 
   router.get('/context', requirePermission('settings.manage'), asyncHandler(async (req, res) => {
     const { organizationId, legalEntityId } = req.organizationScope;
