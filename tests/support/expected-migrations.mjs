@@ -151,6 +151,7 @@ const expected = [
   '124_wos06_adjustment_eligibility',
   '125_wos06_adjustment_batch_lineage',
   '126_wos05_stage_reminders',
+  '127_wos05_assignment_creation_approvals',
 ];
 
 export function expectedMigrationsFrom(first) {

@@ -228,6 +228,8 @@
     "test:assignment-approval": "node tests/assignment-approval-smoke.mjs",
     "test:assignment-approval-service": "tsx tests/assignment-approval-service-smoke.mjs",
     "test:assignment-approval-postgres": "node tests/assignment-approval-postgres-smoke.mjs",
+    "test:assignment-creation-postgres": "node tests/assignment-creation-postgres-smoke.mjs",
+    "test:assignment-creation-journey": "node tests/assignment-creation-journey-browser-smoke.mjs",
     "test:assignment-approval-journey": "node tests/assignment-approval-journey-browser-smoke.mjs",
     "test:workforce-directory": "node tests/workforce-directory-smoke.mjs && node --import tsx tests/workforce-directory-service-smoke.mjs",
     "test:workforce-directory-postgres": "node tests/workforce-directory-postgres-smoke.mjs",
