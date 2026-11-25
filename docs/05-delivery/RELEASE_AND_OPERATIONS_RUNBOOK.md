@@ -37,6 +37,8 @@ test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainer
 
 The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. The checksummed npm-third-party-notices.json preserves installed npm notice files, including vendored notices and root README licence sections. Review any packagesWithoutRootNotice entries and separately reconcile frontend assets, base-image components and source-distribution terms before buyer handover. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
 
+The frontend build records the installed Tailwind versions and their licence texts in `dist/stylesheet-notices.txt`. Release packaging extracts that file from the tested image and includes it in `SHA256SUMS` alongside the runtime npm notices.
+
 ## Maintaining a standing margin threshold
 
 In Commercial Amendments select the managed-service engagement and a newer contract version adopted by its parent. Enter the threshold, effective date, reason and approval reference. Review the before and after terms, confirm, and verify the saved version in protected history. Clear an existing threshold to disable it through a subsequent amendment. Roll back the setting with a later effective amendment so the prior approval remains auditable. No schema migration is required.
