@@ -34,6 +34,18 @@ export async function verifyMonthEndDelivery(databaseUrl,engagementId,identities
     }
     const setScope=active=>pool.query('update user_organization_scopes set active=$2 where user_id=$1 and legal_entity_id=$3',
       [reader.id,active,legalEntityId]);
+    // The owner can still receive notices while the separate named finance role loses inbox access.
+    const financeId = identities.first.id;
+    await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin'",[financeId]);
+    const namedRecipients = async () => (await pool.query(
+      "select reason from engagement_risk_recipients('managed_service',$1,$2,$3,$4,'Employee',$5,'Admin') order by reason",
+      [...scope,reader.id,financeId])).rows.map(row=>row.reason);
+    const required = ['commercial_manager','engagement_owner','finance_billing_owner'];
+    assert.deepEqual(await namedRecipients(),required);
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='employees.view'");
+    assert.deepEqual(await namedRecipients(),[]);
+    await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='employees.view'");
+    assert.deepEqual(await namedRecipients(),required);
     await setScope(false);
     await processMonthEndMarginAlerts(pool);
     assert.deepEqual((await pool.query('select failure,attempts from service_margin_risk_dispatch')).rows,
