@@ -5,7 +5,7 @@ import {
   reconciliationCsv,
   portfolioReconciliationCsv,
 } from './reconciliation-csv.mjs';
-import { readFixedFeeBillingBalances, readFixedFeeBillingControls } from './fixed-fee-balances.mjs';
+import { readChargeBalances, readChargeControls } from './charge-reconciliation.mjs';
 import { readBillingReconciliation, readPortfolioReconciliation } from './reconciliation.mjs';
 import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { Router } from 'express';
@@ -427,13 +427,24 @@ export const createInvoiceDraftRouter = (o) => {
     };
     return { ...value, reportToken: reconciliationToken(reportScope(r), value) };
   };
-  router.get('/reconciliation/fixed-fee', handle(false, async (c,r) => {
-    const {engagementId,controls} = parse(z.object({engagementId:id,controls:z.literal('1').optional()}).strict(),r.query);
-    await authorize(c,r,'view',['commercial.invoice_export.view','commercial.fixed_fee_eligibility.issue']);
-    const balances = await readFixedFeeBillingBalances(c,scope(r),engagementId);
-    if (!balances) throw fail(404,'BILLING_REPORT_SOURCE','Scoped fixed-fee engagement unavailable.');
-    return {...await envelope(c,r), engagementId, balances, ...(controls ? {controls:await readFixedFeeBillingControls(c,scope(r),engagementId)} : {})};
-  }));
+  const chargeReports = [
+    ['fixed-fee','FIXED_FEE_INSTALLMENT','fixed_fee'],
+    ['retainer','RETAINER_PERIOD','retainer'],
+    ['service-units','MANAGED_SERVICE_UNIT','managed_service'],
+    ['service-periods','MANAGED_SERVICE_PERIOD','managed_service'],
+  ];
+  for (const [path,source,model] of chargeReports) {
+    router.get('/reconciliation/'+path, handle(false, async (c,r) => {
+      const {engagementId,controls} = parse(z.object({engagementId:id,controls:z.literal('1').optional()}).strict(),r.query);
+      await authorize(c,r,'view',['commercial.invoice_export.view',contractChargeGrant(source)]);
+      const rows = await readChargeBalances(c,scope(r),engagementId,source,model);
+      if (!rows) throw fail(404,'BILLING_REPORT_SOURCE','Scoped billing engagement unavailable.');
+      const balances = source==='FIXED_FEE_INSTALLMENT'
+        ? rows.map(({charges,...row})=>({...row,installments:charges})) : rows;
+      return {...await envelope(c,r),engagementId,balances,
+        ...(controls ? {controls:await readChargeControls(c,scope(r),engagementId,source)} : {})};
+    }));
+  }
   const portfolioFilters = {
     start: z.string().date(),
     end: z.string().date(),
