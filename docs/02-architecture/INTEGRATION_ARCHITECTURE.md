@@ -74,6 +74,12 @@ The export command revalidates batch state, scope, control totals, idempotency a
 
 A retry with the same idempotency key and payload identity cannot create a second accepted export or duplicate downstream lines. `Exported` and `Billed/Confirmed` batches may support idempotent artifact retrieval or downstream-status confirmation, but they cannot initiate another delivery or transition to `Exported` again.
 
+#### Operating the optional HTTPS finance provider (WOS-INV-006, WOS-INV-007)
+
+Set `FINANCE_EXPORT_ENDPOINT` to the buyer's fixed HTTPS receiver and inject `FINANCE_EXPORT_TOKEN` from its secret store. Grant `commercial.invoice_export.deliver` to authorized finance staff who already hold scoped export access. The receiver must durably deduplicate the `Idempotency-Key` before applying the delivery. Each request includes the operation and batch IDs, schema version, base64 payload, SHA-256, line count, currency and decimal-string total. Return a successful HTTP response with JSON status `accepted` and echo all identity and control fields, omitting the payload. A receiver that permanently refuses this delivery can return the same exact receipt with status `permanently_rejected`. It must durably prevent later acceptance for that key. This receipt leaves the batch approved and permits authorized pre-export cancellation. A timeout, HTTP error or mismatched receipt remains unconfirmed and keeps cancellation blocked.
+
+Reserve an approved batch with `POST /api/v1/invoice-csv/provider-exports` using the existing export command. Keep the returned export ID. Submit `POST /api/v1/invoice-csv/provider-exports/{id}/deliver` with the current owner key. An unconfirmed attempt retains approval and blocks competing CSV export and cancellation. Reuse the reservation to reconcile or retry against the original destination. Provider acceptance retains the export artifact. Billing confirmation remains a subsequent action. Before disabling the integration or changing destinations, reconcile all outstanding reservations against the original receiver.
+
 ### CSV artifact acceptance
 
 CSV export does not depend on a future external provider. An `Approved` batch becomes `Exported` only after WorkOS atomically creates and records an immutable, versioned CSV artifact, validates matching control totals and makes that exact artifact available for controlled retrieval.
