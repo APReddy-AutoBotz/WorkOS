@@ -4,7 +4,8 @@ import {commercialDraftingService,isCommercialDraftingContextCurrent,type Commer
 
 type Policy = Awaited<ReturnType<typeof commercialDraftingService.riskNoticePolicy>>['latest'];
 
-export function FixedFeeNoticePolicy({context,engagement,today}:{context:CommercialDraftingContext;engagement:string;today:string}) {
+export function EngagementNoticePolicy({context,engagement,today,model='fixed_fee'}:{context:CommercialDraftingContext;engagement:string;today:string;model?:'fixed_fee'|'managed_service'}) {
+  const recipients=model==='fixed_fee'?'Budget warning recipients':'Monthly margin alert recipients';
   const [policy,setPolicy]=useState<Policy|undefined>(undefined);
   const [delivery,setDelivery]=useState<Awaited<ReturnType<typeof commercialDraftingService.riskDeliveryStatus>>|null>(null);
   const [busy,setBusy]=useState(false);
@@ -12,7 +13,7 @@ export function FixedFeeNoticePolicy({context,engagement,today}:{context:Commerc
   async function read() {
     setBusy(true);setMessage('');setPolicy(undefined);
     try {
-      const result=await commercialDraftingService.riskNoticePolicy(engagement,context);
+      const result=await commercialDraftingService.riskNoticePolicy(engagement,context,undefined,model);
       if (isCommercialDraftingContextCurrent(context)) setPolicy(result.latest);
     } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not load the engagement notice policy.');}
     finally {setBusy(false);}
@@ -20,7 +21,7 @@ export function FixedFeeNoticePolicy({context,engagement,today}:{context:Commerc
   async function inspectDelivery() {
     setBusy(true);setMessage('');setDelivery(null);
     try {
-      const result=await commercialDraftingService.riskDeliveryStatus(engagement,context);
+      const result=await commercialDraftingService.riskDeliveryStatus(engagement,context,model);
       if (isCommercialDraftingContextCurrent(context)) setDelivery(result);
     } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not load warning delivery status.');}
     finally {setBusy(false);}
@@ -36,19 +37,19 @@ export function FixedFeeNoticePolicy({context,engagement,today}:{context:Commerc
         expectedVersion:policy?.version??0,effectiveFrom:text('date'),locale:text('locale'),title:text('title'),
         body:text('body'),reason:text('reason'),manager:{userId:text('manager'),role:text('managerRole')},
         finance:{userId:text('finance'),role:text('financeRole')}
-      });
+      },model);
       if (isCommercialDraftingContextCurrent(context)) {setPolicy(result.latest);setMessage('Notice policy saved.');}
     } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not save. Check the recipient accounts, held roles and effective date, then reload the policy.');}
     finally {setBusy(false);}
   }
-  return <section aria-label="Budget warning recipients">
-    <button type="button" disabled={busy} onClick={()=>void read()}>Review budget warning recipients</button>
+  return <section aria-label={recipients}>
+    <button type="button" disabled={busy} onClick={()=>void read()}>{model==='fixed_fee'?'Review budget warning recipients':'Review monthly margin alert recipients'}</button>
     <button type="button" disabled={busy} onClick={()=>void inspectDelivery()}>Check warning deliveries</button>
     {delivery && <div aria-label="Warning delivery status">
       {delivery.scan?.scanFailure && <p>Budget evaluation needs a retry.</p>}
-      {delivery.events.length===0 && <p>No recorded budget alerts.</p>}
-      {delivery.events.map(row=><div key={row.metric+row.sourceAmendmentId}><p>
-        {row.metric==='effort'?'Delivery hours':'Labor cost'} · {row.through} · {row.deliveredAt?'Delivered '+row.deliveredAt:
+      {delivery.events.length===0 && <p>No recorded alerts.</p>}
+      {delivery.events.map(row=><div key={row.marginVersionId??row.metric+row.sourceAmendmentId}><p>
+        {row.metric==='margin'?'Monthly margin':row.metric==='effort'?'Delivery hours':'Labor cost'} · {row.through} · {row.deliveredAt?'Delivered '+row.deliveredAt:
           row.failure==='RECIPIENTS_UNAVAILABLE'?'Check recipient access':row.failure==='POLICY_UNAVAILABLE'?'Configure a notice policy':
           row.failure?'Delivery needs a retry':'Pending'}{row.nextAttempt && ' · Next attempt '+row.nextAttempt}
       </p>{row.history.length>0 && <details><summary>Recent delivery attempts ({row.attempts} total)</summary>
@@ -57,7 +58,7 @@ export function FixedFeeNoticePolicy({context,engagement,today}:{context:Commerc
       </details>}</div>)}
     </div>}
     {policy!==undefined && <form key={policy?.id??'new'} onSubmit={save}><fieldset disabled={busy}>
-      <legend>{policy?'Notice policy version '+policy.version+' · Effective '+policy.effectiveFrom:'Configure budget warning recipients'}</legend>
+      <legend>{policy?'Notice policy version '+policy.version+' · Effective '+policy.effectiveFrom:'Configure '+recipients.toLowerCase()}</legend>
       <RiskNoticePolicyFields policy={policy} today={today}/>
       <button>Save notice policy</button>
     </fieldset></form>}

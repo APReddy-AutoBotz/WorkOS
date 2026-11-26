@@ -90,6 +90,9 @@ export const createInvoiceDraftRouter = (o) => {
     } catch (e) {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
+      else if (e.code === 'IPD01') res.status(409).json({
+        code:'INVOICE_PROVIDER_PENDING',error:'Reconcile the pending provider delivery before cancellation.',
+      });
       else if (['IDR01', 'IDR02', 'IDR03', 'IBA02', '23505', '23514', '40001', '40P01'].includes(e.code))
         res.status(e.code === 'IDR01' ? 403 : 409).json({
           code: e.code === 'IDR01' ? 'INVOICE_DRAFT_AUTHORITY' : 'INVOICE_DRAFT_CONFLICT',

@@ -1,3 +1,4 @@
+import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
 import {verifyRiskDelivery} from './support/fixed-fee-risk-delivery-journey.mjs';
 import {verifyRiskNoticePolicy} from './support/fixed-fee-risk-policy-journey.mjs';
 import {budgetWarningStatus} from '../server/modules/commercial-drafting/fixed-fee-risk.mjs';
@@ -65,7 +66,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies','108_wos06_fixed_fee_risk_delivery','109_wos06_risk_delivery_attempt_history','110_wos06_po_commitment_balance_evidence','111_wos06_po_risk_engagement_assignments','112_wos06_purchase_order_risk_events','113_wos06_retainer_risk_routing']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('099_wos06_fixed_fee_work_costs'));
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
