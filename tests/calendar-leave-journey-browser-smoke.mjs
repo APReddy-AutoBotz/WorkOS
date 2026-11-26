@@ -23,6 +23,21 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercial
  await pool.query("insert into leave_requests(id,employee_id,leave_type_id,start_date,end_date,total_days,status,reason)values('synthetic-browser-legacy-ambiguous',$1,'leave-type-annual',$2,$3,0.5,'Approved','Synthetic existing aggregate source fixture')",[f.ownerId,today,shiftCapacityDate(today,1)]);const unknown=await ownPeriod();assert.equal(unknown.status,'unavailable');assert(unknown.reasonCodes.includes('LEGACY_ABSENCE_ALLOCATION_UNAVAILABLE'));
  // A server-accepted old-owner request must not repopulate the cleared form/list.
  await worker.getByRole('button',{name:'My calendar leave',exact:true}).click();const later=shiftCapacityDate(today,2);await worker.getByLabel('Start',{exact:true}).fill(later);await worker.getByLabel('End',{exact:true}).fill(later);await worker.getByLabel('Reason',{exact:true}).fill('Synthetic late accepted leave');quote=await calculate();assert.equal(quote.totalDaysExact,'1');const blocker=await pool.connect();let open=false;try{await blocker.query('begin');open=true;await blocker.query('select 1 from employees where id=$1 for update',[f.ownerId]);const sent=worker.waitForRequest(r=>new URL(r.url()).pathname==='/api/leave/requests'&&r.method()==='POST');pending=reply(worker,'/api/leave/requests');await worker.getByRole('button',{name:'Submit Request',exact:true}).click();await sent;assert.equal(await worker.getByLabel('Reason',{exact:true}).isDisabled(),true);await worker.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));await panel.getByText('Access, scope or inputs changed. Calculate leave dates again.',{exact:true}).waitFor();await worker.getByLabel('Reason',{exact:true}).fill('Synthetic new unsaved draft after scope change');await blocker.query('commit');open=false;response=await pending;assert.equal(response.status(),200,await response.text());assert.equal(await panel.getByRole('table').count(),0);assert.equal(await worker.getByLabel('Reason',{exact:true}).inputValue(),'Synthetic new unsaved draft after scope change');assert.equal(await worker.getByText('Leave request submitted for approval.',{exact:true}).count(),0);assert.equal((await pool.query("select count(*)::int n from leave_requests where employee_id=$1 and start_date=$2 and reason='Synthetic late accepted leave'",[f.ownerId,later])).rows[0].n,1);}finally{if(open)await blocker.query('rollback');blocker.release();}
+ const lateRequest = await response.json();
+ await manager.getByRole('button',{name:'Review calendar leave',exact:true}).click();
+ const reject = manager.getByTitle('Reject',{exact:true});
+ manager.once('dialog', dialog => dialog.dismiss());
+ await reject.click();
+ assert.equal((await pool.query('select status from leave_requests where id=$1',[lateRequest.id])).rows[0].status,'Submitted');
+ const reviewComment = 'Please submit the corrected leave dates.';
+ manager.once('dialog', dialog => dialog.accept(reviewComment));
+ pending = reply(manager,'/api/leave/requests/'+lateRequest.id+'/status','PATCH');
+ await reject.click();
+ response = await pending;
+ assert.equal(response.status(),200,await response.text());
+ assert.deepEqual((await pool.query('select status,comments from leave_requests where id=$1',[lateRequest.id])).rows[0],{status:'Rejected',comments:reviewComment});
+ await worker.reload();
+ await worker.getByRole('row').filter({hasText:'Rejected'}).getByText(reviewComment,{exact:true}).waitFor();
  assert.deepEqual(await protectedSources(),beforeWork);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);for(const c of contexts)await c.close();
  }finally{await browser?.close();await fixtureServer.close();}
  });});

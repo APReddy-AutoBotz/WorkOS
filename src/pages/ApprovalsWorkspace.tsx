@@ -87,7 +87,10 @@ const ApprovalTable = ({
               <td className="py-3 pr-4 font-bold text-heading">{record.subjectEmployeeName || record.subjectEmployeeId || '-'}</td>
               <td className="py-3 pr-4 text-body">{formatDateTime(record.createdAt)}</td>
               <td className="py-3 pr-4 text-body">{formatDateTime(record.dueAt)}</td>
-              <td className="py-3 pr-4"><Badge variant={statusVariant(record.status)}>{record.status}</Badge></td>
+              <td className="py-3 pr-4">
+                <Badge variant={statusVariant(record.status)}>{record.status}</Badge>
+                {record.status === 'Rejected' && record.comments && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-body">{record.comments}</p>}
+              </td>
               {onDecide && (
                 <td className="py-3 text-right">
                   {record.status === 'Pending' && (record.entityType !== 'LeaveRequest' || isEnterpriseFeatureEnabled('leave')) && !leaveRequest?.approvalInstanceId && (
@@ -208,9 +211,14 @@ export const ApprovalsWorkspace = () => {
   }, [pending]);
 
   const decide = async (record: ApprovalRecord, status: 'Approved' | 'Rejected') => {
-    const comments = status === 'Rejected' ? 'Rejected from shared approval workspace.' : undefined;
+    const reason = status === 'Rejected' ? window.prompt('Enter the reason for rejecting this approval.') : undefined;
+    if (reason === null) return;
+    if (reason !== undefined && !reason.trim()) {
+      setNotice('Enter a rejection reason before submitting the decision.');
+      return;
+    }
     try {
-      await approvalService.decide(record.id, status, comments);
+      await approvalService.decide(record.id, status, reason?.trim());
       setNotice(`${status} ${record.entityType} approval.`);
       await refresh();
     } catch (error) {
