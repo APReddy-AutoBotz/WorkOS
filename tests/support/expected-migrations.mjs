@@ -147,6 +147,7 @@ const expected = [
   '120_wos05_approval_escalation_recipient',
   '121_wos05_overdue_work_stages',
   '122_wos05_overdue_delivery',
+  '130_wos07_risk_recipient_inbox_access',
 ];
 
 export function expectedMigrationsFrom(first) {

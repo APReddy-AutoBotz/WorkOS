@@ -562,7 +562,7 @@ Production Compose wiring for WOS-IAM-008 is checked with a fractional session l
 
 WOS-IAM-001 and WOS-NFR-SEC-001/002/013: shared auth throttle migration 057c, API middleware and `test:persistent-auth-throttle` verify durable replica budgets and safe storage failure.
 
-The production frontend build verifies WOS-ORG-005 document branding in `tests/document-metadata-smoke.mjs` and exercises the compiled login route in `tests/production-frontend-browser.mjs`. Build output checks cover default and configured metadata and a server-only environment marker.
+The production frontend build verifies WOS-ORG-005 document branding in `tests/document-metadata-smoke.mjs` and exercises the compiled login route in `tests/production-frontend-browser.mjs`. Build output checks cover default and configured metadata and a server-only environment marker. The compiled login check verifies that the deployment favicon survives runtime branding initialization.
 
 
 Notification diagnostics: WOS-IAM-005/010, CORE-003, INT-002/004, NFR-SEC-004/008/013 and PRV-001 map to scoped delivery SQL, the typed diagnostic projection, new notification writes, historical integration/audit readers and real API/browser negative tests. See [the task](../tasks/WOS-05-NOTIFICATION-DIAGNOSTIC-BOUNDARY.md). Broader notification policy/retry and deployment-wide support access remain separate.
@@ -822,7 +822,7 @@ WOS-COM-009 and WOS-RPT-004. The commercial drafting PostgreSQL/browser journey 
 
 WOS-COM-009, WOS-RPT-004, WOS-INT-002 and WOS-INT-005. Migration 113 retains explicit assignments, observed quantities, notice policies, attempts and acknowledgements. The retainer PostgreSQL journey verifies concurrent overconsumption detection. The commercial browser journey exercises expiry before first use, a shared version, duplicate roles, missing assignments, retry and access revocation.
 
-WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment and migration 115 for managed-service recipient-policy authority. The existing service margin API journey exercises policy authorization, current recipients, replay and immutable history. Migration 116 retains month-end breaches and enforces the complete recipient set on dispatch. The existing service-effort acceptance exercises failed delivery, concurrent replay, current-scope denial and recipient acknowledgement through the inbox.
+WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment and migration 115 for managed-service recipient-policy authority. The existing service margin API journey exercises policy authorization, current recipients, replay and immutable history. Migration 116 retains month-end breaches and enforces the complete recipient set on dispatch. The existing service-effort acceptance exercises failed delivery, concurrent replay, current-scope denial and recipient acknowledgement through the inbox. Migration 130 also requires the configured manager and finance roles to have governed inbox access before accepting the recipient set.
 
 ### Governed work approval deadlines
 
