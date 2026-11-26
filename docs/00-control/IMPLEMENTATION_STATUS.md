@@ -19,6 +19,10 @@ The product owner confirmed on 24 November 2026 that the pilot buyer is awaiting
 
 The buyer handover template contains 44 unchecked items across eight areas. Record buyer decisions against a named release and artifact before declaring handover complete. [Release criteria](../04-quality/RELEASE_ACCEPTANCE_CRITERIA.md) · [Buyer checklist](../05-delivery/BUYER_HANDOVER_CHECKLIST.md)
 
+## Delivery acceleration
+
+The WOS-OPS-007 candidate scopes application validation for progress-only PRs. The previous Gitleaks action scanned a PR commit range on pull requests. Its green PR checks establish evidence for that range only. The candidate explicitly scans all fetched refs, including merge changes. Buyer acceptance and release evidence still use the full release path.
+
 ## Utilization evidence
 
 Forecast pressure and project allocation indicators now use the same dated eligible workforce and project population. A checkpoint without capacity cannot generate a hiring assessment.

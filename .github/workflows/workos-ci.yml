@@ -15,8 +15,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate application, migrations, and container
+  scope:
+    name: Check documentation scope
+    runs-on: ubuntu-24.04
+    outputs:
+      prose: ${{ steps.scope.outputs.prose }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - id: scope
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Compare the tested merge tree to its actual base parent.
+          changes=$(git diff --no-renames --name-status HEAD^1 HEAD)
+          [[ -n "$changes" ]] || exit 0
+          while IFS= read -r change; do
+            case "$change" in
+              $'M\tCHANGELOG.md'|$'M\tdocs/00-control/IMPLEMENTATION_STATUS.md'|$'M\tdocs/05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md') ;;
+              *) exit 0 ;;
+            esac
+          done <<< "$changes"
+          summary=$(git diff --summary HEAD^1 HEAD)
+          [[ -z "$summary" ]] || exit 0
+          git diff --check HEAD^1 HEAD
+          echo "prose=true" >> "$GITHUB_OUTPUT"
+
+  application:
+    name: Run application and deployment checks
+    needs: scope
+    if: needs.scope.outputs.prose != 'true'
     # The locked Playwright browser registry supports Ubuntu 24.04.
     runs-on: ubuntu-24.04
     permissions:
@@ -194,7 +227,11 @@ jobs:
         run: npm run test:resource-demand-postgres
 
       - name: Install Chromium for synthetic browser checks
-        run: npx playwright install --with-deps chromium
+        run: |
+          npx --no-install playwright install chromium
+          if ! node --input-type=module -e "import {chromium} from 'playwright'; const browser = await chromium.launch(); await browser.close()"; then
+            npx --no-install playwright install-deps chromium
+          fi
 
       - name: Verify acknowledged settings save and load recovery
         run: npm run test:settings-save-outcomes-browser
@@ -322,20 +359,23 @@ jobs:
             fi
             sleep 1
           done
-          npm run test:import-history-browser
-          npm run test:project-import-ui-browser
-          npm run test:scoped-audit-browser
-          npm run test:organization-audit-browser
-          npm run test:deployment-audit-browser
-          npm run test:utilization-overview-browser
-          npm run test:planned-utilization-browser
-          npm run test:actual-utilization-browser
-          npm run test:forecast-utilization-browser
-          npm run test:organization-profile-browser
-          npm run test:terminology-configuration-browser
-          npm run test:working-calendar-browser
-          npm run test:commercial-drafting-browser
-          npm run test:client-profiles-browser
+          # Each browser owns its session. The shared fixture server serves static test pages.
+          xargs -n 1 -P 2 npm run <<'BROWSER_JOURNEYS'
+          test:import-history-browser
+          test:project-import-ui-browser
+          test:scoped-audit-browser
+          test:organization-audit-browser
+          test:deployment-audit-browser
+          test:utilization-overview-browser
+          test:planned-utilization-browser
+          test:actual-utilization-browser
+          test:forecast-utilization-browser
+          test:organization-profile-browser
+          test:terminology-configuration-browser
+          test:working-calendar-browser
+          test:commercial-drafting-browser
+          test:client-profiles-browser
+          BROWSER_JOURNEYS
 
       - name: Verify commercial ownership, approvals, adopted rates, valuation and eligibility in PostgreSQL
         run: |
@@ -522,12 +562,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  validate:
+    name: Validate application, migrations, and container
+    needs: [scope, application]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require the selected checks
+        env:
+          SCOPE: ${{ needs.scope.result }}
+          PROSE: ${{ needs.scope.outputs.prose }}
+          APPLICATION: ${{ needs.application.result }}
+        run: |
+          [[ "$SCOPE" == success ]] && {
+            [[ "$PROSE" == true && "$APPLICATION" == skipped ]] ||
+            [[ "$PROSE" != true && "$APPLICATION" == success ]]
+          }
+
   secret-scan:
     name: Scan full history for secrets
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - name: Check out full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -536,9 +592,13 @@ jobs:
           persist-credentials: false
 
       - name: Scan with Gitleaks
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-          GITLEAKS_ENABLE_SUMMARY: "true"
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gitleaks_8.24.3_linux_x64.tar.gz"
+          curl --fail --location --silent --show-error --retry 3 \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz -o "$archive"
+          echo "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  $archive" | sha256sum --check --status
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          test "$(git rev-parse --is-shallow-repository)" = false
+          "$RUNNER_TEMP/gitleaks" git --log-opts="--all --diff-merges=first-parent" --redact=100 --exit-code=2 --no-banner .

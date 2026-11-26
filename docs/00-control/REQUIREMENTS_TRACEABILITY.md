@@ -853,3 +853,5 @@ WOS-APR-008. The timesheet bulk action requires a configured approval role and t
 WOS-APR-005 and WOS-INT-002. Timed timesheet policies retain an optional escalation recipient. The existing approval browser journey records that choice, and PostgreSQL acceptance rejects adoption when the recipient cannot see all selected workers. Migration 122 records mandatory in-app delivery attempts and acknowledgements. The real-clock approval journey verifies a temporarily unavailable escalation recipient, atomic retry, recipient-only visibility and acknowledgement.
 
 WOS-APR-005. Migration 121 and the overdue worker retain elapsed stage deadlines once, including late decisions between scans. The existing approval browser journey checks premature writes are rejected. Its optional real-clock rehearsal uses a one-minute stage and concurrent discovery calls.
+
+WOS-OPS-007 covers the progress-document CI path in `.github/workflows/workos-ci.yml`. The pinned Gitleaks CLI scans all fetched refs for every event. The release runbook describes the scope and full-validation fallback.

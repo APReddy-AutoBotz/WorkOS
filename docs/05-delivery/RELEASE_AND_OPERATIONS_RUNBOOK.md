@@ -921,3 +921,9 @@ For governed timesheets, set the optional time allowed per stage in the approval
 ### Scoped bulk timesheet approval
 
 Timesheet bulk approval uses the same scoped decision API as individual review. Admins, Country Directors, Project Managers and Team Leads with approval permission can preview submitted rows. If a reporting relationship changes before confirmation, inspect the per-item outcomes. A denied row that has left the reviewer’s scope appears without its worker name. Reload current records before retrying an unacknowledged decision.
+
+## CI for progress updates
+
+PRs targeting main that only modify existing text in the changelog, implementation status, or enterprise delivery roadmap run a whitespace check and the full-history secret scan. Other PR changes, main pushes and manual runs select the application and deployment suite. The secret job checks for a complete clone and runs the checksum-pinned Gitleaks release against all fetched refs, including merge changes. Earlier green PR scans from the Gitleaks action covered the PR commit range. Use a manual run to obtain full evidence for a release revision. Revert the workflow change to restore full application validation on every eligible progress PR.
+
+The full suite installs the lockfile-selected Chromium build and attempts a headless launch on the pinned Ubuntu runner. A failed launch triggers Playwright's OS dependency installer before the role journeys run. The 14 browser scripts that share the compiled fixture server run two at a time. A script failure fails the step.
