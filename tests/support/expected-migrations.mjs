@@ -157,6 +157,7 @@ const expected = [
   '128_wos05_configured_leave_stages',
   '129_wos02_module_release_decisions',
   '130_wos07_risk_recipient_inbox_access',
+  '131_wos06_fixed_fee_po_commitments',
 ];
 
 export function expectedMigrationsFrom(first) {
