@@ -83,7 +83,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);
  const fx=await seedWorkApproval(pool), ids=fx.identities;
  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Employee','leave.self_service',true) on conflict(role_name,permission_key) do update set enabled=true");
- await withCommercialApi({databaseUrl,identities:ids},async({request})=>{
+ await withCommercialApi({enableLeave:true,databaseUrl,identities:ids},async({request})=>{
   await adoptActualInputs(request,fx.today);
   const policy=leaveDefinition(ids);
   await adoptLeavePolicy(request,fx,{...policy,stages:policy.stages.slice(0,1)});
