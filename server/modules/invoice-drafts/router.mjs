@@ -5,7 +5,7 @@ import {
   reconciliationCsv,
   portfolioReconciliationCsv,
 } from './reconciliation-csv.mjs';
-import { readFixedFeeBillingBalances } from './fixed-fee-balances.mjs';
+import { readChargeBalances, readChargeControls } from './charge-reconciliation.mjs';
 import { readBillingReconciliation, readPortfolioReconciliation } from './reconciliation.mjs';
 import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { Router } from 'express';
@@ -427,22 +427,52 @@ export const createInvoiceDraftRouter = (o) => {
     };
     return { ...value, reportToken: reconciliationToken(reportScope(r), value) };
   };
-  router.get('/reconciliation/fixed-fee', handle(false, async (c,r) => {
-    const {engagementId} = parse(z.object({engagementId:id}).strict(),r.query);
-    await authorize(c,r,'view',['commercial.invoice_export.view','commercial.fixed_fee_eligibility.issue']);
-    const balances = await readFixedFeeBillingBalances(c,scope(r),engagementId);
-    if (!balances) throw fail(404,'BILLING_REPORT_SOURCE','Scoped fixed-fee engagement unavailable.');
-    return {...await envelope(c,r), engagementId, balances};
-  }));
+  const chargeReports = [
+    ['fixed-fee','FIXED_FEE_INSTALLMENT','fixed_fee'],
+    ['retainer','RETAINER_PERIOD','retainer'],
+    ['service-units','MANAGED_SERVICE_UNIT','managed_service'],
+    ['service-periods','MANAGED_SERVICE_PERIOD','managed_service'],
+  ];
+  for (const [path,source,model] of chargeReports) {
+    router.get('/reconciliation/'+path, handle(false, async (c,r) => {
+      const {engagementId,controls} = parse(z.object({engagementId:id,controls:z.literal('1').optional()}).strict(),r.query);
+      await authorize(c,r,'view',['commercial.invoice_export.view',contractChargeGrant(source)]);
+      const rows = await readChargeBalances(c,scope(r),engagementId,source,model);
+      if (!rows) throw fail(404,'BILLING_REPORT_SOURCE','Scoped billing engagement unavailable.');
+      const balances = source==='FIXED_FEE_INSTALLMENT'
+        ? rows.map(({charges,...row})=>({...row,installments:charges})) : rows;
+      return {...await envelope(c,r),engagementId,balances,
+        ...(controls ? {controls:await readChargeControls(c,scope(r),engagementId,source)} : {})};
+    }));
+  }
   const portfolioFilters = {
     start: z.string().date(),
     end: z.string().date(),
-    source: z.enum(['both', 'time_and_materials', 'milestone']),
+    source: z.enum(['both', 'time_and_materials', 'milestone', ...chargeReports.map(([path])=>path)]),
   };
-  const portfolioPermissions = (source) => [
-    'commercial.invoice_export.view',
-    ...(source === 'time_and_materials' ? [] : ['commercial.milestone_billing.view']),
-  ];
+  const portfolioPermissions = (source) => {
+    const charge=chargeReports.find(([path])=>path===source);
+    return ['commercial.invoice_export.view',...(charge ? [contractChargeGrant(charge[1])]
+      : source==='time_and_materials' ? [] : ['commercial.milestone_billing.view'])];
+  };
+  const portfolioReport = async (c,r,filters,includeToken) => {
+    const charge=chargeReports.find(([path])=>path===filters.source);
+    if (!charge) return readPortfolioReconciliation(c,r,o,filters,includeToken);
+    const [path,source,model]=charge;
+    const balances=await readChargeBalances(c,scope(r),null,source,model,filters);
+    const checks=await readChargeControls(c,scope(r),null,source,filters);
+    const totals=balances.flatMap(row=>[
+      ...(row.charges?[{currency:row.currency,status:row.status+' charges',lineCount:row.charges,amount:row.gross}]:[]),
+      ...(row.credits?[{currency:row.currency,status:row.status+' credits',lineCount:row.credits,amount:row.adjustments}]:[]),
+    ]);
+    const controls=checks.map(({currency,boundary,observed,amount,expected,exceptions})=>({
+      currency,boundary,lineCount:observed,amount,expected,exceptions,
+    }));
+    const report={version:'workos.portfolio-reconciliation/1',start:filters.start,end:filters.end,source:path,totals,controls,
+      exceptionCount:checks.reduce((sum,row)=>sum+row.exceptions,0)};
+    const asOf=(await c.query('select transaction_timestamp() as stamp')).rows[0].stamp;
+    return {...report,asOf,...(includeToken?{reportToken:capacityHash(capacityCanonical({scope:reportScope(r),...report}))}:{})};
+  };
   router.get(
     '/reconciliation/portfolio',
     handle(false, async (c, r) => {
@@ -459,7 +489,7 @@ export const createInvoiceDraftRouter = (o) => {
       await authorize(c, r, 'view', portfolioPermissions(q.source));
       return {
         ...(await envelope(c, r)),
-        ...(await readPortfolioReconciliation(c, r, o, q, Boolean(q.forExport))),
+        ...(await portfolioReport(c, r, q, Boolean(q.forExport))),
       };
     }),
   );
@@ -489,7 +519,7 @@ export const createInvoiceDraftRouter = (o) => {
         'reports.export',
       ]);
       const value = portfolio
-        ? await readPortfolioReconciliation(c, r, o, d, true)
+        ? await portfolioReport(c, r, d, true)
         : await report(c, r, d.engagementId);
       const filters = portfolio
         ? { start: d.start, end: d.end, source: d.source }

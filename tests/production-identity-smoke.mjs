@@ -132,8 +132,23 @@ const collectOutput = (child) => {
   return () => output;
 };
 
-const spawnProduction = (environment) => {
-  const child = spawn(process.execPath, ['server/start-production.mjs'], {
+const spawnProduction = (environment, image) => {
+  let executable = process.execPath;
+  let args = ['server/start-production.mjs'];
+  if (image) {
+    executable = 'docker';
+    // The CI runner hosts the disposable database and synthetic identity provider on loopback.
+    // Exercise the image's own command, dependencies, frontend assets and non-root user.
+    environment = {...environment, NODE_EXTRA_CA_CERTS:'/tmp/workos-fixture.crt',
+      NODE_OPTIONS:'--import=/tmp/workos-entra-fixture.mjs'};
+    const fixture = join(process.cwd(),'tests/support/entra-fetch-fixture.mjs');
+    const keys = [...testKeys, 'API_SESSION_TTL_HOURS'].filter(key => environment[key] !== undefined);
+    args = ['run','--rm','--init','--network','host',
+      '--mount',`type=bind,source=${certificatePath},target=/tmp/workos-fixture.crt,readonly`,
+      '--mount',`type=bind,source=${fixture},target=/tmp/workos-entra-fixture.mjs,readonly`,
+      ...keys.flatMap(key => ['--env',key]),image];
+  }
+  const child = spawn(executable, args, {
     cwd: process.cwd(),
     env: environment,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -397,7 +412,7 @@ try {
     APP_URL: rootOrigin,
     ENTRA_REDIRECT_URI: `${rootOrigin}/api/auth/entra/callback`,
   });
-  const production = spawnProduction(environment);
+  const production = spawnProduction(environment, process.env.WORKOS_TEST_PRODUCTION_IMAGE);
   productionChild = production.child;
   productionOutputForCallback = production.output;
 
@@ -424,6 +439,21 @@ try {
   const initialReadiness = await fetchWithTimeout(`${serviceOrigin}/api/health/ready`, {}, 1000);
   assert.equal(initialReadiness.status, 200);
   assert.equal((await initialReadiness.json()).identityProvider, 'available');
+  if (process.env.WORKOS_TEST_PRODUCTION_IMAGE) {
+    const build = await fetchWithTimeout(`${serviceOrigin}/api/health/build`, {}, 1000);
+    assert.equal(build.status,200);
+    const {commit,migrationLevel} = await build.json();
+    assert.equal(commit,process.env.GITHUB_SHA,'running image must report the packaged revision');
+    assert.ok(migrationLevel,'running image must report an installed migration');
+    const page = await fetchWithTimeout(serviceOrigin, {}, 1000);
+    assert.equal(page.status,200);
+    const asset = (await page.text()).match(/<script[^>]*\bsrc="(\/assets\/[^"]+\.js)"/)?.[1];
+    assert.ok(asset,'packaged HTML must point to its compiled application');
+    const script = await fetchWithTimeout(serviceOrigin+asset, {}, 1000);
+    assert.equal(script.status,200);
+    assert.match(script.headers.get('content-type') || '',/javascript/);
+    results.push({name:'packaged-production-readiness',commit,migrationLevel,asset});
+  }
 
   const identityConfig = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/config`, {}, 1000);
   assert.equal(identityConfig.status, 200);

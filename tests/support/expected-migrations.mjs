@@ -145,6 +145,7 @@ const expected = [
   '118_wos02_organization_branding',
   '119_wos05_work_stage_deadline',
   '130_wos07_risk_recipient_inbox_access',
+  '131_wos06_fixed_fee_po_commitments',
 ];
 
 export function expectedMigrationsFrom(first) {
