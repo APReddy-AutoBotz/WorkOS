@@ -134,10 +134,12 @@ export const portfolioReconciliationCsv = (scope, report) => {
     new Date(report.asOf).toISOString(),
     report.reportToken,
   ];
-  const rows = [columns, ['REPORT', ...metadata, '', '', '', '']];
+  const charges=!['both','time_and_materials','milestone'].includes(report.source);
+  if (charges) columns.push('expected_records','exceptions');
+  const rows = [columns, ['REPORT', ...metadata, '', '', '', '',...(charges?['','']:[])]];
   for (const row of report.controls)
-    rows.push(['CONTROL', ...metadata, row.currency, row.boundary, row.lineCount, row.amount]);
+    rows.push(['CONTROL', ...metadata, row.currency, row.boundary, row.lineCount, row.amount,...(charges?[row.expected,row.exceptions]:[])]);
   for (const row of report.totals)
-    rows.push(['REGISTER_STATE', ...metadata, row.currency, row.status, row.lineCount, row.amount]);
+    rows.push(['REGISTER_STATE', ...metadata, row.currency, row.status, row.lineCount, row.amount,...(charges?['','']:[])]);
   return rows.map((cells) => cells.map(quoteCsvCell).join(',')).join('\r\n') + '\r\n';
 };

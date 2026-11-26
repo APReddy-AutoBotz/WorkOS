@@ -140,9 +140,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
     <section aria-label="Billing reconciliation" className="my-4 space-y-3 rounded-xl border p-4">
       <h2>Billing reconciliation</h2>
       <p>
-        Reconcile approved T&amp;M work or accepted milestones across the portfolio or within one engagement,
-        from eligibility through invoice reservation, export and manual confirmation. Select a fixed-fee engagement to see its registered installments and credits by billing state. Totals reflect your
-        current access and stay in the original currency.
+        Select a billing source and date range for the portfolio, or choose an engagement below. Amounts stay in their original currency.
       </p>
       {!allowed ? (
         <p role="status">Scoped invoice and export view access are required.</p>
@@ -181,6 +179,8 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                   setSource(e.target.value as Portfolio['source']);
                 }}
               >
+                {Object.entries(reconciliationGrants).filter(([,permission])=>hasRatePermission(permission)).map(([key])=>
+                  <option key={key} value={key}>{{'fixed-fee':'Fixed-fee installments',retainer:'Retainer periods','service-units':'Managed-service units','service-periods':'Managed-service periods'}[key]}</option>)}
                 <option value="time_and_materials">Time and materials</option>
                 {hasRatePermission('commercial.milestone_billing.view') && (
                   <>
@@ -216,8 +216,10 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                       <tr>
                         <th>Currency</th>
                         <th>Boundary</th>
-                        <th>Lines</th>
+                        {portfolio.source in reconciliationGrants && <th>Expected records</th>}
+                        <th>Observed records</th>
                         <th>Amount</th>
+                        {portfolio.source in reconciliationGrants && <th>Exceptions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -225,8 +227,10 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                         <tr key={x.currency + x.boundary}>
                           <td>{x.currency}</td>
                           <th scope="row">{x.boundary.replaceAll('_', ' ').toLowerCase()}</th>
+                          {'expected' in x && <td>{x.expected}</td>}
                           <td>{x.lineCount}</td>
                           <td>{x.amount}</td>
+                          {'exceptions' in x && <td>{x.exceptions}</td>}
                         </tr>
                       ))}
                     </tbody>

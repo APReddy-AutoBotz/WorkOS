@@ -397,6 +397,21 @@ export const reconciliationGrants={
   'service-periods':'commercial.service_periods.issue',
 } as const;
 export type ChargeReportSource=keyof typeof reconciliationGrants;
+const portfolioSource=z.enum(['both','time_and_materials','milestone','fixed-fee','retainer','service-units','service-periods']);
+type PortfolioSource=z.infer<typeof portfolioSource>;
+const canReadPortfolioSource=(source:PortfolioSource)=>{
+  if (source==='both' || source==='milestone') return hasRatePermission('commercial.milestone_billing.view');
+  return source==='time_and_materials' || hasRatePermission(reconciliationGrants[source]);
+};
+const chargePortfolioTotals={
+  controls:z.array(z.object({
+    currency:z.string(),boundary:z.string(),lineCount:count,amount:balanceAmount,expected:count,exceptions:count,
+  }).strict().refine(({lineCount,...row})=>chargeControl.safeParse({...row,observed:lineCount}).success)),
+  totals:z.array(z.object({
+    currency:z.string().regex(/^[A-Z]{3}$/),status:z.string().regex(/^(Available|Reserved|Exported|Confirmed) (charges|credits)$/),
+    lineCount:z.number().int().positive(),amount:balanceAmount,
+  }).strict().refine(row=>row.status.endsWith('credits') ? balanceUnits(row.amount)<0n : balanceUnits(row.amount)>0n)),
+};
 const chargeReport = async(engagementId:string,c:RateContext|null, includeControls:boolean,source:ChargeReportSource)=>{
     const allowed=()=>hasRatePermission(reconciliationGrants[source]) && hasRatePermission('commercial.invoice_export.view');
     if (!allowed() || !id.safeParse(engagementId).success) return bad();
@@ -448,12 +463,12 @@ export const invoiceDrafts = {
   portfolio: async (
     start: string,
     end: string,
-    source: 'both' | 'time_and_materials' | 'milestone',
+    source: PortfolioSource,
     c: RateContext | null,
   ) => {
     const allowed = () =>
       hasRatePermission('commercial.invoice_export.view') &&
-      (source === 'time_and_materials' || hasRatePermission('commercial.milestone_billing.view'));
+      canReadPortfolioSource(source);
     if (!date.safeParse(start).success || !date.safeParse(end).success || start > end || !allowed())
       return bad();
     const raw = await call(
@@ -469,9 +484,9 @@ export const invoiceDrafts = {
         reportToken: z.string().regex(/^[a-f0-9]{64}$/),
         start: date,
         end: date,
-        source: z.enum(['both', 'time_and_materials', 'milestone']),
+        source: portfolioSource,
         asOf: instant,
-        ...reconciliationTotals,
+        ...(source in reconciliationGrants ? chargePortfolioTotals : reconciliationTotals),
         exceptionCount: z.number().int().nonnegative(),
       })
       .strict()
@@ -695,7 +710,7 @@ export const invoiceDrafts = {
       | {
           start: string;
           end: string;
-          source: 'both' | 'time_and_materials' | 'milestone';
+          source: PortfolioSource;
           reportToken: string;
           version: 'workos.portfolio-reconciliation/1';
         },
@@ -714,10 +729,9 @@ export const invoiceDrafts = {
     const filters = portfolio
       ? { start: report.start, end: report.end, source: report.source }
       : { engagementId: report.engagementId };
-    const milestone = portfolio
-      ? report.source !== 'time_and_materials'
-      : report.version === 'workos.milestone-reconciliation/1';
-    if (milestone && !hasRatePermission('commercial.milestone_billing.view')) return bad();
+    const allowedSource=()=>portfolio ? canReadPortfolioSource(report.source)
+      : report.version!=='workos.milestone-reconciliation/1' || hasRatePermission('commercial.milestone_billing.view');
+    if (!allowedSource()) return bad();
     const raw = await call(
       'POST',
       portfolio ? '/reconciliation/portfolio/exports' : '/reconciliation/exports',
@@ -728,7 +742,7 @@ export const invoiceDrafts = {
     if (
       !hasRatePermission('commercial.invoice_export.view') ||
       !hasRatePermission('reports.export') ||
-      (milestone && !hasRatePermission('commercial.milestone_billing.view'))
+      !allowedSource()
     )
       return bad();
     const receipt = {
@@ -754,7 +768,7 @@ export const invoiceDrafts = {
             ...receipt,
             start: date,
             end: date,
-            source: z.enum(['both', 'time_and_materials', 'milestone']),
+            source: portfolioSource,
             version: z.literal('workos.portfolio-reconciliation/1'),
           })
           .strict(),
