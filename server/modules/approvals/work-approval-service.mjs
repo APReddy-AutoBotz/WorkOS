@@ -61,18 +61,32 @@ export const scopedWorkApproval = async (c, req, id, o, lock = false, includeSou
             workApprovalFail('WORK_APPROVAL_SOURCE_UNAVAILABLE', 'Retained source identity does not match the instance.');
         source = { weekEnding: captured.header.weekEnding, totalHoursExact: canonicalHours(captured.header.totalHours), billableHoursExact: canonicalHours(captured.header.billableHours), currentHeaderStatus: header.status, isCurrentSubmission: latest?.id === i.submission_id, entries: captured.submission.entries.map(e => ({ id: e.entryId, date: e.workDate, workType: e.workType, projectId: e.projectId ?? null, clientName: e.clientName ?? null, category: e.category ?? null, categoryCode: e.categoryCode ?? null, hoursExact: canonicalHours(e.hours), billable: e.billable, remark: e.remark ?? null, evidenceUrl: e.evidenceUrl ?? null, workReference: e.workReference ?? null })) };
     }
-    return { i, policy, transitions, state: approvalState(policy.definition.stages, transitions), worker, notificationFailures, source };
+    const hasOverdueDelivery = includeSource && policy.definition.stageDueMinutes != null
+      && (await c.query("select to_regclass('public.work_approval_overdue_attempts') is not null as available")).rows[0].available;
+    const overdueDeliveries=hasOverdueDelivery ? (await c.query(`select d.stage,d.due_at as "dueAt",
+      coalesce(last.attempt,0) as attempts,case when last.attempt is null then 'Pending'
+        when last.failure is not null then 'Recipient unavailable' else 'Delivered' end as status
+      from work_approval_overdue_stages d left join lateral(select a.attempt,a.failure from work_approval_overdue_attempts a
+        where a.instance_id=d.instance_id and a.stage=d.stage order by a.attempt desc limit 1) last on true
+      where d.instance_id=$1 order by d.stage`,[id])).rows : [];
+    return { i, policy, transitions, overdueDeliveries, state: approvalState(policy.definition.stages, transitions), worker, notificationFailures, source };
 };
 export const workApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at });
-export const workApprovalView = v => ({ id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, source: v.source });
-const recipientScope = async (c, req, id, workerId, o) => { const u = await workApprovalUser(c, req, id, o); for (const role of u.roles) {
-    const permissions = await o.getEffectivePermissionsForUser(c, u.id, role);
-    if (!['employees.view', 'notifications.view'].every(k => permissions.includes(k)))
-        continue;
-    const actor = { ...req, user: { sub: u.id, activeRole: role, employeeRecordId: u.employee_record_id, employeeId: u.employee_id, countryDirectorId: u.country_director_id, permissions } }, p = [workerId], where = o.buildEmployeeScopeWhere(actor, p, 'e');
-    if ((await c.query(`select 1 from employees e where e.id=$1 and ${where}`, p)).rowCount)
-        return;
-} workApprovalFail('WORK_APPROVAL_RELATIONSHIP_UNAVAILABLE', 'A mandatory recipient no longer has an existing scoped in-app relationship.'); };
+export const workApprovalView = v => ({ id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, ...(v.overdueDeliveries.length ? {overdueDeliveries:v.overdueDeliveries} : {}), source: v.source });
+export const workApprovalRecipientScope = async (c,req,id,workerIds,o) => {
+    const user=await workApprovalUser(c,req,id,o), remaining=new Set(workerIds);
+    for (const role of user.roles) {
+        const permissions=await o.getEffectivePermissionsForUser(c,user.id,role);
+        if (!['employees.view','notifications.view'].every(key=>permissions.includes(key))) continue;
+        const actor={...req,user:{sub:user.id,activeRole:role,employeeRecordId:user.employee_record_id,
+            employeeId:user.employee_id,countryDirectorId:user.country_director_id,permissions}};
+        const params=[[...remaining]], where=o.buildEmployeeScopeWhere(actor,params,'e');
+        const workers=await c.query(`select e.id from employees e where e.id=any($1::text[]) and ${where}`,params);
+        for (const worker of workers.rows) remaining.delete(worker.id);
+        if (!remaining.size) return;
+    }
+    workApprovalFail('WORK_APPROVAL_RELATIONSHIP_UNAVAILABLE','A mandatory recipient lacks current inbox or worker access.');
+};
 const requiredRecipients = async (c, req, v, key, stage, o) => {
     if (key === 'approval.action_required') {
         const actor = await workApprovalActor(c, req, v.policy.definition.stages[stage], await sourceHeader(c, req, v.i.timesheet_id), o);
@@ -82,8 +96,8 @@ const requiredRecipients = async (c, req, v, key, stage, o) => {
     const users = (await c.query('select u.id from users u join user_organization_scopes s on s.user_id=u.id where u.employee_record_id=$1 and u.status=\'Active\'and s.organization_id=$2 and s.legal_entity_id=$3 and s.active order by u.id limit 2', [v.i.employee_id, ...workApprovalScope(req)])).rows;
     if (users.length !== 1)
         workApprovalFail('WORK_APPROVAL_RELATIONSHIP_UNAVAILABLE', 'The affected worker must have one current scoped account; no recipient can be omitted or redirected.');
-    await recipientScope(c, req, v.i.requester_user_id, v.i.employee_id, o);
-    await recipientScope(c, req, users[0].id, v.i.employee_id, o);
+    await workApprovalRecipientScope(c, req, v.i.requester_user_id, [v.i.employee_id], o);
+    await workApprovalRecipientScope(c, req, users[0].id, [v.i.employee_id], o);
     return approvalRecipients([{ userId: v.i.requester_user_id, reason: 'requester' }, { userId: users[0].id, reason: 'affected_worker' }]);
 };
 const emit = async (c, req, v, key, sequence, stage, operationId, reason, o) => {

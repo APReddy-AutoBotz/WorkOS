@@ -2,6 +2,17 @@ import assert from 'node:assert/strict';
 import { validWorkApprovalPolicy, approvalState, approvalRecipients, approvalEventIdentity, renderApprovalTemplate } from '../shared/work-approval.mjs';
 const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'], stages = ids.map(userId => ({ userId, role: 'Admin' })), templates = ['approval.action_required', 'approval.rejected_or_correction_required', 'approval.completed'].map(key => ({ key, subject: 'Work {{sourceRef}}', body: '{{workerCode}} {{stageNumber}} {{decisionReason}}' })), definition = { entityType: 'Timesheet', workerIds: ['synthetic-worker'], stages, locale: 'en-GB', templates, completionInApp: true };
 assert(validWorkApprovalPolicy(definition));
+assert(validWorkApprovalPolicy({...definition,stageDueMinutes:90,escalationUserId:ids[1]}));
+assert.equal(validWorkApprovalPolicy({...definition,escalationUserId:ids[1]}),false);
+assert.equal(validWorkApprovalPolicy({...definition,stageDueMinutes:90,escalationUserId:null}),false);
+const overdue={key:'approval.overdue_or_escalated',subject:'Late stage {{stageNumber}}',body:'Inspect {{sourceRef}}'};
+assert(validWorkApprovalPolicy({...definition,stageDueMinutes:1,overdueTemplate:overdue}));
+assert.equal(validWorkApprovalPolicy({...definition,overdueTemplate:overdue}),false);
+assert.equal(validWorkApprovalPolicy({...definition,stageDueMinutes:1,overdueTemplate:{...overdue,body:'{{email}}'}}),false);
+for (const subject of ['{{decisionReason}}','{{workerCode}}'.repeat(7)]) {
+    assert.equal(validWorkApprovalPolicy({...definition,stageDueMinutes:1,overdueTemplate:{...overdue,subject}}),false);
+}
+assert.equal(validWorkApprovalPolicy({...definition,templates:[...templates.slice(0,2),overdue]}),false);
 for (const stageDueMinutes of [0, 1.5, '90', null, 2147483648])
     assert.equal(validWorkApprovalPolicy({...definition, stageDueMinutes}), false);
 assert(validWorkApprovalPolicy({ ...definition, workerIds: [] }), 'explicit empty future selection retires adoption without changing existing instances');
