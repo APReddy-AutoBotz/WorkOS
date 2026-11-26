@@ -35,7 +35,9 @@ test "$(docker image inspect --format '{{.Id}}' "$image_id")" = "$image_id"
 test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id")" = "$(cat source-commit.txt)"
 ```
 
-The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
+The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. The checksummed npm-third-party-notices.json preserves installed npm notice files, including vendored notices and root README licence sections. Review any packagesWithoutRootNotice entries and separately reconcile frontend assets, base-image components and source-distribution terms before buyer handover. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
+
+The frontend build records the installed Tailwind versions and their licence texts in `dist/stylesheet-notices.txt`. Release packaging extracts that file from the tested image and includes it in `SHA256SUMS` alongside the runtime npm notices.
 
 ## Maintaining a standing margin threshold
 
@@ -202,7 +204,7 @@ The repository provides a Node 22 production image and a PostgreSQL Compose prof
 
 ### Production environment reference
 
-The production profile reads the following values from `.env.production`. Secret values stay in the deployment environment and must never be copied into logs or support tickets. Values marked required are enforced by the production startup validator or Compose interpolation. The Entra fields are mandatory for production and must identify a real configured application; format validation cannot prove that the provider will accept its credentials.
+The production profile reads the following values from `.env.production`. Secret values stay in the deployment environment and must never be copied into logs or support tickets. The guided setup production check uses the startup validator and requires local login to be disabled. Values marked required are enforced by the production startup validator or Compose interpolation. The Entra fields are mandatory for production and must identify a real configured application; format validation cannot prove that the provider will accept its credentials.
 
 | Variable | Purpose | Sensitivity | Required | Allowed values |
 |---|---|---|---|---|
