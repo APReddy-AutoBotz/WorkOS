@@ -1180,7 +1180,12 @@ const sendNotification = async (client, req, {
     try {
       let metadata = { mode: selectedProvider, deterministic: true };
       if (deliveryChannel === 'Email' && selectedProvider === 'graph') {
-        metadata = { ...metadata, ...(await deliverGraphEmail({ recipient, subject, body: messageBody })) };
+        const brand = recipient?.organization_id && (await client.query(
+          `select branding->>'emailBrand' as label from organization_profile_versions
+           where organization_id=$1 and current_date between effective_from and coalesce(effective_to,'infinity'::date)
+           order by effective_from desc limit 1`, [recipient.organization_id],
+        )).rows[0]?.label;
+        metadata = { ...metadata, ...(await deliverGraphEmail({ recipient, subject:brand ? brand + ' · ' + subject : subject, body: messageBody })) };
       } else if (deliveryChannel === 'Email' && selectedProvider !== 'mock') {
         throw new Error(`Email provider ${selectedProvider} is not supported by this build`);
       } else if (deliveryChannel === 'Teams' && selectedProvider === 'graph') {

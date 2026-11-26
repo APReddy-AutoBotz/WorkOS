@@ -51,6 +51,11 @@ let injectedFailure = '';
 const privateFailure = () => new Error('synthetic-private-database-detail');
 const pool = {
   async query(sql, values = []) {
+    if (sql.includes('branding->>\'faviconUrl\'')) {
+      assert.deepEqual(values,['org-test']);
+      assert.doesNotMatch(sql,/legal_name|support_contact|emailBrand|reportBrand|select\s+\*/i);
+      return {rows:[{productName:'Synthetic Workspace',faviconUrl:'/brand/icon.svg'}]};
+    }
     if (sql.includes('from user_organization_scopes s')) {
       if(injectedFailure==='scope')throw privateFailure();
       const [userId, organizationId, legalEntityId] = values;
@@ -130,6 +135,17 @@ const server = app.listen(0, '127.0.0.1');
 await new Promise(resolve => server.once('listening', resolve));
 try {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const loginBrandUrl = baseUrl+'/api/organization-setup/login-brand?organizationId=another-buyer';
+  const previousPublicOrg = process.env.PUBLIC_BRANDING_ORGANIZATION_ID;
+  try {
+    delete process.env.PUBLIC_BRANDING_ORGANIZATION_ID;
+    assert.deepEqual(await (await fetch(loginBrandUrl)).json(),{});
+    process.env.PUBLIC_BRANDING_ORGANIZATION_ID='org-test';
+    assert.deepEqual(await (await fetch(loginBrandUrl)).json(),{productName:'Synthetic Workspace',faviconUrl:'/brand/icon.svg'});
+  } finally {
+    if(previousPublicOrg === undefined) delete process.env.PUBLIC_BRANDING_ORGANIZATION_ID;
+    else process.env.PUBLIC_BRANDING_ORGANIZATION_ID=previousPublicOrg;
+  }
   const deniedResponses = await Promise.all([
     fetch(`${baseUrl}/api/organization-setup/context`),
     fetch(`${baseUrl}/api/v1/organization-setup/context`),

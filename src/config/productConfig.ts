@@ -66,11 +66,34 @@ export const getConfiguredTerminologyValue = (key: TerminologyKey): TerminologyV
 export const getTerminologyValue = (key: TerminologyKey): TerminologyValue => persistedTerminology[key] || defaultTerminology[key];
 const terminology = new Proxy(defaultTerminology, { get: (_defaults, key: TerminologyKey) => getTerminologyValue(key).singular }) as unknown as Terminology;
 
-export const productConfig = Object.freeze({
+const deploymentBrand = {
   productName: valueOr('VITE_PRODUCT_NAME', 'WorkOS'),
   organizationName: valueOr('VITE_ORGANIZATION_NAME', 'Your organization'),
   logoUrl: valueOr('VITE_PRODUCT_LOGO_URL', '/workos-mark.svg'),
   supportName: valueOr('VITE_SUPPORT_NAME', valueOr('VITE_PRODUCT_NAME', 'WorkOS') + ' Support'),
   supportEmail: valueOr('VITE_SUPPORT_EMAIL', 'support@example.test'),
-  terminology,
+};
+type RuntimeBrand = NonNullable<import('../types').OrganizationProfile['branding']> & {productName?:string;organizationName?:string};
+let effectiveBrand: RuntimeBrand = {};
+export function applyRuntimeBrand(brand: RuntimeBrand = {}) {
+  effectiveBrand = brand;
+  if (typeof document === 'undefined') return;
+  for (const [token,color] of [['--color-primary',brand.primaryAccent],['--color-heading',brand.secondaryAccent]] as const) {
+    if (color) document.documentElement.style.setProperty(token,color);
+    else document.documentElement.style.removeProperty(token);
+  }
+  document.title = productConfig.productName;
+  const icon = document.querySelector<HTMLLinkElement>('#workos-favicon');
+  if (icon) {
+    icon.removeAttribute('type');
+    icon.href = brand.faviconUrl || deploymentBrand.logoUrl;
+  }
+}
+export const productConfig = Object.freeze({
+  ...deploymentBrand, terminology,
+  get productName() { return effectiveBrand.productName || deploymentBrand.productName; },
+  get organizationName() { return effectiveBrand.organizationName || deploymentBrand.organizationName; },
+  get logoUrl() { return effectiveBrand.logoUrl || deploymentBrand.logoUrl; },
+  get compactMarkUrl() { return effectiveBrand.compactMarkUrl || this.logoUrl; },
+  get reportBrand() { return effectiveBrand.reportBrand || ''; },
 });

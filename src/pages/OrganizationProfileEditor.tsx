@@ -115,7 +115,7 @@ export const OrganizationProfileEditor = () => {
     };
   }, []);
 
-  const edit = (field: keyof OrganizationProfile, value: string | number) => {
+  const edit = (field: keyof OrganizationProfile, value: string | number | NonNullable<OrganizationProfile['branding']>) => {
     const owner = live.current;
     if (owner.generation !== state.generation || owner.status !== 'ready' || !owner.draft || !current(owner)) return;
     publish({...owner, draft: {...owner.draft, [field]: value}, message: undefined});
@@ -128,7 +128,7 @@ export const OrganizationProfileEditor = () => {
     if (owner.generation !== state.generation || owner.status !== 'ready' || !owner.draft || !current(owner)) return;
     publish({...owner, status: 'saving', message: undefined});
     try {
-      const profile = await adminService.updateOrganizationProfile({...owner.draft}, owner.context);
+      const profile = await adminService.updateOrganizationProfile({...owner.draft,branding:owner.draft.branding ?? {}}, owner.context);
       if (discardStale(owner)) return;
       if (profile.organizationId !== owner.context!.scope.organizationId) throw new Error('Saved profile scope did not match');
       publish({...owner, status: 'ready', draft: profile, message: profile.effectiveFrom > new Date().toISOString().slice(0, 10)
@@ -154,7 +154,7 @@ export const OrganizationProfileEditor = () => {
       <Link className="font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin">Governance Settings</Link>
       <button type="button" className={buttonClass} onClick={reload} disabled={Boolean(owned && state.status === 'saving')}>Reload profile</button>
     </div>
-    <p className="mb-5 text-sm text-slate-600">Organization-wide metadata is shared across its legal entities. Product display name is stored metadata; runtime branding remains environment-configured. This page does not complete every setup requirement.</p>
+    <p className="mb-5 text-sm text-slate-600">Organization settings and branding apply across its legal entities from the effective date.</p>
     {(state.status === 'blocked' || (state.context && !owned)) && <p role="alert" className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4">Scope or access changed. Draft cleared. Reload profile with settings-management access and a selected organization and legal entity. An already submitted save may still complete in its original scope.</p>}
     {owned && state.status === 'loading' && <p role="status">Loading organization profile…</p>}
     {owned && state.message && <p role={state.status === 'ready' && /^Organization profile (saved|scheduled)/.test(state.message) ? 'status' : 'alert'} className="mb-5 rounded-xl border border-slate-300 p-4">{state.message}</p>}
@@ -177,6 +177,30 @@ export const OrganizationProfileEditor = () => {
           </select></div>
           {field('effectiveFrom', 'Effective from', {type: 'date'})}
         </div>
+        <fieldset id="branding" className="mt-6 grid gap-4 md:grid-cols-2">
+          <legend className="font-semibold text-heading">Branding</legend>
+          <p className="md:col-span-2 text-sm text-slate-600">Use image paths hosted by your deployment. Accent colors must have at least 4.5:1 contrast against white.</p>
+          {([['logoUrl','Logo path'],['compactMarkUrl','Compact mark path'],['faviconUrl','Favicon path'],
+            ['primaryAccent','Primary accent'],['secondaryAccent','Secondary accent'],
+            ['emailBrand','Email branding label'],['reportBrand','Report branding label']] as const).map(([key,label]) =>
+            <label key={key} className="text-sm font-semibold">{label}
+              <input className={inputClass} value={visibleDraft.branding?.[key] ?? ''}
+                placeholder={key.endsWith('Url') ? '/brand/asset.svg' : key.endsWith('Accent') ? '#003761' : undefined}
+                onChange={event => {
+                  const next = {...visibleDraft.branding};
+                  if (event.target.value) next[key] = event.target.value;
+                  else delete next[key];
+                  edit('branding',next);
+                }} />
+            </label>)}
+          <div className="md:col-span-2 rounded-lg border p-4" aria-label="Brand preview"
+            style={{borderColor:visibleDraft.branding?.primaryAccent,color:visibleDraft.branding?.secondaryAccent}}>
+            {visibleDraft.branding?.logoUrl && /^\/(?!\/)[a-zA-Z0-9_./-]+\.(?:svg|png|jpe?g|webp|gif|ico)$/i.test(visibleDraft.branding.logoUrl) &&
+              !visibleDraft.branding.logoUrl.split('/').some(part => part === '.' || part === '..') &&
+              <img src={visibleDraft.branding.logoUrl} alt="" className="mb-2 h-8" />}
+            <strong>{visibleDraft.productDisplayName}</strong> · {visibleDraft.name}
+          </div>
+        </fieldset>
         <p className="mt-5 text-sm text-slate-600">Use an effective date on or after the latest saved version. Saving on the same date updates that version; earlier dates can conflict. Reload returns the currently effective profile, not a future scheduled version.</p>
         <button className={`${buttonClass} mt-5 bg-primary text-white`} type="submit">{state.status === 'saving' ? 'Saving profile…' : 'Save profile'}</button>
       </fieldset>

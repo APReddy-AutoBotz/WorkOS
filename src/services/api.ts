@@ -1719,7 +1719,7 @@ const normalizeOrganizationProfileDate = (value: unknown) => {
 };
 const normalizeOrganizationProfile = (row: Record<string, unknown>): OrganizationProfile => ({
   organizationId:String(row.organization_id), code:String(row.organization_code), name:String(row.organization_name),
-  legalName:String(row.legal_name), productDisplayName:String(row.product_display_name), supportContact:String(row.support_contact),
+  ...(row.branding ? {branding:row.branding as OrganizationProfile['branding']} : {}), legalName:String(row.legal_name), productDisplayName:String(row.product_display_name), supportContact:String(row.support_contact),
   defaultLocale:String(row.default_locale), defaultTimeZone:String(row.default_time_zone), baseCurrency:String(row.base_currency),
   fiscalYearStart:String(row.fiscal_year_start), defaultWeekStart:Number(row.default_week_start), effectiveFrom:normalizeOrganizationProfileDate(row.profile_effective_from),
 });
@@ -1768,7 +1768,7 @@ export const adminService = {
     const {name, legalName, productDisplayName, supportContact, defaultLocale, defaultTimeZone,
       baseCurrency, fiscalYearStart, defaultWeekStart, effectiveFrom} = profile;
     return normalizeOrganizationProfile(await api.putWithScope<Record<string, unknown>>('/api/organization-setup/profile', {
-      organizationId: captured.scope.organizationId, name, legalName, productDisplayName, supportContact,
+      organizationId: captured.scope.organizationId, name, legalName, productDisplayName, supportContact, ...(profile.branding ? {branding:profile.branding} : {}),
       defaultLocale, defaultTimeZone, baseCurrency, fiscalYearStart, defaultWeekStart, effectiveFrom,
     }, captured.scope));
   },

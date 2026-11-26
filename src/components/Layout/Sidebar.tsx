@@ -150,7 +150,7 @@ export const Sidebar = () => {
       <div className="flex items-center p-4 border-b border-sidebar-border h-16 shrink-0">
         {isCollapsed ? (
           <div className="w-9 h-9 rounded-lg bg-white flex items-center justify-center shrink-0 shadow-lg shadow-black/10">
-            <img src={productConfig.logoUrl} alt={productConfig.productName} className="w-7 h-7 object-contain" />
+            <img src={productConfig.compactMarkUrl} alt={productConfig.productName} className="w-7 h-7 object-contain" />
           </div>
         ) : (
           <div className="h-11 w-full rounded-xl bg-white px-3 py-2 flex items-center shadow-lg shadow-black/10">
@@ -176,7 +176,7 @@ export const Sidebar = () => {
                 className={({ isActive }) => cn(
                   "flex items-center px-6 py-2.5 text-sm transition-all duration-300 group relative",
                   isActive
-                    ? "text-primary bg-primary/5 font-bold"
+                    ? "text-white bg-white/15 font-bold"
                     : "text-white/60 hover:text-white hover:bg-white/5"
                 )}
               >
@@ -187,7 +187,7 @@ export const Sidebar = () => {
                     )}
                     <item.icon className={cn(
                       "shrink-0 transition-colors",
-                      isActive ? "text-primary" : "group-hover:text-white",
+                      isActive ? "text-white" : "group-hover:text-white",
                       isCollapsed ? "mx-auto" : "mr-4"
                     )} size={18} />
                     {!isCollapsed && <span>{item.name}</span>}
@@ -203,7 +203,7 @@ export const Sidebar = () => {
         {!isCollapsed ? (
           <div className="p-4">
             <div className="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-white/5 mb-4 group/user">
-              <div className="w-9 h-9 rounded bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-xs">
+              <div className="w-9 h-9 rounded bg-white/10 border border-white/20 flex items-center justify-center text-white font-bold text-xs">
                 {getInitials(user.name)}
               </div>
               <div className="flex-1 min-w-0">

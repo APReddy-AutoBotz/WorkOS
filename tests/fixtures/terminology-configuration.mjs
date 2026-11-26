@@ -5,7 +5,8 @@ import {createRoot} from 'react-dom/client';
 import {BrowserRouter} from 'react-router-dom';
 import {TerminologyConfigurationEditor} from '../../src/pages/TerminologyConfigurationEditor.tsx';
 import {RuntimeTerminology} from '../../src/config/RuntimeTerminology.tsx';
-import {getTerminologyValue} from '../../src/config/productConfig.ts';
+import {brandedReportFilename} from '../../src/lib/reportExport.ts';
+import {productConfig,getTerminologyValue} from '../../src/config/productConfig.ts';
 import {resetBackendCheck} from '../../src/services/apiClient.ts';
 import '../../src/index.css';
 
@@ -89,6 +90,9 @@ const render = () => {
 window.terminologyConfigurationHarness = {
   pending, calls, unexpectedFetches, initialScope, syntheticToken: token,
   runtimeSnapshot: snapshot,
+  runtimeBrand: () => [productConfig.productName,productConfig.organizationName,productConfig.logoUrl,productConfig.compactMarkUrl,
+    document.querySelector('#workos-favicon').getAttribute('href'),...['--color-primary','--color-heading'].map(k=>document.documentElement.style.getPropertyValue(k)),
+    brandedReportFilename('hours.csv')],
   runtimeState: () => ({mounts, scopeEvents}),
   settle(id, result, status) {
     const index = pending.findIndex(call => call.id === id);
