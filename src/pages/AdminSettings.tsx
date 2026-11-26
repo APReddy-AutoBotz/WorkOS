@@ -837,8 +837,7 @@ export const AdminSettings = () => {
                      </div>
                      <ChevronRight size={16} className="text-gray-300 group-hover:translate-x-1 group-hover:text-primary transition-all" />
                   </button>
-                  <button
-                    onClick={() => setNotice({ type: 'info', message: `Branding is locked to the current ${productConfig.organizationName} visual system for this phase.` })}
+                  {hasPermission(currentUser, 'settings.manage') && <Link to="/admin/organization-profile#branding"
                     className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-slate-100 transition-all group"
                   >
                      <div className="flex items-center gap-3 text-heading">
@@ -846,7 +845,7 @@ export const AdminSettings = () => {
                         <span className="text-xs font-bold">Customize Branding</span>
                      </div>
                      <ChevronRight size={16} className="text-gray-300 group-hover:translate-x-1 group-hover:text-primary transition-all" />
-                  </button>
+                  </Link>}
                   <button
                     onClick={handleResetDemoData}
                     className="w-full flex items-center justify-between p-4 bg-orange-50 hover:bg-orange-100 rounded-2xl border border-primary/20 transition-all group"

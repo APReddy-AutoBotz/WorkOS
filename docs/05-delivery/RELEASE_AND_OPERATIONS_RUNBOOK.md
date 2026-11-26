@@ -904,6 +904,20 @@ After UTC month-end, the worker evaluates the last version retained during the m
 
 For an approved fixed-fee installment, inspect the line in the invoice CSV workspace and enter its released purchase-order number and allocation reason. Check the displayed committed and available values. To suspend new allocations, revoke purchase-order release access for the affected preparers. Retain existing commitments, balance evidence and migration history during application rollback.
 
+## Buyer branding (WOS-ORG-005)
+
+Open **Governance Settings → Customize Branding** with settings-management authority. Supply image paths served by the buyer's frontend, review the preview, select the effective date and save the organization profile. Both accent colors need at least 4.5:1 contrast against white. Empty asset and color fields use deployment defaults. The report label prefixes report export filenames and the email label prefixes Graph notification subjects.
+
+To publish the effective product name, login logo, favicon and accents before authentication, set `PUBLIC_BRANDING_ORGANIZATION_ID` to the deployment's buyer organization. An unset selector leaves the deployment login brand in use. A profile without a favicon uses the deployment logo configured by `VITE_PRODUCT_LOGO_URL`. The login endpoint takes no organization selector from the browser. For rollback, restore the prior values through the profile editor and retain the profile versions and audit records.
+
+### Governed work approval deadlines
+
+For governed timesheets, set the optional time allowed per stage in the approval policy editor. Each pending stage gets its own UTC deadline. Leaving the field blank keeps the stage untimed. Migration 119 accepts the optional field on work policies. Preserve the migration and retained policies during rollback. An older application cannot read a policy containing this field, so verify reader compatibility before reverting after adoption.
+
+### Scoped bulk timesheet approval
+
+Timesheet bulk approval uses the same scoped decision API as individual review. Admins, Country Directors, Project Managers and Team Leads with approval permission can preview submitted rows. If a reporting relationship changes before confirmation, inspect the per-item outcomes. A denied row that has left the reviewer’s scope appears without its worker name. Reload current records before retrying an unacknowledged decision.
+
 ## CI for progress updates
 
 PRs targeting main that only modify existing text in the changelog, implementation status, or enterprise delivery roadmap run a whitespace check and the full-history secret scan. Other PR changes, main pushes and manual runs select the application and deployment suite. The secret job checks for a complete clone and runs the checksum-pinned Gitleaks release against all fetched refs, including merge changes. Earlier green PR scans from the Gitleaks action covered the PR commit range. Use a manual run to obtain full evidence for a release revision. Revert the workflow change to restore full application validation on every eligible progress PR.

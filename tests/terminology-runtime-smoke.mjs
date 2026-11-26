@@ -208,7 +208,7 @@ try {
     };
     const pending = loadRuntimeTerminology();
     const request = runtimeRequests.at(-1);
-    assert.deepEqual(request, {url: '/api/organization-setup/terminology', init: {
+    assert.deepEqual(request, {url: '/api/organization-setup/terminology?includeBrand=1', init: {
       method: 'GET', credentials: 'include', headers: {
         'Content-Type': 'application/json', Authorization: `Bearer ${runtimeToken}`,
         'X-Organization-Id': runtimeScope.organizationId, 'X-Legal-Entity-Id': runtimeScope.legalEntityId,

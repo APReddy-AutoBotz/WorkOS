@@ -18,6 +18,9 @@ export type WorkApprovalDefinition = {
     stages: WorkStage[];
     locale: string;
     completionInApp: boolean;
+    stageDueMinutes?: number;
+    escalationUserId?: string;
+    overdueTemplate?: {key:string;subject:string;body:string};
     templates: Array<{
         key: string;
         subject: string;
@@ -95,6 +98,7 @@ export type WorkApprovalInstance = {
     };
     state: WorkStageState;
     transitions: WorkDecisionReceipt[];
+    overdueDeliveries?: Array<{stage:number;dueAt:string;attempts:number;status:'Pending'|'Recipient unavailable'|'Delivered'}>;
     notificationFailures: Array<{
         sequence: number;
         code: 'INFORMATIONAL_NOTIFICATION_UNAVAILABLE';
@@ -115,7 +119,7 @@ export type WorkApprovalNotification = {
     submissionId: string;
     transitionSequence: number;
     eventKey: string;
-    policyClass: 'ACTION_REQUIRED' | 'INFORMATIONAL';
+    policyClass: 'ACTION_REQUIRED' | 'INFORMATIONAL' | 'CONTROL_MANDATORY';
     templateId: string;
     operationId: string;
     locale: string;
@@ -208,8 +212,11 @@ const sameState = (a: {
 export const decodeWorkDecision = (v: unknown, instance?: string): WorkDecisionReceipt => { if (!object(v) || !keys(v, ['id', 'instanceId', 'sequence', 'stage', 'decision', 'actorId', 'activeRole', 'requestId', 'operationId', 'reason', 'outcome', 'createdAt']) || !uuid(v.id) || !uuid(v.instanceId) || instance !== undefined && v.instanceId !== instance || !integer(v.sequence, 1, 10) || !integer(v.stage, 0, 9) || !['Approved', 'Rejected'].includes(String(v.decision)) || !uuid(v.actorId) || !text(v.activeRole, 100) || !uuid(v.requestId) || !text(v.operationId) || !text(v.reason, 1000) || !state(v.outcome) || v.outcome.sequence !== v.sequence || !instant(v.createdAt))
     return invalid(); return v as WorkDecisionReceipt; };
 export const decodeWorkApprovalInstance = (v: unknown, id?: string): WorkApprovalInstance => {
-    if (!object(v) || !keys(v, ['id', 'timesheetId', 'submissionId', 'submissionSequence', 'sourceToken', 'requesterUserId', 'worker', 'createdAt', 'policy', 'state', 'transitions', 'notificationFailures', 'source']) || !uuid(v.id) || id !== undefined && v.id !== id || !uuid(v.timesheetId) || !text(v.submissionId) || !integer(v.submissionSequence, 1) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !object(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || !text(v.worker.id) || !text(v.worker.code) || !text(v.worker.name, 2000) || !instant(v.createdAt) || !object(v.policy) || !keys(v.policy, ['id', 'sequence', 'effectiveFrom', 'stages']) || !uuid(v.policy.id) || !integer(v.policy.sequence, 1) || !validCapabilityDate(v.policy.effectiveFrom) || !stages(v.policy.stages) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !state(v.state) || !Array.isArray(v.notificationFailures) || v.notificationFailures.length > 10)
+    if (!object(v) || !keys(v, ['id', 'timesheetId', 'submissionId', 'submissionSequence', 'sourceToken', 'requesterUserId', 'worker', 'createdAt', 'policy', 'state', 'transitions', 'notificationFailures', 'source',...(Object.hasOwn(v,'overdueDeliveries')?['overdueDeliveries']:[])]) || !uuid(v.id) || id !== undefined && v.id !== id || !uuid(v.timesheetId) || !text(v.submissionId) || !integer(v.submissionSequence, 1) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !object(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || !text(v.worker.id) || !text(v.worker.code) || !text(v.worker.name, 2000) || !instant(v.createdAt) || !object(v.policy) || !keys(v.policy, ['id', 'sequence', 'effectiveFrom', 'stages']) || !uuid(v.policy.id) || !integer(v.policy.sequence, 1) || !validCapabilityDate(v.policy.effectiveFrom) || !stages(v.policy.stages) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !state(v.state) || !Array.isArray(v.notificationFailures) || v.notificationFailures.length > 10)
         return invalid();
+    if (v.overdueDeliveries!==undefined && (!Array.isArray(v.overdueDeliveries) || v.overdueDeliveries.length>10 ||
+        v.overdueDeliveries.some(x=>!object(x) || !keys(x,['stage','dueAt','attempts','status']) || !integer(x.stage,0,9) ||
+          !instant(x.dueAt) || !integer(x.attempts,0) || !['Pending','Recipient unavailable','Delivered'].includes(String(x.status))))) return invalid();
     const quantity = (q: unknown) => { try {
         return typeof q === 'string' && q.length <= 200 && canonicalHours(q) === q;
     }
@@ -252,7 +259,7 @@ const notification = (v: unknown): CanonicalWorkNotice => {
     if(object(v)&&(v.kind==='fixed-fee-risk'||v.kind==='monthly-margin-risk'))return engagementRiskNotice(v);
     if(object(v)&&v.kind==='milestone-billing-eligibility')return milestoneBillingNotice(v); if(object(v)&&v.kind==='invoice-action')return invoiceActionNotice(v); if(object(v)&&v.kind==='invoice-export')return invoiceExportNotice(v); if(object(v)&&(v.kind==='invoice-batch-approval'||v.kind==='invoice-reversal-review'||v.kind==='invoice-reversal-decision'))return invoiceBatchNotice(v); if(object(v)&&v.kind==='tm-billing-eligibility')return tmBillingNotice(v);
     if(object(v)&&v.kind==='commercial-candidate-approval')return commercialNotice(v);
-    if(object(v)&&v.kind==='assignment-approval')return decodeAssignmentApprovalNotice(v); if(object(v)&&v.kind==='work-period')return decodePeriodNotice(v); if (!object(v) || !keys(v, ['id', 'eventId', 'instanceId', 'timesheetId', 'submissionId', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'createdAt', 'readAt']) || !uuid(v.id) || !uuid(v.instanceId) || !uuid(v.timesheetId) || !text(v.submissionId) || !integer(v.transitionSequence, 0, 10) || !APPROVAL_EVENT_KEYS.includes(v.eventKey as string) || !uuid(v.templateId) || !text(v.operationId) || v.eventId !== approvalEventIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || v.reasons.length < 1 || v.reasons.some(r => !['requester', 'affected_worker', 'current_stage_approver'].includes(r)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== 'ACTION_REQUIRED' || v.channelDecision !== 'Required'))
+    if(object(v)&&v.kind==='assignment-approval')return decodeAssignmentApprovalNotice(v); if(object(v)&&v.kind==='work-period')return decodePeriodNotice(v); if (!object(v) || !keys(v, ['id', 'eventId', 'instanceId', 'timesheetId', 'submissionId', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'createdAt', 'readAt']) || !uuid(v.id) || !uuid(v.instanceId) || !uuid(v.timesheetId) || !text(v.submissionId) || !integer(v.transitionSequence, 0, 10) || (!APPROVAL_EVENT_KEYS.includes(v.eventKey as string) && v.eventKey!=='approval.overdue_or_escalated') || !uuid(v.templateId) || !text(v.operationId) || v.eventId !== approvalEventIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || v.reasons.length < 1 || v.reasons.some(r => !(v.eventKey==='approval.overdue_or_escalated'?['current_stage_approver','escalation_target']:['requester','affected_worker','current_stage_approver']).includes(r)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== (v.eventKey==='approval.overdue_or_escalated'?'CONTROL_MANDATORY':'ACTION_REQUIRED') || v.channelDecision !== 'Required'))
     return invalid(); return v as WorkApprovalNotification; };
 const request = async (method: 'GET' | 'POST', tail: string, c: WorkApprovalContext | null, body?: Record<string, unknown>) => { const captured = owner(c), expected = await ownerKey(captured); owner(captured); const raw = await api.requestWithContext<unknown>(method, '/api/v1/work-approvals' + tail, body ? { ...body, expectedOwnerKey: expected } : undefined, captured); owner(captured); if (!object(raw) || raw.contractVersion !== WORK_APPROVAL_VERSION || raw.organizationId !== captured.scope.organizationId || raw.legalEntityId !== captured.scope.legalEntityId || raw.ownerKey !== expected || !uuid(raw.actorUserId) || captured.actorId !== undefined && raw.actorUserId !== captured.actorId)
     return invalid(); captured.actorId = raw.actorUserId; return raw; };

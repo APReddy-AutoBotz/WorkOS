@@ -564,7 +564,7 @@ Production Compose wiring for WOS-IAM-008 is checked with a fractional session l
 
 WOS-IAM-001 and WOS-NFR-SEC-001/002/013: shared auth throttle migration 057c, API middleware and `test:persistent-auth-throttle` verify durable replica budgets and safe storage failure.
 
-The production frontend build verifies WOS-ORG-005 document branding in `tests/document-metadata-smoke.mjs` and exercises the compiled login route in `tests/production-frontend-browser.mjs`. Build output checks cover default and configured metadata and a server-only environment marker.
+The production frontend build verifies WOS-ORG-005 document branding in `tests/document-metadata-smoke.mjs` and exercises the compiled login route in `tests/production-frontend-browser.mjs`. Build output checks cover default and configured metadata and a server-only environment marker. The compiled login check verifies that the deployment favicon survives runtime branding initialization.
 
 
 Notification diagnostics: WOS-IAM-005/010, CORE-003, INT-002/004, NFR-SEC-004/008/013 and PRV-001 map to scoped delivery SQL, the typed diagnostic projection, new notification writes, historical integration/audit readers and real API/browser negative tests. See [the task](../tasks/WOS-05-NOTIFICATION-DIAGNOSTIC-BOUNDARY.md). Broader notification policy/retry and deployment-wide support access remain separate.
@@ -837,5 +837,17 @@ WOS-RPT-007 and WOS-INV-008. The commercial drafting journey follows registered 
 WOS-RPT-007. The portfolio report accepts an eligible date range for registered fixed-fee installments, retainer periods, managed-service units or managed-service periods. The commercial drafting journey exercises the source permissions, signed balances, portfolio controls and audited CSV download.
 
 WOS-CTR-002 and WOS-COM-013 extend purchase-order commitments to approved fixed-fee installments in migration 131. The existing commercial drafting journey exercises the approved line, an over-limit refusal, a successful browser allocation, replay and revoked source access.
+
+### Governed work approval deadlines
+
+WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Approval reminder and escalation delivery remain open.
+
+### Scoped bulk timesheet approval
+
+WOS-APR-008. The timesheet bulk action requires a configured approval role and the existing approval permission. The timesheet export and approval browser journey changes one reporting relationship after a Team Lead previews two rows, then verifies the HTTP denial and both stored outcomes.
+
+WOS-APR-005 and WOS-INT-002. Timed timesheet policies retain an optional escalation recipient. The existing approval browser journey records that choice, and PostgreSQL acceptance rejects adoption when the recipient cannot see all selected workers. Migration 122 records mandatory in-app delivery attempts and acknowledgements. The real-clock approval journey verifies a temporarily unavailable escalation recipient, atomic retry, recipient-only visibility and acknowledgement.
+
+WOS-APR-005. Migration 121 and the overdue worker retain elapsed stage deadlines once, including late decisions between scans. The existing approval browser journey checks premature writes are rejected. Its optional real-clock rehearsal uses a one-minute stage and concurrent discovery calls.
 
 WOS-OPS-007 covers the progress-document CI path in `.github/workflows/workos-ci.yml`. The pinned Gitleaks CLI scans all fetched refs for every event. The release runbook describes the scope and full-validation fallback.
