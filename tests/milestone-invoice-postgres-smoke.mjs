@@ -807,12 +807,16 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
           ).status,
           409,
         );
-        const confirmations = await Promise.all([
-          request(csv + '/confirmations', { method: 'POST', body: confirm }),
-          request(csv + '/confirmations', { method: 'POST', body: confirm }),
-        ]);
-        assert.deepEqual(confirmations.map((x) => x.status).sort(), [200, 201]);
+        const confirmOriginal = async () => {
+          const confirmations = await Promise.all([
+            request(csv + '/confirmations', { method: 'POST', body: confirm }),
+            request(csv + '/confirmations', { method: 'POST', body: confirm }),
+          ]);
+          assert.deepEqual(confirmations.map(x => x.status).sort(), [200, 201]);
+          assert.equal(ok(confirmations.find(x => x.status === 201),201).confirmation.method,'MANUAL_ATTESTATION');
+        };
         if (verifyPurchaseOrder) {
+          await confirmOriginal();
           const poBalance=ok(await request(orderPath)).commitment;
           assert.deepEqual([poBalance.committed,poBalance.consumed,poBalance.remaining],['0','125.1500','24.8500']);
           await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'");
@@ -828,13 +832,6 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
           await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.milestone_billing.view'");
           return;
         }
-        assert.equal(
-          ok(
-            confirmations.find((x) => x.status === 201),
-            201,
-          ).confirmation.method,
-          'MANUAL_ATTESTATION',
-        );
         assert.deepEqual(
           (await pool.query('select payload from invoice_csv_artifacts where id=$1', [artifact.id])).rows[0]
             .payload,
@@ -842,11 +839,11 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         );
         const line = csvSource.lines[0], reversalPath = csv + '/batches/' + draft.batch.id + '/lines/' + line.lineId + '/reversal-request';
         const command = { artifactId: artifact.id, sha256: artifact.sha256, expectedOwnerKey: inspection.ownerKey,
-          inspectedState: 'Billed/Confirmed', reason: 'Synthetic downstream full reversal review' };
+          inspectedState: 'Exported', reason: 'Synthetic downstream full reversal review' };
         const submitReversal = (overrides = {}) => request(reversalPath, { method: 'POST', body: { ...command, ...overrides } });
         assert.equal(ok(await request(reversalPath)).request, null);
         assert.equal((await request(reversalPath.replace(line.lineId, randomUUID()))).status, 404);
-        for (const values of [{ inspectedState: 'Exported' }, { expectedOwnerKey: '0'.repeat(64) }, { sha256: '0'.repeat(64) }])
+        for (const values of [{ inspectedState: 'Billed/Confirmed' }, { expectedOwnerKey: '0'.repeat(64) }, { sha256: '0'.repeat(64) }])
           assert.equal((await submitReversal(values)).status, 409);
         assert.equal((await submitReversal({ amount: '1.00' })).status, 400);
         await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.invoice_drafts.prepare'");
@@ -858,8 +855,8 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         await pool.query('drop trigger synthetic_refuse_reversal on audit_logs');
         await assert.rejects(pool.query(
           `insert into invoice_line_reversal_requests(id,organization_id,legal_entity_id,line_id,artifact_id,confirmation_id,actor_id,active_role,reason,operation_id)
-           select $1,c.organization_id,c.legal_entity_id,$2,c.artifact_id,c.id,c.actor_id,c.active_role,$3,'synthetic-missing-audit'
-           from invoice_batch_confirmations c where c.artifact_id=$4`,
+           select $1,c.organization_id,c.legal_entity_id,$2,c.id,null,c.actor_id,c.active_role,$3,'synthetic-missing-audit'
+           from invoice_csv_artifacts c where c.id=$4`,
           [randomUUID(), line.lineId, command.reason, artifact.id],
         ), e => e.code === '23514' && e.message.includes('matching audit evidence'));
         const requests = await Promise.all([submitReversal(), submitReversal()]);
@@ -868,7 +865,7 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         assert.equal(retainedReversal.reason, command.reason);
         assert.deepEqual(ok(await request(reversalPath + '/review-route')).route, { status: 'NO_REVERSAL_POLICY' });
         const noPolicyReview = await request(reversalPath + '/review', {
-          method: 'POST', body: { expectedOwnerKey: inspection.ownerKey, requestId: retainedReversal.id, policyId: invoicePolicy.id, inspectedState: 'Billed/Confirmed' },
+          method: 'POST', body: { expectedOwnerKey: inspection.ownerKey, requestId: retainedReversal.id, policyId: invoicePolicy.id, inspectedState: 'Exported' },
         });
         assert.equal(noPolicyReview.status, 409);
         assert.equal(ok(await request(reversalPath + '/review')).review, null);
@@ -879,12 +876,12 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
             reason:'Synthetic milestone correction review policy'},
         }),201).policy;
         const milestoneReview = ok(await request(reversalPath + '/review',{
-          method:'POST',body:{expectedOwnerKey:inspection.ownerKey,requestId:retainedReversal.id,policyId:enabledPolicy.id,inspectedState:'Billed/Confirmed'},
+          method:'POST',body:{expectedOwnerKey:inspection.ownerKey,requestId:retainedReversal.id,policyId:enabledPolicy.id,inspectedState:'Exported'},
         }),201).review;
         const correctionPath = '/api/v1/work-approvals/reversal-reviews/' + milestoneReview.id;
         const correctionSource = ok(await request(correctionPath,{identity:ids.second})).review;
         assert.equal(correctionSource.sourceType,'MILESTONE_ACCEPTANCE');
-        assert.equal(correctionSource.externalReference,confirm.reference);
+        assert.equal(correctionSource.confirmationId,null);
         const acceptedCorrection = ok(await request(correctionPath+'/decisions',{
           method:'POST',identity:ids.second,body:{expectedOwnerKey:await readApprovalOwner(request,ids.second),expectedSequence:0,
             policyId:enabledPolicy.id,confirmationId:correctionSource.confirmationId,decision:'Approved',reason:'Synthetic milestone reversal approval'},
@@ -1029,6 +1026,7 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         assert.equal(recovered.total,issued.amount);
         assert.equal(recovered.reference,creditAttestation.reference);
         assert.equal(ok(await request(csv+'/confirmation-sources/'+finalBatch)).source.state,'Billed/Confirmed');
+        await confirmOriginal();
         assert.equal(ok(await request(csv+'/confirmation-sources/'+draft.batch.id)).confirmation.reference,confirm.reference);
         const reverse=ok(await request(linkPath)).lines;
         assert.equal(reverse.length,1);
@@ -1052,7 +1050,7 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         assert.equal(await validReviewPolicy({ ...invoicePolicyDefinition, fullLineReversals: 'true' }), false);
         assert.equal(await validReviewPolicy({ ...invoicePolicyDefinition, fullLineReversals: true, stages: [invoicePolicyDefinition.stages[0], invoicePolicyDefinition.stages[0]] }), false);
 
-        assert.ok(retainedReversal.confirmationId);
+        assert.equal(retainedReversal.confirmationId,null);
         assert.equal((await submitReversal({ reason: 'Synthetic changed motive' })).status, 409);
         assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and module='Invoice Corrections' and reason=$2", [retainedReversal.id, command.reason])).rows[0].n, 1);
         assert.equal((await pool.query("select count(*)::int n from invoice_draft_occupancies where line_id=$1", [line.lineId])).rows[0].n, 1);
