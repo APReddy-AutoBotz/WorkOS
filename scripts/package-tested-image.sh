@@ -36,13 +36,17 @@ assert.equal(bom.metadata.component.version,app.version);
 assert.ok(bom.components.length>0 && bom.dependencies.length>0);
 NODE
 docker run --rm --network none "$image_id" apk info -v | LC_ALL=C sort > "$out/alpine-packages.txt"
+docker run --rm -i --network none "$image_id" node --input-type=module - \
+  < scripts/image-third-party-notices.mjs > "$out/npm-third-party-notices.json"
+docker run --rm --network none "$image_id" cat /app/dist/stylesheet-notices.txt > "$out/stylesheet-notices.txt"
+test -s "$out/stylesheet-notices.txt"
 test -s "$out/alpine-packages.txt"
 docker save "$image_id" | gzip -1 > "$out/image.tar.gz"
 (
   cd -- "$out"
   printf '%s\n' "$revision" > source-commit.txt
   printf '%s\n' "$image_id" > image-id.txt
-  sha256sum image.tar.gz npm-runtime.cdx.json alpine-packages.txt source-commit.txt image-id.txt > SHA256SUMS
+  sha256sum image.tar.gz npm-runtime.cdx.json npm-third-party-notices.json stylesheet-notices.txt alpine-packages.txt source-commit.txt image-id.txt > SHA256SUMS
   sha256sum --check SHA256SUMS
   docker load --input image.tar.gz
 )

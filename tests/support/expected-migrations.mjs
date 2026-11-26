@@ -148,6 +148,7 @@ const expected = [
   '121_wos05_overdue_work_stages',
   '122_wos05_overdue_delivery',
   '130_wos07_risk_recipient_inbox_access',
+  '131_wos06_fixed_fee_po_commitments',
 ];
 
 export function expectedMigrationsFrom(first) {

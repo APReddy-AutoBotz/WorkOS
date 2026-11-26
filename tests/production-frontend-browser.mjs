@@ -52,6 +52,12 @@ try {
   assert.equal(await page.title(), brand);
   assert.equal(await page.locator('#workos-favicon').getAttribute('href'), deploymentIcon);
   assert.equal(await signIn.evaluate(el => getComputedStyle(el).textTransform), 'uppercase');
+  await page.route('**/api/organization-setup/login-brand',route=>route.fulfill({json:{
+    productName:'Synthetic Buyer Portal',logoUrl:'/workos-mark.svg?buyer',faviconUrl:'/workos-mark.svg?buyer-icon'}}));
+  await page.reload();
+  await page.waitForFunction(()=>document.title==='Synthetic Buyer Portal');
+  assert.equal(await page.locator('#workos-favicon').getAttribute('href'),'/workos-mark.svg?buyer-icon');
+  await page.locator('img[src="/workos-mark.svg?buyer"]').first().waitFor();
   assert.deepEqual(errors, []);
   await new Promise(resolve => server.close(resolve));
   assert.equal((await fetch(origin + '/api/preview-check', {signal: AbortSignal.timeout(5000)})).status, 502);
