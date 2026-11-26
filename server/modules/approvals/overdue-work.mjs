@@ -8,12 +8,26 @@ const builtIn={id:'0525e4f1-2f48-48b7-bdc6-3774721b5c0c',locale:'en',
   key:OVERDUE_KEY,subject:'Work approval overdue',body:'Stage {{stageNumber}} for {{sourceRef}} exceeded its deadline.'};
 
 // Catch up from immutable stage history, including decisions recorded between ticks.
-export function collectOverdueWorkStages(pool) {
-  return pool.query(`insert into work_approval_overdue_stages(instance_id,stage,due_at)
-    select s.instance_id,s.stage,s.due_at from work_approval_timed_stages s
-    where s.due_at < least(now(),coalesce(s.decided_at,now()))
-      and not exists(select from work_approval_overdue_stages e where e.instance_id=s.instance_id and e.stage=s.stage)
-    order by s.due_at,s.instance_id,s.stage limit 100 on conflict do nothing`);
+export async function collectOverdueWorkStages(pool) {
+  const c=await pool.connect();
+  try {
+    await c.query('begin isolation level read committed');
+    const {rows}=await c.query(`select i.id from work_approval_instances i
+      join work_approval_timed_stages s on s.instance_id=i.id
+      where s.due_at < least(now(),coalesce(s.decided_at,now()))
+        and not exists(select from work_approval_overdue_stages e where e.instance_id=i.id and e.stage=s.stage)
+      order by s.due_at,i.id,s.stage limit 100 for update of i skip locked`);
+    // The fresh statement snapshot includes decisions committed before we took each instance lock.
+    const result=await c.query(`insert into work_approval_overdue_stages(instance_id,stage,due_at)
+      select instance_id,stage,due_at from work_approval_timed_stages
+      where instance_id=any($1::uuid[]) and due_at < least(now(),coalesce(decided_at,now()))
+      on conflict do nothing`,[rows.map(row=>row.id)]);
+    await c.query('commit');
+    return result;
+  } catch(error) {
+    await c.query('rollback');
+    throw error;
+  } finally {c.release();}
 }
 
 async function dispatchNext(c,o) {

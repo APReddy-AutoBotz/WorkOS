@@ -43,6 +43,10 @@ Security-sensitive PRs require:
 - Logging review for sensitive-data exposure.
 - Exact-head independent review before merge.
 
+## Historical scanner findings
+
+The five entries in `.gitleaksignore` identify individual historical occurrences by commit, file, rule and line. Three are the session fixture used by the local WOS-02 acceptance service. The project owner reported using no secrets. Repository inspection traced the other two values to a synthetic request idempotency key and a published file-verification checksum. WorkOS issue #10 holds the provenance and scan evidence. A finding at a different commit or location requires its own disposition.
+
 ## Exclusions
 
 This policy is not a guarantee of vulnerability-free software and does not replace buyer-specific penetration testing, identity configuration, infrastructure security or operational monitoring.
