@@ -13,9 +13,11 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  await pool.query('update users set employee_record_id=$1,employee_id=$1 where id=$2',[recipient,ids.denied.id]);
  await pool.query("insert into user_roles(user_id,role_id)select $1,id from roles where name='TeamLead' on conflict do nothing",[ids.reader.id]);
  await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead','approvals.view',true) on conflict(role_name,permission_key)do update set enabled=true");
+ await pool.query(`insert into approval_records(id,entity_type,entity_id,subject_employee_id,requester_name,status)
+ values('synthetic-comment-review','AllocationChange','synthetic-comment-source',$1,'Synthetic requester','Pending')`,[recipient]);
  await withCommercialApi({databaseUrl,identities:ids},async({request,tokenFor,baseUrl})=>{
   const identity=ids.manager,current=await request('/api/auth/me');assert.equal(current.status,200);
-  const fixtureServer = await startFixtureServer({root, fixtures: ['legacy-approval'], apiUrl: baseUrl, publicEnv: {VITE_APP_MODE: 'production', VITE_ALLOW_TEST_FALLBACK: 'false'}});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['legacy-approval'], application: true, apiUrl: baseUrl, publicEnv: {VITE_FEATURE_TEAMS: 'true', VITE_APP_MODE: 'production', VITE_ALLOW_TEST_FALLBACK: 'false'}});
   let browser;
   try{
    const origin = fixtureServer.url;
@@ -27,6 +29,18 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.route('**/*',route=>{const url=new URL(route.request().url());return /^https?:$/.test(url.protocol)&&url.origin!==origin?route.abort():route.continue();});
    await page.goto(origin+'/tests/fixtures/legacy-approval.html',{waitUntil:'domcontentloaded',timeout:60000});
    await page.getByLabel('Delegator',{exact:true}).waitFor({timeout:60000});
+   const reject = page.getByRole('row').filter({hasText:'synthetic-comment-source'}).getByTitle('Reject');
+   page.once('dialog', dialog => dialog.accept('   '));
+   await reject.click();
+   await page.getByRole('status').filter({hasText:'Enter a rejection reason'}).waitFor();
+   assert.equal((await pool.query("select status from approval_records where id='synthetic-comment-review'")).rows[0].status,'Pending');
+   const reason = 'The requested allocation overlaps an approved assignment.';
+   page.once('dialog', dialog => dialog.accept(reason));
+   const decision = page.waitForResponse(response => response.url().endsWith('/api/approvals/synthetic-comment-review/status') && response.request().method() === 'PATCH');
+   await reject.click();
+   assert.equal((await decision).status(),200);
+   assert.deepEqual((await pool.query("select status,comments from approval_records where id='synthetic-comment-review'")).rows[0],{status:'Rejected',comments:reason});
+   await page.getByRole('row').filter({hasText:'synthetic-comment-source'}).getByText(reason,{exact:true}).waitFor();
    await page.getByLabel('Delegator',{exact:true}).selectOption(f.ownerId);
    await page.getByLabel('Delegate',{exact:true}).selectOption(recipient);
    await page.getByLabel('Delegation role',{exact:true}).selectOption('Admin');
@@ -39,6 +53,38 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('button',{name:'Create Delegation',exact:true}).click();assert.equal((await saved).status(),200);
    await page.getByRole('status').filter({hasText:'Created approval delegation to Synthetic browser delegate.'}).waitFor();
    assert.equal((await pool.query('select count(*)::int n from approval_delegations')).rows[0].n,1);
+   await pool.query(`insert into approval_records(id,entity_type,entity_id,subject_employee_id,requester_name,status)
+     values('synthetic-teams-review','AllocationChange','synthetic-teams-source',$1,'Synthetic requester','Pending')`,[recipient]);
+   const issued = await request('/api/integrations/teams-action-tokens',{method:'POST',body:{
+     entity_type:'ApprovalRecord',entity_id:'synthetic-teams-review',action:'reject',expires_at:new Date(Date.now()+3600000).toISOString(),
+   }});
+   assert.equal(issued.status,200);
+   const executePath='/api/integrations/teams-action-tokens/'+issued.body.token+'/execute';
+   const refused=async(identity,label)=>{
+    const snapshot=async()=>Promise.all(['approval_records','teams_action_tokens','audit_logs','notification_events'].map(async table=>
+      (await pool.query(`select to_jsonb(t) value from ${table} t order by to_jsonb(t)::text`)).rows));
+    const before=await snapshot();
+    const result=await request(executePath,{identity,method:'POST',body:{comments:reason}});
+    assert.equal(result.status,403,label);
+    assert.match(JSON.stringify(result.body),/Independent approval authority/);
+    assert.deepEqual(await snapshot(),before);
+   };
+   await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','approvals.view',false) on conflict(role_name,permission_key) do update set enabled=false");
+   try {await refused(ids.manager,'missing approval grant');} finally {
+    await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='approvals.view'");
+   }
+   await pool.query("update approval_records set requester_id=$1 where id='synthetic-teams-review'",[ids.manager.id]);
+   try {await refused(ids.manager,'requester cannot decide');} finally {
+    await pool.query("update approval_records set requester_id=null where id='synthetic-teams-review'");
+   }
+   await page.goto(origin+'/teams/actions/'+issued.body.token);
+   const execute = page.getByRole('button',{name:'Execute Action',exact:true});
+   await execute.click();
+   await page.getByRole('alert').getByText('Enter a rejection reason',{exact:false}).waitFor();
+   await page.getByLabel('Decision comment (required for rejection)').fill(reason);
+   await execute.click();
+   await page.getByText('Teams action completed: reject').waitFor();
+   assert.deepEqual((await pool.query("select status,comments from approval_records where id='synthetic-teams-review'")).rows[0],{status:'Rejected',comments:reason});
    console.log('Real approval workspace: invalid participant role displays server refusal with zero writes; corrected delegation saves once and displays acknowledgement.');
   }finally{await browser?.close();await fixtureServer.close();}
  });

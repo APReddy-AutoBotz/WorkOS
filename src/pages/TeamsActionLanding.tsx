@@ -11,6 +11,7 @@ import { productConfig } from '../config/productConfig';
 export const TeamsActionLanding = () => {
   const { token = '' } = useParams();
   const navigate = useNavigate();
+  const [comment, setComment] = useState('');
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<TeamsActionToken | null>(null);
   const [error, setError] = useState('');
@@ -22,7 +23,7 @@ export const TeamsActionLanding = () => {
     setExecuting(true);
     setError('');
     try {
-      const next = await integrationService.executeTeamsActionToken(token, `Completed from ${productConfig.productName} Teams action link.`);
+      const next = await integrationService.executeTeamsActionToken(token, comment.trim() || undefined);
       setResult(next);
       if (next.action === 'open_portal' && next.targetUrl) {
         navigate(next.targetUrl);
@@ -62,7 +63,12 @@ export const TeamsActionLanding = () => {
           </div>
         </div>
 
-        {error && <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div>}
+        {!result && <label className="mt-5 block text-sm font-semibold">
+          Decision comment (required for rejection)
+          <textarea className="input-field mt-1 block w-full" value={comment} disabled={executing}
+            onChange={event => setComment(event.target.value)} />
+        </label>}
+        {error && <div role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div>}
         {result && (
           <div className="mt-5 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-bold text-green-700">
             <div className="flex items-center gap-2"><CheckCircle2 size={16} /> Teams action completed: {result.action}</div>
