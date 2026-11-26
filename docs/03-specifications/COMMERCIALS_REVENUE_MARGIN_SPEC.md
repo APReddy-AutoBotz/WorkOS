@@ -362,7 +362,7 @@ The selected entity reporting period defines both boundaries. Compare the cumula
 
 ### Standing managed-service margin thresholds
 
-WOS-RPT-004 and WOS-INT-002. A governed managed-service engagement amendment may adopt an exact signed threshold percentage with up to two fractional digits. The approval reference, effective date and threshold are retained with the terms. An omitted threshold carries forward the prior approved value. An explicit disabled value ends it from the new effective date. The one-off reporting comparator remains available. Delivery and historical-month alert evaluation require separate evidence.
+WOS-RPT-004 and WOS-INT-002. A governed managed-service engagement amendment may adopt an exact signed threshold percentage with up to two fractional digits. The approval reference, effective date and threshold are retained with the terms. An omitted threshold carries forward the prior approved value. An explicit disabled value ends it from the new effective date. The one-off reporting comparator remains available. For a mandatory alert, evaluate the retained monthly margin against the approved threshold in force on the last calendar day of that reporting month. Wait until the month has ended in UTC. An amendment effective on the last day applies to that month. A later amendment applies prospectively. A disabled or absent threshold and an unavailable margin percentage cannot establish a breach. Use the retained margin percentage and a strict below-threshold comparison. Delivery must retain evidence of the financial version and applicable approved terms.
 
 ### Fixed-fee expense budgets
 

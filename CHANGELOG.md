@@ -4,6 +4,8 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+- Added governed month-end managed-service margin alerts, buyer recipient configuration, delivery history and inbox acknowledgement.
+
 - Corrected forecast pressure and project allocation indicators for out-of-term projects and missing capacity.
 
 - Anchored forecast charts, roll-off dates and exports to the report source date.
