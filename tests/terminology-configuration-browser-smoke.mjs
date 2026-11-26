@@ -77,7 +77,7 @@ const reader = async (after = 0, organizationId = 'org-a', legalEntityId = 'lega
   return request;
 };
 const runtimeReader = (after, organizationId, legalEntityId) =>
-  reader(after, organizationId, legalEntityId, '/api/organization-setup/terminology?includeBrand=1');
+  reader(after, organizationId, legalEntityId, '/api/organization-setup/terminology?includeBrand=1&includeReleases=1');
 const expectConfiguration = async expected => {
   await page.waitForFunction(value => document.getElementById('term-employee-singular')?.value === value, expected.terms.employee.singular);
   for (const key of keys) {

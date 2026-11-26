@@ -1,3 +1,4 @@
+import {moduleReleased} from '../module-releases.mjs';
 import {Router} from 'express';
 import {z} from 'zod';
 import {safeNotificationMetadata, safeNotificationProvider} from './delivery-diagnostics.mjs';
@@ -8,6 +9,7 @@ export const createNotificationRouter = ({
   requireDatabase,
   requireAuth,
   requirePermission,
+  requireNotificationRelease,
   buildEmployeeScopeWhere,
   audit,
   sendNotification,
@@ -16,7 +18,7 @@ export const createNotificationRouter = ({
   if (!pool || typeof pool.query !== 'function' || typeof pool.connect !== 'function'
       || typeof run !== 'function' || typeof buildEmployeeScopeWhere !== 'function'
       || typeof audit !== 'function' || typeof sendNotification !== 'function'
-      || ![requireDatabase, requireAuth, requirePermission].every(value => typeof value === 'function')
+      || ![requireDatabase, requireAuth, requirePermission, requireNotificationRelease].every(value => typeof value === 'function')
       || typeof logError !== 'function') {
     throw new TypeError('Notification routes require a database, identity guards, scope resolver, audit writer, and delivery adapter.');
   }
@@ -57,11 +59,11 @@ export const createNotificationRouter = ({
     }
   });
 
-  router.get('/notification-templates', requireDatabase, requireAuth, requirePermission('notifications.manage'), (_req, res) => {
+  router.get('/notification-templates', requireDatabase, requireAuth, requirePermission('notifications.manage'), requireNotificationRelease, (_req, res) => {
     run(res, 'select * from notification_templates order by event_type, channel');
   });
 
-  router.post('/notification-templates', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {
+  router.post('/notification-templates', requireDatabase, requireAuth, requirePermission('notifications.manage'), requireNotificationRelease, async (req, res) => {
     const schema = z.object({
       id: z.string().optional(),
       event_type: z.string().min(1),
@@ -110,7 +112,7 @@ export const createNotificationRouter = ({
     }
   });
 
-  router.get('/notification-preferences', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
+  router.get('/notification-preferences', requireDatabase, requireAuth, requirePermission('notifications.view'), requireNotificationRelease, async (req, res) => {
     const params = [];
     const where = buildEmployeeScopeWhere(req, params, 'e');
     await run(res, `
@@ -122,7 +124,7 @@ export const createNotificationRouter = ({
     `, params);
   });
 
-  router.post('/notification-preferences', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
+  router.post('/notification-preferences', requireDatabase, requireAuth, requirePermission('notifications.view'), requireNotificationRelease, async (req, res) => {
     const schema = z.object({
       id: z.string().optional(),
       employee_id: z.string().min(1),
@@ -187,7 +189,7 @@ export const createNotificationRouter = ({
     }
   });
 
-  router.get('/notification-delivery-attempts', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {
+  router.get('/notification-delivery-attempts', requireDatabase, requireAuth, requirePermission('notifications.manage'), requireNotificationRelease, async (req, res) => {
     try {
       const params = [];
       const where = buildEmployeeScopeWhere(req, params, 'e');
@@ -205,7 +207,7 @@ export const createNotificationRouter = ({
     }
   });
 
-  router.post('/notifications/test-delivery', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {
+  router.post('/notifications/test-delivery', requireDatabase, requireAuth, requirePermission('notifications.manage'), requireNotificationRelease, async (req, res) => {
     const schema = z.object({
       employee_id: z.string().min(1),
       channels: z.array(z.enum(['InApp', 'Email', 'Teams'])).min(1).default(['InApp']),
@@ -232,6 +234,10 @@ export const createNotificationRouter = ({
         await client.query('rollback');
         res.status(403).json({ error: 'Notification test recipient is outside active-role data scope' });
         return;
+      }
+      if (parsed.data.channels.includes('Teams') && !await moduleReleased(client, targetEmployee.organization_id,'teams')) {
+        await client.query('rollback');
+        return res.status(403).json({error:'Teams is disabled for this organization and environment',code:'MODULE_DISABLED'});
       }
       const event = await sendNotification(client, req, {
         recipientEmployeeId: targetEmployee.id,

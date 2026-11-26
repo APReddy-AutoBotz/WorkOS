@@ -10,7 +10,7 @@ import {shiftCapacityDate} from '../shared/worker-capacity.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url)),role='Synthetic versioned assignment role',precise='20.00000000000000001';
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);const{identities,today,monday,dates}=await seedCapacity(pool);const weekday=new Date(today+'T00:00:00Z').getUTCDay(),currentMonday=shiftCapacityDate(today,weekday===6?2:weekday===0?1:1-weekday),pastMonday=shiftCapacityDate(currentMonday,-7);await pool.query('update projects set start_date=$1 where id=$2',[shiftCapacityDate(pastMonday,-7),f.projectId]);await seedWorkPeriods(pool,today);await pool.query("insert into role_definitions(id,name,department,description)values('synthetic-assignment-version-role',$1,'Delivery','Synthetic explicit role')",[role]);
- await withCommercialApi({databaseUrl,identities},async({baseUrl:apiUrl,request,tokenFor})=>{
+ await withCommercialApi({enableLeave:true, databaseUrl,identities},async({baseUrl:apiUrl,request,tokenFor})=>{
   const cap=await request('/api/v1/worker-capacity/workers/'+f.ownerId+'/profiles',{method:'POST',body:{expectedLatestId:null,effectiveFrom:today,definition:capacityDefinition,reason:'Synthetic version journey capacity'}});assert.equal(cap.status,201);await approveCapacityLeave(request,dates[1],identities.reader);await rejectCalendarHolidayAndRetainLegacyFixture(pool,request,dates[2],identities.reader);assert.equal((await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly','daily']}})).status,201);
   const fixtureServer = await startFixtureServer({root, fixtures: ['assignment-version', 'work-submission-history'], apiUrl});let browser;
   try{

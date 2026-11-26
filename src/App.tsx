@@ -6,7 +6,7 @@ import { authService } from './services/authService';
 import { getOrganizationScope } from './services/apiClient';
 import { canOpenAuditWithoutOrganizationScope, hasRouteRole, ROUTE_ROLES } from './services/accessControl';
 import { UserRole } from './types';
-import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from './config/featureFlags';
+import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled, moduleReleasePending } from './config/featureFlags';
 import { RuntimeTerminology } from './config/RuntimeTerminology';
 import { OrganizationScopeGate } from './components/auth/OrganizationScopeGate';
 
@@ -50,6 +50,7 @@ const ImportExport = lazyPage('ImportExport', () => import('./pages/ImportExport
 const AuditTrail = lazyPage('AuditTrail', () => import('./pages/AuditTrail').then(module => ({ default: module.AuditTrail })));
 const WorkingCalendarInspector = lazyPage('WorkingCalendarInspector', () => import('./pages/WorkingCalendarInspector').then(module => ({ default: module.WorkingCalendarInspector })));
 const TerminologyConfigurationEditor = lazyPage('TerminologyConfigurationEditor', () => import('./pages/TerminologyConfigurationEditor').then(module => ({ default: module.TerminologyConfigurationEditor })));
+const ModuleReleases = lazyPage('ModuleReleases', () => import('./pages/ModuleReleases').then(module => ({default:module.ModuleReleases})));
 const OrganizationProfileEditor = lazyPage('OrganizationProfileEditor', () => import('./pages/OrganizationProfileEditor').then(module => ({ default: module.OrganizationProfileEditor })));
 const AdminSettings = lazyPage('AdminSettings', () => import('./pages/AdminSettings').then(module => ({ default: module.AdminSettings })));
 const Login = lazyPage('Login', () => import('./pages/Login').then(module => ({ default: module.Login })));
@@ -85,6 +86,7 @@ const FeatureRoute = ({
   flag: EnterpriseFeatureFlag;
   roles: readonly UserRole[];
 }) => {
+  if (moduleReleasePending()) return <p role="status">Loading module release settings…</p>;
   if (!isEnterpriseFeatureEnabled(flag)) {
     return <Navigate to="/governance/brd-traceability" replace />;
   }
@@ -180,9 +182,9 @@ export default function App() {
                   </RoleRoute>
                 } />
                 <Route path="/planning" element={
-                  <RoleRoute roles={ROUTE_ROLES.planningWorkspace}>
+                  <FeatureRoute flag="planning" roles={ROUTE_ROLES.planningWorkspace}>
                     <PlanningWorkspace />
-                  </RoleRoute>
+                  </FeatureRoute>
                 } />
                 <Route path="/action-center" element={
                   <RoleRoute roles={ROUTE_ROLES.actionCenter}>
@@ -295,9 +297,9 @@ export default function App() {
                   </FeatureRoute>
                 } />
                 <Route path="/approvals" element={
-                  <FeatureRoute flag="notifications" roles={ROUTE_ROLES.approvals}>
+                  <RoleRoute roles={ROUTE_ROLES.approvals}>
                     <ApprovalsWorkspace />
-                  </FeatureRoute>
+                  </RoleRoute>
                 } />
                 <Route path="/notifications" element={
                   <FeatureRoute flag="notifications" roles={ROUTE_ROLES.notifications}>
@@ -349,6 +351,7 @@ export default function App() {
                     <AdminSettings />
                   </RoleRoute>
                 } />
+                <Route path="/admin/module-releases" element={<ModuleReleases/>} />
                 <Route path="/admin/organization-profile" element={
                   <RoleRoute roles={ROUTE_ROLES.adminSettings}>
                     <OrganizationProfileEditor />

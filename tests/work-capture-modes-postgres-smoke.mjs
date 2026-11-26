@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {copyFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -17,6 +17,7 @@ await withCommercialDatabase(async({pool})=>{
     const work=await workSnapshot(pool),grants=await table(pool,'role_permissions');
     for(const row of work.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;row.value.source_identity=null;row.value.category_code=null;row.value.category_reference=null;} // additive 047/048 column
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
+    await includeReleaseGrant(pool, grants);
     assert.deepEqual(await workSnapshot(pool),work);assert.deepEqual(await table(pool,'role_permissions'),grants);
     assert.equal((await pool.query('select count(*)::int n from work_capture_mode_versions')).rows[0].n,0);
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);

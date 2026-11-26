@@ -1,3 +1,4 @@
+import {isEnterpriseFeatureEnabled} from '../config/featureFlags';
 import {CapabilityPlanner} from '../components/CapabilityPlanner';
 import {ResourceDemandPanel} from '../components/ResourceDemandPanel';
 import { useEffect, useMemo, useState } from 'react';
@@ -246,6 +247,7 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
 export const ResourcePlanningBoard = () => <ResourcePlanningSignals />;
 
 export const PlanningWorkspace = () => {
+  const planning = isEnterpriseFeatureEnabled('planning');
   const user = authService.getCurrentUser();
   const canEditAllocations = canManageAllocations(user);
   const [allocationFocus, setAllocationFocus] = useState<AllocationControlFocus | null>(null);
@@ -256,22 +258,22 @@ export const PlanningWorkspace = () => {
   return (
     <div className="space-y-8 pb-12">
       <PageHeader
-        title="Planning Workspace"
-        subtitle="Review capacity signals and update allocation plans in one workspace. Allocation edits remain the source of record."
-        breadcrumb={['Planning']}
+        title={planning ? "Planning Workspace" : "Allocation Control"}
+        subtitle={planning ? "Review capacity signals and update allocation plans in one workspace." : "Review resource demand and manage assignments."}
+        breadcrumb={[planning ? "Planning" : "Allocations"]}
       />
 
       <CapabilityPlanner/>
       <ResourceDemandPanel onFocusAllocation={canEditAllocations?focusAllocationControl:undefined}/>
 
-      <ResourcePlanningSignals embedded onFocusAllocation={canEditAllocations ? focusAllocationControl : undefined} />
+      {planning && <ResourcePlanningSignals embedded onFocusAllocation={canEditAllocations ? focusAllocationControl : undefined} />}
 
       {canEditAllocations ? (
         <AllocationControlPanel embedded focus={allocationFocus} onClearFocus={() => setAllocationFocus(null)} />
       ) : (
         <Card title="Allocation Control">
           <p className="text-sm font-medium leading-relaxed text-body/70">{`
-            Allocation edits are restricted to Admin, HR, ${productConfig.terminology.regionalOwner}, and Project Manager roles. Planning signals remain available here for review.
+            Allocation edits are restricted to Admin, HR, ${productConfig.terminology.regionalOwner}, and Project Manager roles.
           `}</p>
         </Card>
       )}

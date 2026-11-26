@@ -12,11 +12,11 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   await pool.query('update users set employee_record_id=$2,employee_id=$3 where id=$1',[hr.id,hr.employeeRecordId,hr.employeeId]);
   await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin'",[ids.reader.id]);
   const reviewerIdentity={...ids.reader,role:'Admin'};
-  await withCommercialApi({databaseUrl,identities:ids},async({request,tokenFor,baseUrl})=>{
+  await withCommercialApi({enableLeave:true, databaseUrl,identities:ids},async({request,tokenFor,baseUrl})=>{
     const created=await request('/api/leave/requests',{identity:hr,method:'POST',body:{employee_id:hr.employeeRecordId,leave_type_id:'leave-type-unpaid',start_date:today,end_date:today,reason:'Synthetic browser independence'}});
     assert.equal(created.status,200,JSON.stringify(created.body));
     const path=`/api/leave/requests/${created.body.id}/status`;
-    const fixtureServer = await startFixtureServer({root, fixtures: ['independent-leave'], apiUrl: baseUrl, publicEnv: {VITE_FEATURE_LEAVE: 'true'}});
+    const fixtureServer = await startFixtureServer({root, fixtures: ['independent-leave'], apiUrl: baseUrl});
     let browser;
     try{
       const origin=fixtureServer.url;

@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
@@ -111,6 +111,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         0,
       );
       assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065c_wos06_commercial_candidate_approvals'));
+      await includeReleaseGrant(pool, before.role_permissions);
       assert.deepEqual(await snapshot(), before);
       assert.equal(
         (

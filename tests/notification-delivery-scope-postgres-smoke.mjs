@@ -26,8 +26,11 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  await pool.query(`insert into audit_logs(user_id,user_name,user_role,module,action,entity_type,entity_id,details,new_value,organization_id,legal_entity_id)
  values($1,'Synthetic administrator','Admin','Notifications','Send Notification','NotificationEvent','event-own','Synthetic notification audit',$2,$3,$4)`,[identities.manager.id,JSON.stringify({title:'Synthetic retained notice',deliveryResults:[{channel:'Email',provider:'graph',status:'Failed',error:privateDetail,nested:{token:privateDetail}}]}),f.organizationId,f.legalEntityId]);
  const retained=async()=>({attempts:(await pool.query('select * from notification_delivery_attempts order by id')).rows,integrations:(await pool.query('select * from integration_event_logs order by id')).rows,audit:(await pool.query('select * from audit_logs order by id')).rows});
- const before=await retained();
+
  await withCommercialApi({databaseUrl,identities},async({request})=>{
+  const release=await request('/api/organization-setup/module-releases/notifications',{method:'PUT',body:{enabled:true,expectedRevision:0,evidence:'Synthetic scoped diagnostics'}});
+  assert.equal(release.status,201,JSON.stringify(release.body));
+  const before=await retained();
   for(const prefix of ['/api']){
    const read=async(identity,scope)=>{const r=await request(prefix+'/notification-delivery-attempts',{identity,...scope?{scope}:{}});assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(JSON.stringify(r.body).includes(privateDetail),false);assert.ok(r.body.every(row=>JSON.stringify(row.response_metadata)===JSON.stringify({mode:'graph',statusCode:202})));return r.body.map(x=>x.id).sort();};
    assert.deepEqual(await read(identities.manager),['own','unrelated'],'Admin history remains in the active legal entity');

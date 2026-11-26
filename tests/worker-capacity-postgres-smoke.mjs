@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {readdir,copyFile} from 'node:fs/promises';
@@ -20,7 +20,9 @@ const migration='056_wos04_effective_worker_capacity',prefix='/api/v1/worker-cap
 await withCommercialDatabase(async({pool})=>withPreCommercialMigrations(async rootDir=>{
  for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-5])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));await runMigrations({pool,rootDir,logger:{log(){}}});await seedCapacity(pool);
  const keep=['employees','working_calendars','working_calendar_holidays','organization_catalog_items','legal_entity_profile_versions','worker_history','leave_requests','role_permissions','resource_demands','resource_demand_versions','workforce_capability_versions','commercial_contract_versions','approval_records'],before=Object.fromEntries(await Promise.all(keep.map(async t=>[t,await table(pool,t)]))),work=await workSnapshot(pool);for(const row of before.leave_requests){row.value.calendar_evidence_id=null;}for(const row of work.timesheet_entries){row.value.category_code=null;row.value.category_reference=null;}
- assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));await assertPrecision(pool);assert.deepEqual(await table(pool,'worker_capacity_versions'),[]);assert.deepEqual(await table(pool,'worker_capacity_evidence'),[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);assert.deepEqual(await workSnapshot(pool),work);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
+ await includeReleaseGrant(pool, before.role_permissions);
+ await assertPrecision(pool);assert.deepEqual(await table(pool,'worker_capacity_versions'),[]);assert.deepEqual(await table(pool,'worker_capacity_evidence'),[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);assert.deepEqual(await workSnapshot(pool),work);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);
 }));
 await withCommercialDatabase(async({pool})=>withPreCommercialMigrations(async rootDir=>{
  for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-6])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));
@@ -32,7 +34,7 @@ await withCommercialDatabase(async({pool})=>withPreCommercialMigrations(async ro
 }));
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  assert.equal((await migrateCommercialDatabase(pool)).status.isCurrent,true);await assertPrecision(pool);const{identities,today,monday,dates,calendarId}=await seedCapacity(pool),path=prefix+f.ownerId;
- await withCommercialApi({databaseUrl,identities},async({request})=>{
+ await withCommercialApi({enableLeave:true, databaseUrl,identities},async({request})=>{
   const period=(from=monday,to=dates[4],options={})=>request(path+'/period?'+new URLSearchParams({startsOn:from,endsOn:to}),options),profiles=()=>request(path+'/profiles'),adopt=(expectedLatestId=null,effectiveFrom=monday,def=definition,options={})=>request(path+'/profiles',{method:'POST',body:{expectedLatestId,effectiveFrom,definition:def,reason:'Synthetic explicit capacity adoption'},...options}),retain=(result,options={})=>request(path+'/evidence',{method:'POST',body:{startsOn:result.startsOn,endsOn:result.endsOn,expectedSourceToken:result.sourceToken,reason:'Synthetic retained capacity'},...options});
   assert.equal((await request(path+'/profiles',{authenticated:false})).status,401);assert.equal((await request(path+'/profiles',{identity:identities.denied})).status,404);assert.equal((await request(prefix+f.otherOwnerId+'/profiles')).status,404);assert.equal((await request(path+'/profiles',{scope:{organizationId:f.organizationId,legalEntityId:f.otherLegalEntityId}})).status,403);
   let r=(await period()).body.result;assert.equal(r.status,'unavailable');assert.equal(r.totals.availableHoursExact,null);assert.deepEqual(r.reasonCodes,['CAPACITY_PROFILE_NOT_ADOPTED']);assert.equal((await profiles()).body.latest,null);

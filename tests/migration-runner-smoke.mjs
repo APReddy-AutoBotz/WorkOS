@@ -478,6 +478,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(betaReadiness.checks.imports, false,
       'a generic Import audit marker must not satisfy readiness even when its scope and payload match');
 
+    for (const [org,owner] of [['org-default',actorId],['org-scope-beta',multiScopeActorId]]) {
+      await pool.query(`insert into module_release_decisions(organization_id,environment,module,revision,enabled,evidence,owner_id)
+        select $1,'test',module,1,true,'Synthetic scoped integration fixture',$2 from unnest(array['teams','entra','notifications','leave']) as module`,[org,owner]);
+    }
     const roleMappingResponse = await fetch(`${baseUrl}/api/integrations/entra-role-mappings`, {
       method: 'POST',
       headers: scopedHeaders(token, 'org-default', 'legal-default', {'Content-Type': 'application/json'}),

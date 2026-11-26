@@ -75,6 +75,7 @@ import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/e
 import {createIdentityAccessMiddleware, readCookie, sessionEntraGroups} from './modules/identity-access/middleware.mjs';
 import {assignEmployeeRoles, assertCredentialTarget, assertSecurityAdministrator, synchronizeEntraBinding} from './modules/identity-access/administration.mjs';
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
+import {effectiveReleases, moduleReleased} from './modules/module-releases.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
 import {createOrganizationAuditRouter} from './modules/audit/organization-audit-router.mjs';
@@ -253,6 +254,7 @@ const permissionDefinitions = [
   [deploymentAuditPermissionKey, 'Admin', 'Deployment Audit View', true],
   [organizationAuditPermissionKey, 'Admin', 'Organization Audit View', true],
   ['settings.manage', 'Admin', 'Governance Settings', false],
+  ['releases.manage', 'Admin', 'Manage module releases', true],
   ['periods.financial_reopen','Admin','Reopen Financial Periods',false],
   ['permissions.manage', 'Admin', 'Permission Settings', true],
 ];
@@ -1112,7 +1114,8 @@ const notificationProviderForChannel = (channel) => {
 const fetchNotificationRecipient = async (client, recipientEmployeeId) => {
   if (!recipientEmployeeId) return null;
   const result = await client.query(`
-    select e.*, tul.teams_user_id as linked_teams_user_id, tul.teams_upn, tul.teams_tenant_id
+    select e.*, tul.teams_user_id as linked_teams_user_id, tul.teams_upn, tul.teams_tenant_id,
+      to_regclass('module_release_decisions') is not null as release_settings_available
     from employees e
     left join teams_user_links tul on tul.employee_id = e.id and tul.status = 'Linked'
     where e.id = $1 or e.employee_id = $1
@@ -1157,17 +1160,23 @@ const sendNotification = async (client, req, {
   const event = eventResult.rows[0];
 
   const recipient = await fetchNotificationRecipient(client, recipientEmployeeId);
-  const preference = recipient?.id
+  // On pre-129 schemas the core notice is still delivered with workflow defaults.
+  const releases = recipient?.release_settings_available ? await effectiveReleases(client,recipient.organization_id) : {};
+  const preferencesEnabled = releases.notifications === true;
+  const preference = preferencesEnabled
     ? (await client.query('select * from notification_preferences where employee_id = $1 and event_type = $2', [recipient.id, eventType])).rows[0]
     : null;
   const channelSet = new Set(Array.isArray(channels) && channels.length > 0 ? channels : [channel || 'InApp']);
   if (preference?.in_app) channelSet.add('InApp');
   if (preference?.email) channelSet.add('Email');
   if (preference?.teams) channelSet.add('Teams');
+  if (!releases.teams) {
+    channelSet.delete('Teams');
+  }
   const deliveryResults = [];
 
   for (const deliveryChannel of channelSet) {
-    const template = await fetchNotificationTemplate(client, eventType, deliveryChannel);
+    const template = preferencesEnabled ? await fetchNotificationTemplate(client, eventType, deliveryChannel) : null;
     const context = {
       title,
       body,
@@ -3381,7 +3390,17 @@ const ensureLeaveBalanceForRequest = async (client, employee, leaveTypeId, year,
   return { leaveType, policy, balance };
 };
 
+const requireModuleRelease = module => async (req,res,next) => {
+  try {
+    if (await moduleReleased(pool,req.organizationScope.organizationId,module)) return next();
+    return res.status(403).json({error:`${module} is disabled for this organization and environment`,code:'MODULE_DISABLED'});
+  } catch (error) {
+    return next(error);
+  }
+};
+
 app.use('/api', createLeaveRouter({
+  requireLeaveRelease:requireModuleRelease('leave'),
   pool,
   run,
   requireDatabase,
@@ -3518,6 +3537,10 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     }
 
     if (approval.entity_type === 'LeaveRequest') {
+      if (!await moduleReleased(client,req.organizationScope.organizationId,'leave')) {
+        await client.query('rollback');
+        return res.status(403).json({error:'Leave is disabled for this organization and environment',code:'MODULE_DISABLED'});
+      }
       if (!req.user.permissions.includes('leave.approve')) { await client.query('rollback'); res.status(403).json({error:'Insufficient permission privileges'}); return; }
       await assertLegacyLeaveApproval(client,approval.entity_id);
       const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [approval.entity_id])).rows[0];
@@ -3603,6 +3626,7 @@ app.get('/api/reports/approval-sla', requireDatabase, requireAuth, requirePermis
 });
 
 const notificationRouter = createNotificationRouter({
+  requireNotificationRelease:requireModuleRelease('notifications'),
   pool,
   run,
   requireDatabase,
@@ -3680,7 +3704,7 @@ const isTeamsActionEntityInScope = async (client, req, entityType, entityId) => 
   return false;
 };
 
-app.get('/api/integrations/identity-links', requireDatabase, requireAuth, requirePermission('integrations.identity'), (req, res) => {
+app.get('/api/integrations/identity-links', requireDatabase, requireAuth, requirePermission('integrations.identity'), requireModuleRelease('entra'), (req, res) => {
   run(res, `
     select ipl.*, e.name as employee_name
     from identity_provider_links ipl
@@ -3690,7 +3714,7 @@ app.get('/api/integrations/identity-links', requireDatabase, requireAuth, requir
   `, [req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
 });
 
-app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requirePermission('integrations.identity'), async (req, res) => {
+app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requirePermission('integrations.identity'), requireModuleRelease('entra'), async (req, res) => {
   const schema = z.object({
     id: z.string().optional(),
     employee_id: z.string().min(1),
@@ -3797,11 +3821,11 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
   }
 });
 
-app.get('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, requirePermission('integrations.identity'), (_req, res) => {
+app.get('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, requirePermission('integrations.identity'), requireModuleRelease('entra'), (_req, res) => {
   run(res, 'select * from entra_group_role_mappings order by role_name, group_name');
 });
 
-app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, requirePermission('integrations.identity'), async (req, res) => {
+app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, requirePermission('integrations.identity'), requireModuleRelease('entra'), async (req, res) => {
   const schema = z.object({
     id: z.string().optional(),
     group_id: z.string().min(1),
@@ -3863,7 +3887,7 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
   }
 });
 
-app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), (req, res) => {
+app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), requireModuleRelease('teams'), (req, res) => {
   run(res, `
     select tul.*, e.name as employee_name
     from teams_user_links tul
@@ -3873,7 +3897,7 @@ app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requ
   `, [req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
 });
 
-app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), async (req, res) => {
+app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), requireModuleRelease('teams'), async (req, res) => {
   const schema = z.object({
     id: z.string().optional(),
     employee_id: z.string().min(1),
@@ -3950,7 +3974,7 @@ app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, req
   }
 });
 
-app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), async (req, res) => {
+app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), requireModuleRelease('teams'), async (req, res) => {
   const schema = z.object({
     entity_type: z.enum(['ApprovalRecord', 'LeaveRequest', 'Timesheet', 'PortalLink']),
     entity_id: z.string().min(1),
@@ -4009,7 +4033,7 @@ app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, 
   }
 });
 
-app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), async (req, res) => {
+app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), requireModuleRelease('teams'), async (req, res) => {
   const schema = z.object({ comments: z.string().optional() });
   const parsed = schema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -4116,7 +4140,7 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
   }
 });
 
-app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), async (req, res) => {
+app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, requireAuth, requirePermission('integrations.teams_actions'), requireModuleRelease('teams'), async (req, res) => {
   const schema = z.object({
     recipient_employee_id: z.string().min(1),
     title: z.string().min(1).default('Configured product action required'),
@@ -5344,7 +5368,7 @@ const getResourcePlanningPayload = async (req) => {
   };
 };
 
-app.get('/api/reports/resource-planning', requireDatabase, requireAuth, requirePermission('allocations.view'), async (req, res) => {
+app.get('/api/reports/resource-planning', requireDatabase, requireAuth, requirePermission('allocations.view'), requireModuleRelease('planning'), async (req, res) => {
   try {
     res.json(await getResourcePlanningPayload(req));
   } catch (error) {
@@ -6515,7 +6539,7 @@ registerOrganizationSetupRoutes({
 const workHistoryRouter=createWorkHistoryRouter({pool,requireDatabase,requireAuth,requirePermission});
 app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
-app.use('/api/v1/work-approvals',createWorkApprovalRouter({pool,requireDatabase,requireAuth,requirePermission,...workApprovalOptions}));
+app.use('/api/v1/work-approvals',createWorkApprovalRouter({requireLeaveRelease:requireModuleRelease('leave'),pool,requireDatabase,requireAuth,requirePermission,...workApprovalOptions}));
 app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,getSetting,audit,recordAllocationChangeApproval}));
 app.use('/api/v1/native-forecast',createNativeForecastRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,audit}));

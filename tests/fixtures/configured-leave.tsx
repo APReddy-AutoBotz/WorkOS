@@ -1,3 +1,4 @@
+import {loadRuntimeTerminology} from '../../src/config/RuntimeTerminology';
 import {CanonicalApprovalInbox} from '../../src/components/GovernedWorkApprovals';
 // Synthetic navigation/session only. All feature pages and HTTP/SQL paths are real.
 import { useState } from 'react';
@@ -19,4 +20,4 @@ const Fixture = () => {
     <button onClick={() => setView('actual')}>Actual report and exports</button>
   </nav><div key={view}>{view === 'notices' ? <CanonicalApprovalInbox/> : view === 'approvals' ? <ApprovalsWorkspace /> : view === 'leave' ? <MyLeave /> : view === 'team' ? <TeamLeaveCalendar /> : view === 'own' ? <ESSHome /> : <ActualUtilization />}</div></main></BrowserRouter>;
 };
-createRoot(document.getElementById('root')!).render(<Fixture />);
+void loadRuntimeTerminology().then(() => createRoot(document.getElementById('root')!).render(<Fixture />));

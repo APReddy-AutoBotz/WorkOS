@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'releases.manage',module:'Admin',label:'Manage module releases',description:'Record activation decisions for optional modules in the current organization and environment.',protected:true},
  {permission_key:'commercial.fixed_fee_risk.configure',module:'Commercial',label:'Configure fixed-fee risk notices',description:'Set scoped mandatory recipients and the engagement notice template.',protected:false},
  {permission_key:'commercial.po_risk.configure',module:'Commercial',label:'Configure purchase-order risk notices',description:'Set scoped mandatory recipients and the purchase-order notice template.',protected:false},
  {permission_key:'commercial.service_margin_risk.configure',module:'Commercial',label:'Configure managed-service margin notices',description:'Set mandatory margin breach recipients and the engagement notice template.',protected:false},

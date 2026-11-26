@@ -12,7 +12,9 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
   await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin'",[identities.denied.id]);
   const third = {...identities.denied,role:'Admin'};
   const snapshot = async () => Object.fromEntries(await Promise.all(['leave_requests','leave_balances','approval_records','audit_logs','notification_events','teams_action_tokens','integration_event_logs'].map(async t=>[t,(await pool.query(`select to_jsonb(t) value from ${t} t order by to_jsonb(t)::text`)).rows])));
-  await withCommercialApi({databaseUrl,identities},async ({request})=>{
+  await withCommercialApi({enableLeave:true, databaseUrl,identities},async ({request})=>{
+    const enabled = await request('/api/organization-setup/module-releases/teams',{method:'PUT',body:{enabled:true,evidence:'Synthetic Teams leave boundary check',expectedRevision:0}});
+    assert.equal(enabled.status,201,JSON.stringify(enabled.body));
     const create = async (actor=owner) => {
       const result=await request('/api/leave/requests',{identity:actor,method:'POST',body:{employee_id:f.ownerId,leave_type_id:'leave-type-unpaid',start_date:'2026-11-16',end_date:'2026-11-16',reason:'Synthetic independence test'}});
       assert.equal(result.status,200,JSON.stringify(result.body));return result.body;

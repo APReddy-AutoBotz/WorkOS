@@ -1,4 +1,4 @@
-import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import {expectedMilestoneUpgradeSnapshot} from './support/milestone-upgrade-expectations.mjs';
 import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -114,6 +114,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert(before.invoice_draft_batches.some((x) => x.v.id === draft.id));
         assert.equal((await pool.query("select to_regclass('invoice_action_events') t")).rows[0].t, null);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065l_wos06_invoice_action_required'));
+        await includeReleaseGrant(pool, before.role_permissions);
         assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
         for (const t of [
           'invoice_action_templates',

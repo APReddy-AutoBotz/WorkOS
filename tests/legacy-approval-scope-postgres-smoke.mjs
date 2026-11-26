@@ -11,7 +11,78 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('TeamLead','approvals.view',true) on conflict(role_name,permission_key) do update set enabled=true");
   await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='TeamLead' on conflict do nothing",[ids.reader.id]);
  await withCommercialApi({databaseUrl,identities:ids},async ({request})=>{
-  const body={delegator_id:f.ownerId,delegate_id:employee,role:'TeamLead',start_date:fx.today,end_date:fx.today,status:'Active',reason:'Synthetic delegation'};
+  const releases = '/api/v1/organization-setup/module-releases';
+  const change = {enabled:true, evidence:'Synthetic Teams UAT approval', expectedRevision:0};
+  const setRelease = (body, identity=ids.manager) => request(releases+'/teams',{method:'PUT',body,identity});
+  const initial = await request(releases);
+  assert.equal(initial.status,200,JSON.stringify(initial.body));
+  assert.deepEqual(initial.body.decisions,[]);
+  assert.equal((await setRelease(change,ids.reader)).status,403);
+  assert.equal((await setRelease({...change,organizationId:f.otherOrganizationId})).status,400);
+  const otherScope={organizationId:f.otherOrganizationId,legalEntityId:f.foreignLegalEntityId};
+  for(const path of [releases,releases+'/effective'])
+    assert.equal((await request(path,{scope:otherScope})).status,403);
+  assert.equal((await request(releases+'/teams',{scope:otherScope,method:'PUT',body:change})).status,403);
+  const teamsLinks = '/api/integrations/teams-user-links';
+  assert.equal((await request(teamsLinks)).status,403);
+  const accepted = await setRelease(change);
+  assert.equal((await request(teamsLinks)).status,200);
+  assert.equal(accepted.status,201,JSON.stringify(accepted.body));
+  await pool.query('insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true)',
+    [ids.manager.id,otherScope.organizationId,otherScope.legalEntityId]);
+  try {
+    const otherDecisions=await request(releases,{scope:otherScope});
+    assert.equal(otherDecisions.status,200);
+    assert.deepEqual(otherDecisions.body.decisions,[]);
+    const otherEffective=await request(releases+'/effective',{scope:otherScope});
+    assert.equal(otherEffective.status,200);
+    assert.equal(otherEffective.body.teams,false);
+  } finally {
+    await pool.query('delete from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3',
+      [ids.manager.id,otherScope.organizationId,otherScope.legalEntityId]);
+  }
+  assert.equal(accepted.body.owner_id,ids.manager.id);
+  assert.ok(Date.parse(accepted.body.activated_at));
+  assert.equal((await setRelease(change)).body.id,accepted.body.id);
+  assert.equal((await setRelease({...change,enabled:false})).status,409);
+  const disabled = await setRelease({enabled:false,evidence:'Synthetic rollback',expectedRevision:1});
+  assert.equal(disabled.status,201);
+  assert.equal((await request(releases)).body.decisions[0].enabled,false);
+  assert.equal((await request(teamsLinks)).status,403);
+  assert.deepEqual((await request(releases+'/effective',{identity:ids.reader})).body,{teams:false,entra:false,planning:false,notifications:false,leave:false});
+  const report = '/api/reports/resource-planning';
+  assert.equal((await request(report)).body.code,'MODULE_DISABLED');
+  const planningRelease = (enabled,expectedRevision) => request(releases+'/planning',{method:'PUT',body:{
+    enabled, expectedRevision, evidence:'Synthetic planning review',
+  }});
+  assert.equal((await planningRelease(true,0)).status,201);
+  assert.equal((await request(report)).status,200);
+  assert.equal((await planningRelease(false,1)).status,201);
+  assert.equal((await request(report)).body.code,'MODULE_DISABLED');
+  assert.equal((await request('/api/allocations')).status,200);
+  assert.equal((await request('/api/reports/workforce-command-center')).status,200);
+  await pool.query(`insert into notification_preferences(employee_id,event_type,in_app,email,teams)
+    values($1,'TestDelivery',true,false,true)`,[employee]);
+  const deliver = channels => request('/api/notifications/test-delivery',{method:'POST',body:{employee_id:employee,channels}});
+  assert.equal((await deliver(['InApp'])).body.code,'MODULE_DISABLED');
+  assert.equal((await request('/api/notifications')).status,200);
+  assert.equal((await request(releases+'/notifications',{method:'PUT',body:{...change,evidence:'Synthetic notification center release'}})).status,201);
+  assert.equal((await deliver(['Teams'])).status,403);
+  const notice = await deliver(['InApp']);
+  assert.equal(notice.status,200,JSON.stringify(notice.body));
+  const channelsFor = async id => (await pool.query('select channel from notification_delivery_attempts where notification_id=$1 order by channel',[id])).rows.map(row=>row.channel);
+  assert.deepEqual(await channelsFor(notice.body.id),['InApp']);
+  assert.equal((await setRelease({...change,expectedRevision:2})).status,201);
+  const enabledNotice = await deliver(['InApp']);
+  assert.equal(enabledNotice.status,200,JSON.stringify(enabledNotice.body));
+  assert.deepEqual(await channelsFor(enabledNotice.body.id),['InApp','Teams']);
+  const auditRows=await pool.query("select organization_id,legal_entity_id,active_role,old_value,new_value from audit_logs where entity_id=$1",[disabled.body.id]);
+  assert.equal(auditRows.rowCount,1);
+  assert.deepEqual([auditRows.rows[0].organization_id,auditRows.rows[0].legal_entity_id,auditRows.rows[0].active_role],[f.organizationId,null,ids.manager.role]);
+  assert.equal(auditRows.rows[0].old_value.enabled,true);
+  assert.equal(auditRows.rows[0].new_value.enabled,false);
+  const delegationDate=(await pool.query("select current_date::text today")).rows[0].today;
+  const body={delegator_id:f.ownerId,delegate_id:employee,role:'TeamLead',start_date:delegationDate,end_date:delegationDate,status:'Active',reason:'Synthetic delegation'};
   const baselineOriginal=await request('/api/approval-delegations',{method:'POST',body});
   assert.equal(baselineOriginal.status,200,JSON.stringify(baselineOriginal.body));
   const baselineTakeover=await request('/api/approval-delegations',{identity:ids.denied,method:'POST',body:{...body,id:baselineOriginal.body.id,delegator_id:employee,delegate_id:f.ownerId}});

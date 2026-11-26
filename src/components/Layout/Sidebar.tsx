@@ -77,7 +77,9 @@ export const Sidebar = () => {
     {
       group: 'Planning',
       items: [
-        { name: 'Planning Workspace', path: '/planning', icon: ClipboardCheck, roles: ROUTE_ROLES.planningWorkspace },
+        isEnterpriseFeatureEnabled('planning')
+          ? { name: 'Planning Workspace', path: '/planning', icon: ClipboardCheck, roles: ROUTE_ROLES.planningWorkspace }
+          : { name: 'Allocation Control', path: '/allocations', icon: ClipboardCheck, roles: ROUTE_ROLES.allocations },
       ]
     },
     {

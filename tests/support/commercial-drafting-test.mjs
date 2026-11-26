@@ -34,10 +34,10 @@ export const commercialFixture = Object.freeze({
   workId: '55da358d-89b3-411d-8872-c278c4fc9d3e',
 });
 
-export const withCommercialDatabase = async test => {
+export const withCommercialDatabase = async (test, adminDatabaseUrl = process.env.WORKOS_TEST_DATABASE_URL) => {
   // Reuse the allowlist including the prohibition on libpq URL overrides. A
   // missing service is a required-test failure, never a passing skip.
-  const adminUrl = localDatabaseUrl(process.env.WORKOS_TEST_DATABASE_URL);
+  const adminUrl = localDatabaseUrl(adminDatabaseUrl);
   const admin = new pg.Client({connectionString: adminUrl.toString()});
   const name = `workos_commercial_${randomBytes(8).toString('hex')}`;
   let created = false;
@@ -187,7 +187,7 @@ const stopApi = async child => {
   }
 };
 
-export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UTC',
+export const withCommercialApi = async ({databaseUrl, identities, enableLeave = false, timeZone = 'UTC',
   sessionTtlHours = '0.25', sessionSecret = null, emailProvider = 'mock', onServerError = null, financeProviderFixture = false, runBackgroundWorkers = false, apiRoot = root}, test) => {
   const port = await availablePort();
   const secret = sessionSecret || randomBytes(48).toString('base64url');
@@ -236,6 +236,12 @@ export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UT
       await delay(100);
     }
     assert.equal(ready, true, 'actual commercial API must connect to the migrated disposable PostgreSQL database');
+    if (enableLeave) {
+      const release = await request('/api/organization-setup/module-releases/leave',{method:'PUT',body:{
+        enabled:true,expectedRevision:0,evidence:'Synthetic leave workflow acceptance',
+      }});
+      assert.ok([200,201].includes(release.status), JSON.stringify(release.body));
+    }
     await test({baseUrl, request, tokenFor});
   } finally { await stopApi(child); }
 };
