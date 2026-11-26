@@ -126,7 +126,9 @@ jobs:
         run: npm run test:work-period-notices-postgres
 
       - name: Verify material assignment approvals in PostgreSQL
-        run: npm run test:assignment-approval-postgres
+        run: |
+          npm run test:assignment-approval-postgres
+          npm run test:assignment-creation-postgres
 
       - name: Verify scoped workforce directory postgres
         run: npm run test:workforce-directory-postgres
@@ -252,7 +254,9 @@ jobs:
         run: npm run test:work-period-notices-journey
 
       - name: Verify material assignment approvals in browser
-        run: npm run test:assignment-approval-journey
+        run: |
+          npm run test:assignment-approval-journey
+          npm run test:assignment-creation-journey
 
       - name: Verify scoped workforce directory journey
         run: npm run test:workforce-directory-journey

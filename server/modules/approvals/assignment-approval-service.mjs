@@ -28,7 +28,9 @@ export const assignmentApprovalActor = async (c, req, stage, source, o) => {
     if (source) {
         if ([u.employee_record_id, u.employee_id].includes(source.employee_id))
             fail('ASSIGNMENT_APPROVAL_SELF_DECISION', 'The affected worker cannot receive or decide an approval stage for this assignment.', 403);
-        await assignmentApprovalSource(c, actor, source.id, o);
+        if (source.creation)
+            await assignmentCreationSource(c, actor, source.employee_id, source.project_id, source.id, o);
+        else await assignmentApprovalSource(c, actor, source.id, o);
     }
     return actor;
 };
@@ -91,7 +93,9 @@ export const scopedAssignmentApproval = async (c, req, id, o) => {
     const i = (await c.query('select * from assignment_approval_instances where id=$1 and organization_id=$2 and legal_entity_id=$3', [id, ...scope(req)])).rows[0];
     if (!i)
         fail('ASSIGNMENT_APPROVAL_NOT_FOUND', 'Assignment proposal is unavailable.', 404);
-    const { a, latestId } = await assignmentApprovalSource(c, req, i.assignment_id, o);
+    const { a, latestId } = i.operation_kind === 'Creation'
+        ? await assignmentCreationSource(c, req, i.employee_id, i.project_id, i.assignment_id, o, i.source_revision)
+        : await assignmentApprovalSource(c, req, i.assignment_id, o);
     if (a.employee_id !== i.employee_id || a.project_id !== i.project_id)
         fail('ASSIGNMENT_APPROVAL_SOURCE_CHANGED', 'Assignment identity no longer matches this proposal.');
     const p = (await c.query('select *,effective_from::text from assignment_approval_policies where id=$1 and organization_id=$2 and legal_entity_id=$3', [i.policy_id, ...scope(req)])).rows[0], transitions = (await c.query('select * from assignment_approval_transitions where instance_id=$1 order by sequence', [id])).rows;
@@ -101,7 +105,45 @@ export const scopedAssignmentApproval = async (c, req, id, o) => {
     return { i, p, a, latestId, transitions, state: approvalState(p.definition.stages, transitions), notificationFailures };
 };
 export const assignmentApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at });
-export const assignmentApprovalView = v => ({ id: v.i.id, assignmentId: v.i.assignment_id, employeeId: v.i.employee_id, projectId: v.i.project_id, sourceRevision: v.i.source_revision, sourceVersionId: v.i.source_version_id, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, requestId: v.i.request_id, reason: v.i.reason, createdAt: v.i.created_at, worker: { id: v.a.employee_id, code: v.a.worker_code, name: v.a.worker_name }, policy: assignmentApprovalPolicyView(v.p), before: v.i.before_snapshot, proposed: v.i.proposed_definition, currentRevision: v.a.revision, currentVersionId: v.latestId, state: v.state, transitions: v.transitions.map(assignmentApprovalReceipt), notificationFailures: v.notificationFailures });
+export const assignmentApprovalView = v => ({ ...(v.i.operation_kind === 'Creation' ? { operationKind: 'Creation' } : {}), id: v.i.id, assignmentId: v.i.assignment_id, employeeId: v.i.employee_id, projectId: v.i.project_id, sourceRevision: v.i.source_revision, sourceVersionId: v.i.source_version_id, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, requestId: v.i.request_id, reason: v.i.reason, createdAt: v.i.created_at, worker: { id: v.a.employee_id, code: v.a.worker_code, name: v.a.worker_name }, policy: assignmentApprovalPolicyView(v.p), before: v.i.before_snapshot, proposed: v.i.proposed_definition, currentRevision: v.a.revision, currentVersionId: v.latestId, state: v.state, transitions: v.transitions.map(assignmentApprovalReceipt), notificationFailures: v.notificationFailures });
+
+// A creation proposal is a scoped request, never an allocation/reservation. Its
+// reserved identifier has no source row/version until the final atomic decision.
+export const assignmentCreationSource = async (c, req, employeeId, projectId, id, o, absentRevision = capacityHash({ assignmentId: id, employeeId, projectId, absent: true })) => {
+    const p = [], ew = o.buildEmployeeScopeWhere(req, p, 'e'), pw = o.buildProjectScopeWhere(req, p, 'p');
+    p.push(employeeId, projectId);
+    const pair = (await c.query(`select e.id employee_id,e.employee_id worker_code,e.name worker_name,p.id project_id from employees e cross join projects p where ${ew} and ${pw} and e.id=$${p.length - 1} and p.id=$${p.length} and e.organization_id=p.organization_id and e.legal_entity_id=p.legal_entity_id`, p)).rows[0];
+    if (!pair) fail('ASSIGNMENT_APPROVAL_NOT_FOUND', 'Creation worker/project is unavailable in current scope.', 404);
+    const existing = (await c.query('select * from project_allocations where id=$1', [id])).rows[0];
+    if (existing) {
+        const current = await assignmentApprovalSource(c, req, id, o);
+        return { ...current, a: { ...current.a, creation: true } };
+    }
+    return { a: { ...pair, id, creation: true, revision: absentRevision, snapshot: null }, latestId: null };
+};
+export const proposeAssignmentCreation = async (c, req, input, o) => {
+    const fingerprint = capacityHash({ kind: 'Creation', actorId: req.user.sub, activeRole: req.user.activeRole, ...input });
+    const prior = (await c.query('select id,request_fingerprint,operation_kind from assignment_approval_instances where organization_id=$1 and legal_entity_id=$2 and requester_user_id=$3 and request_id=$4', [...scope(req), req.user.sub, input.requestId])).rows[0];
+    if (prior) {
+        if (prior.operation_kind !== 'Creation' || prior.request_fingerprint !== fingerprint) fail('ASSIGNMENT_APPROVAL_REQUEST_CONFLICT', 'This creation request has different content.');
+        return { instance: assignmentApprovalView(await scopedAssignmentApproval(c, req, prior.id, o)), replayed: true };
+    }
+    const id = 'a-' + randomUUID(), { a } = await assignmentCreationSource(c, req, input.employeeId, input.projectId, id, o), p = await assignmentApprovalPolicy(c, req, input.employeeId);
+    if (!p || p.id !== input.expectedPolicyId || p.definition.creationRequired !== true) fail('ASSIGNMENT_APPROVAL_POLICY_STALE', 'No matching creation policy is currently adopted. Reload configuration.');
+    await assertAssignmentProposalDefinition(c, req, a, input.definition, o);
+    for (const stage of p.definition.stages) {
+        const actor = await assignmentApprovalActor(c, req, stage, a, o);
+        if (actor.user.sub === req.user.sub || [actor.user.employeeRecordId, actor.user.employeeId].includes(a.employee_id)) fail('ASSIGNMENT_APPROVAL_SELF_DECISION', 'Requester and affected worker cannot be decision stages.', 403);
+    }
+    await setAssignmentApprovalContext(c, req);
+    const iid = randomUUID(), canonical = capacityCanonical({ operationKind: 'Creation', assignmentId: id, employeeId: a.employee_id, projectId: a.project_id, before: null, sourceRevision: a.revision, sourceVersionId: null, policyId: p.id, definition: input.definition });
+    await c.query("insert into assignment_approval_instances(id,organization_id,legal_entity_id,assignment_id,employee_id,project_id,policy_id,requester_user_id,active_role,request_id,request_fingerprint,source_revision,source_version_id,before_snapshot,proposed_definition,source_token,source_canonical,reason,operation_id,operation_kind)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,null,'null'::jsonb,$13,$14,$15,$16,$17,'Creation')", [iid, ...scope(req), id, a.employee_id, a.project_id, p.id, req.user.sub, req.user.activeRole, input.requestId, fingerprint, a.revision, input.definition, capacityHash(canonical), canonical, input.reason, req.operationId]);
+    await c.query("insert into approval_records(entity_type,entity_id,subject_employee_id,requester_id,requester_name,active_role,status,comments,source)values('AssignmentProposal',$1,$2,$3,$4,$5,'Pending',$6,'Web')", [iid, a.employee_id, req.user.sub, req.user.username, req.user.activeRole, input.reason]);
+    const v = await scopedAssignmentApproval(c, req, iid, o);
+    await emit(c, req, v, 'approval.action_required', 0, 0, null, o);
+    await o.audit(c, req, { module: 'Approvals', action: 'Request Assignment Creation', entityType: 'AssignmentProposal', entityId: iid, newValue: assignmentApprovalView(v), reason: input.reason, details: 'Explicit configured creation request; no allocation, version, capacity reservation or external delivery.' });
+    return { instance: assignmentApprovalView(v), replayed: false };
+};
 export const proposeAssignmentApproval = async (c, req, id, input, o) => {
     const { a, latestId } = await assignmentApprovalSource(c, req, id, o, true), fingerprint = capacityHash({ assignmentId: id, actorId: req.user.sub, activeRole: req.user.activeRole, ...input }), prior = (await c.query('select id,request_fingerprint from assignment_approval_instances where organization_id=$1 and legal_entity_id=$2 and requester_user_id=$3 and request_id=$4', [...scope(req), req.user.sub, input.requestId])).rows[0];
     if (prior) {
@@ -153,8 +195,11 @@ export const decideAssignmentApproval = async (c, req, id, input, o) => {
         await assertAssignmentProposalDefinition(c, req, v.a, v.i.proposed_definition, o);
         const d = v.i.proposed_definition;
         await setAssignmentVersionContext(c, req, { employeeId: v.i.employee_id, projectId: v.i.project_id, reason: v.i.reason });
-        const applied = (await c.query('update project_allocations set role_on_project=$1,percentage=$2::numeric,start_date=$3::date,end_date=$4::date,billable=$5,status=$6,comments=$7,updated_at=clock_timestamp()where id=$8 and organization_id=$9 and legal_entity_id=$10 returning *', [d.role, d.quantityExact, d.startsOn, d.endsOn, d.billable, d.status, d.comment, v.i.assignment_id, ...scope(req)])).rows[0];
-        await o.audit(c, req, { module: 'Allocations', action: 'Apply Approved Material Assignment Change', entityType: 'Allocation', entityId: v.i.assignment_id, oldValue: v.i.before_snapshot, newValue: applied, reason: v.i.reason, details: 'Final named-stage decision applies exact approved source; existing dates/overlap/version guards retained; no historical work or financial rewrite.' });
+        const values = [d.role, d.quantityExact, d.startsOn, d.endsOn, d.billable, d.status, d.comment, v.i.assignment_id, ...scope(req)];
+        const applied = v.i.operation_kind === 'Creation'
+            ? (await c.query('insert into project_allocations(role_on_project,percentage,start_date,end_date,billable,status,comments,id,organization_id,legal_entity_id,employee_id,project_id)values($1,$2::numeric,$3::date,$4::date,$5,$6,$7,$8,$9,$10,$11,$12)returning *', [...values, v.i.employee_id, v.i.project_id])).rows[0]
+            : (await c.query('update project_allocations set role_on_project=$1,percentage=$2::numeric,start_date=$3::date,end_date=$4::date,billable=$5,status=$6,comments=$7,updated_at=clock_timestamp()where id=$8 and organization_id=$9 and legal_entity_id=$10 returning *', values)).rows[0];
+        await o.audit(c, req, { module: 'Allocations', action: v.i.operation_kind === 'Creation' ? 'Apply Approved Assignment Creation' : 'Apply Approved Material Assignment Change', entityType: 'Allocation', entityId: v.i.assignment_id, oldValue: v.i.before_snapshot, newValue: applied, reason: v.i.reason, details: 'Final named-stage decision applies exact approved source; existing dates/overlap/version guards retained; no historical work or financial rewrite.' });
     }
     if (next.status !== 'Pending')
         await o.decideApprovalRecord(c, req, { entityType: 'AssignmentProposal', entityId: id, status: next.status, comments: input.reason, suppressNotification: true });
@@ -178,5 +223,5 @@ export const decideAssignmentApproval = async (c, req, id, input, o) => {
 };
 export const assignmentApprovalInboxRows = async (c, req, o, { after = null, id = null } = {}) => {
     const p = [req.user.sub, ...scope(req), after, id], where = o.buildEmployeeScopeWhere(req, p, 'e');
-    return (await c.query(`select 'assignment-approval'::text kind,r.id,r.event_id "eventId",i.id "instanceId",i.assignment_id "assignmentId",i.source_token "sourceToken",ev.transition_sequence "transitionSequence",ev.event_key "eventKey",ev.policy_class "policyClass",ev.template_id "templateId",ev.operation_id "operationId",ev.locale,ev.title,ev.body,r.reasons,r.channel_decision "channelDecision",d.id "deliveryId",d.status "deliveryStatus",ev.created_at "createdAt",rd.read_at "readAt" from assignment_approval_recipients r join assignment_approval_events ev on ev.id=r.event_id join assignment_approval_instances i on i.id=ev.instance_id join employees e on e.id=i.employee_id and e.organization_id=i.organization_id and e.legal_entity_id=i.legal_entity_id join assignment_approval_deliveries d on d.recipient_id=r.id left join assignment_approval_reads rd on rd.recipient_id=r.id and rd.user_id=r.user_id where r.user_id=$1 and i.organization_id=$2 and i.legal_entity_id=$3 and r.in_app and($4::uuid is null or r.id>$4)and($5::uuid is null or r.id=$5)and ${where} order by r.id limit 21`, p)).rows;
+    return (await c.query(`select case when to_jsonb(i)->>'operation_kind'='Creation'then'assignment-creation-approval'else'assignment-approval'end kind,r.id,r.event_id "eventId",i.id "instanceId",i.assignment_id "assignmentId",i.source_token "sourceToken",ev.transition_sequence "transitionSequence",ev.event_key "eventKey",ev.policy_class "policyClass",ev.template_id "templateId",ev.operation_id "operationId",ev.locale,ev.title,ev.body,r.reasons,r.channel_decision "channelDecision",d.id "deliveryId",d.status "deliveryStatus",ev.created_at "createdAt",rd.read_at "readAt" from assignment_approval_recipients r join assignment_approval_events ev on ev.id=r.event_id join assignment_approval_instances i on i.id=ev.instance_id join employees e on e.id=i.employee_id and e.organization_id=i.organization_id and e.legal_entity_id=i.legal_entity_id join assignment_approval_deliveries d on d.recipient_id=r.id left join assignment_approval_reads rd on rd.recipient_id=r.id and rd.user_id=r.user_id where r.user_id=$1 and i.organization_id=$2 and i.legal_entity_id=$3 and r.in_app and($4::uuid is null or r.id>$4)and($5::uuid is null or r.id=$5)and ${where} order by r.id limit 21`, p)).rows;
 };

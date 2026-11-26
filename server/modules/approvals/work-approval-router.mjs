@@ -61,6 +61,8 @@ export const createWorkApprovalRouter = options => {
                 await c.query('rollback').catch(() => { });
             if (e.statusCode)
                 res.status(e.statusCode).json({ error: e.message, code: e.code });
+            else if (['ALP01', 'ALP02'].includes(e.code))
+                res.status(422).json({ error: 'Current assignment overlap policy rejects or cannot validate this final source. Reload planning and policy.', code: e.code === 'ALP01' ? 'ASSIGNMENT_OVERLAP_BLOCKED' : 'ASSIGNMENT_OVERLAP_AUTHORITY' });
             else if (['IBA02','ASA01','ASA02','ASA03','ASA04','WDN02', 'WDN03', '23505', '40001', 'WGA02', 'WGA03', 'WGA04', 'WGA05'].includes(e.code))
                 res.status(409).json({ error: 'Work approval authority, source or current stage changed. Read history before retrying.', code: 'WORK_APPROVAL_CONFLICT' });
             else if (['IBA01','WDN01', '23514', '23503', 'WGA01'].includes(e.code))
