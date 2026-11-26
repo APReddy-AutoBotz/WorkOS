@@ -19,11 +19,28 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   assert.deepEqual(initial.body.decisions,[]);
   assert.equal((await setRelease(change,ids.reader)).status,403);
   assert.equal((await setRelease({...change,organizationId:f.otherOrganizationId})).status,400);
+  const otherScope={organizationId:f.otherOrganizationId,legalEntityId:f.foreignLegalEntityId};
+  for(const path of [releases,releases+'/effective'])
+    assert.equal((await request(path,{scope:otherScope})).status,403);
+  assert.equal((await request(releases+'/teams',{scope:otherScope,method:'PUT',body:change})).status,403);
   const teamsLinks = '/api/integrations/teams-user-links';
   assert.equal((await request(teamsLinks)).status,403);
   const accepted = await setRelease(change);
   assert.equal((await request(teamsLinks)).status,200);
   assert.equal(accepted.status,201,JSON.stringify(accepted.body));
+  await pool.query('insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true)',
+    [ids.manager.id,otherScope.organizationId,otherScope.legalEntityId]);
+  try {
+    const otherDecisions=await request(releases,{scope:otherScope});
+    assert.equal(otherDecisions.status,200);
+    assert.deepEqual(otherDecisions.body.decisions,[]);
+    const otherEffective=await request(releases+'/effective',{scope:otherScope});
+    assert.equal(otherEffective.status,200);
+    assert.equal(otherEffective.body.teams,false);
+  } finally {
+    await pool.query('delete from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3',
+      [ids.manager.id,otherScope.organizationId,otherScope.legalEntityId]);
+  }
   assert.equal(accepted.body.owner_id,ids.manager.id);
   assert.ok(Date.parse(accepted.body.activated_at));
   assert.equal((await setRelease(change)).body.id,accepted.body.id);

@@ -161,14 +161,14 @@ const finishRuntimeRemount = async (after, currentValue, expectedMounts, scope =
   await expectConfiguration(currentValue);
   return remountedRead;
 };
-const bootRuntime = async (value = configuration()) => {
+const bootRuntime = async (value = configuration(), brand) => {
   await open({runtime: true});
   // The editor's health-gated read and wrapper's direct runtime read are real,
   // concurrent production requests. Settle runtime first to force its remount.
   const initialHealth = await pending('health');
   const initialRuntime = await runtimeReader();
   const before = await runtimeState();
-  await settle(initialRuntime, raw(value));
+  await settle(initialRuntime, {...raw(value),brand});
   await finishRuntimeRemount(initialRuntime.id, value, before.mounts);
   const beforeObsolete = await calls();
   await settle(initialHealth, undefined, 503);
@@ -522,15 +522,25 @@ try {
 
   // The same real wrapper must not refresh/remount a replacement-scope draft
   // when an original-scope mutation happens to finish after the scope switch.
-  await bootRuntime(original);
+  const buyerBrand = id => ({productName:'Suite '+id,organizationName:'Buyer '+id,logoUrl:'/logo-'+id+'.svg',
+    compactMarkUrl:'/compact-'+id+'.svg',faviconUrl:'/icon-'+id+'.svg',primaryAccent:id==='A'?'#003761':'#334455',
+    secondaryAccent:'#223344',reportBrand:'Report '+id});
+  const expectBuyer = async id => {
+    const b=buyerBrand(id);
+    assert.deepEqual(await page.evaluate(()=>window.terminologyConfigurationHarness.runtimeBrand()),
+      [b.productName,b.organizationName,b.logoUrl,b.compactMarkUrl,b.faviconUrl,b.primaryAccent,b.secondaryAccent,'Report-'+id+'-hours.csv']);
+  };
+  await bootRuntime(original,buyerBrand('A'));
+  await expectBuyer('A');
   await save().click();
   const originalScopePost = await pending('save');
   const beforeScopeRuntime = await runtimeState();
   await page.evaluate(() => window.terminologyConfigurationHarness.scope('org-b', 'legal-b'));
   const replacementRuntime = await runtimeReader(originalScopePost.id, 'org-b', 'legal-b');
-  await settle(replacementRuntime, raw(valueB));
+  await settle(replacementRuntime, {...raw(valueB),brand:buyerBrand('B')});
   await finishRuntimeRemount(replacementRuntime.id, valueB, beforeScopeRuntime.mounts, {organizationId: 'org-b', legalEntityId: 'legal-b'});
   await expectRuntime(valueB);
+  await expectBuyer('B');
   const replacementDraft = configuration('Synthetic Scope B');
   replacementDraft.terms.project.singular = 'Synthetic Retained Scope B Draft';
   await input('project', 'singular').fill(replacementDraft.terms.project.singular);

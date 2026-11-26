@@ -34,10 +34,10 @@ export const commercialFixture = Object.freeze({
   workId: '55da358d-89b3-411d-8872-c278c4fc9d3e',
 });
 
-export const withCommercialDatabase = async test => {
+export const withCommercialDatabase = async (test, adminDatabaseUrl = process.env.WORKOS_TEST_DATABASE_URL) => {
   // Reuse the allowlist including the prohibition on libpq URL overrides. A
   // missing service is a required-test failure, never a passing skip.
-  const adminUrl = localDatabaseUrl(process.env.WORKOS_TEST_DATABASE_URL);
+  const adminUrl = localDatabaseUrl(adminDatabaseUrl);
   const admin = new pg.Client({connectionString: adminUrl.toString()});
   const name = `workos_commercial_${randomBytes(8).toString('hex')}`;
   let created = false;

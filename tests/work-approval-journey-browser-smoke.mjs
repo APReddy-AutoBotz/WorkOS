@@ -132,7 +132,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                 const toggle='update user_organization_scopes set active=$4 where user_id=$1 and organization_id=$2 and legal_entity_id=$3';
                 await pool.query(toggle,[...scopeParams,false]);
                 // Exercise the production worker on a real elapsed deadline only in the clock rehearsal.
-                await w.waitForTimeout(Math.max(0,deadline-Date.now())+10);
+                const decisionClient=await pool.connect();
+                try {
+                    await decisionClient.query('begin');
+                    await decisionClient.query('select id from work_approval_instances where id=$1 for update',[instance.id]);
+                    await w.waitForTimeout(Math.max(0,deadline-Date.now())+10);
+                    await collectOverdueWorkStages(pool);
+                    assert.equal((await observed()).rowCount,0);
+                } finally {
+                    await decisionClient.query('rollback');
+                    decisionClient.release();
+                }
                 await Promise.all([collectOverdueWorkStages(pool),collectOverdueWorkStages(pool)]);
                 assert.deepEqual((await observed()).rows,[{stage:0,due_at:new Date(deadline)}]);
                 const failedUntil=Date.now()+45_000;

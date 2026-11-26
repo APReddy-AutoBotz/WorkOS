@@ -74,7 +74,13 @@ export const readBillingReconciliation = async (
     ? 'milestone_billing_source_valid(review.organization_id,review.legal_entity_id,review.engagement_id,review.milestone_id,review.engagement_lifecycle_id,review.contract_lifecycle_id)'
     : 'tm_billing_source_valid(ev.organization_id,ev.legal_entity_id,ev.engagement_id,ev.snapshot_id)';
   const milestoneChecks = milestone
-    ? `coalesce(case when ev.reverses_event_id is not null then credit.evidence=ev.billing_evidence else decision.decision='Approved'
+    ? `coalesce(case when ev.reverses_event_id is not null then (
+      credit.evidence=ev.billing_evidence
+      -- Issuance validates and retains the entire evidence object. A later original
+      -- invoice confirmation may only replace its explicit null confirmationId.
+      or (credit.confirmation is not null and
+          jsonb_set(credit.evidence,'{confirmationId}','null'::jsonb,false)=ev.billing_evidence)
+    ) else decision.decision='Approved'
     and decision.sequence=jsonb_array_length(policy.definition->'stages')
     and ev.billing_evidence->>'milestoneId'=m.id and ev.billing_evidence->>'decisionId'=decision.id::text
     and ev.billing_evidence->'evidence'=review.evidence
