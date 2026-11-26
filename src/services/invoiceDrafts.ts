@@ -331,6 +331,14 @@ const canonical = (value: unknown) =>
       : v,
   );
 export { captureRateContext };
+const balanceAmount = z.string().max(40).regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,4})?$/);
+export const correctionEvidence=z.object({
+  adjustmentKind:z.enum(['Discount','Write-off']).optional(),approvedBalanceBefore:z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).optional(),
+  sourceVersion:z.literal(1),reviewId:uuid,policyId:uuid,requestId:uuid,decisionId:uuid,
+  originalSourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT']),originalEventId:uuid,originalEventVersion:z.literal(1),
+  originalItemId:uuid,originalItemVersion:z.literal(1),originalLineId:uuid,originalBatchId:uuid,artifactId:uuid,
+  artifactSha256:z.string().regex(/^[a-f0-9]{64}$/),confirmationId:uuid.nullable(),currency:z.string().regex(/^[A-Z]{3}$/),originalAmount:z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),amount:z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).refine(v=>/[1-9]/.test(v)),
+}).strict();
 const reconciliationTotals = {
   controls: z.array(
     z
@@ -347,7 +355,7 @@ const reconciliationTotals = {
           'HISTORICAL_RELEASED_LINE',
         ]),
         lineCount: z.number().int().nonnegative(),
-        amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
+        amount: balanceAmount,
       })
       .strict(),
   ),
@@ -357,12 +365,11 @@ const reconciliationTotals = {
         currency: z.string().regex(/^[A-Z]{3}$/),
         status: z.enum(['OCCUPIED', 'AVAILABLE', 'SOURCE_UNAVAILABLE']),
         lineCount: z.number().int().nonnegative(),
-        amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
+        amount: balanceAmount,
       })
       .strict(),
   ),
 };
-const balanceAmount = z.string().max(40).regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,4})?$/);
 const balanceUnits = (value: string) => {
   const [integer, fraction = ''] = value.split('.');
   return BigInt(integer + fraction.padEnd(4, '0'));
@@ -520,8 +527,8 @@ export const invoiceDrafts = {
         engagementId: id,
         eligibleOn: date,
         currency: z.string().regex(/^[A-Z]{3}$/),
-        amount,
-        sourceAmount: amount,
+        amount: balanceAmount,
+        sourceAmount: balanceAmount,
         sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
         sourceMatches: z.boolean(),
         sourceCurrent: z.boolean(),
@@ -529,7 +536,7 @@ export const invoiceDrafts = {
         lineId: uuid.nullable(),
         acquisitionRequestId: uuid.nullable(),
         acquisitionOperationId: id.nullable(),
-        lineAmount: amount.nullable(),
+        lineAmount: balanceAmount.nullable(),
         lineCurrency: z
           .string()
           .regex(/^[A-Z]{3}$/)
@@ -559,7 +566,7 @@ export const invoiceDrafts = {
                 'Billed/Confirmed',
                 'Cancelled',
               ]),
-              amount,
+              amount: balanceAmount,
               currency: z.string().regex(/^[A-Z]{3}$/),
               matches: z.boolean(),
             })
@@ -569,7 +576,7 @@ export const invoiceDrafts = {
         controlOk: z.boolean(),
       })
       .strict();
-    const row = z.discriminatedUnion('sourceType', [
+    const row = z.union([
       commonRow.extend({ sourceType: z.literal('TM_SNAPSHOT'), snapshotId: uuid, evidence }),
       commonRow.extend({
         sourceType: z.literal('MILESTONE_ACCEPTANCE'),
@@ -577,6 +584,13 @@ export const invoiceDrafts = {
         milestoneId: id,
         evidence: milestoneInvoiceEvidence,
         acceptanceMatches: z.boolean(),
+      }),
+      commonRow.extend({
+        sourceType: z.enum(['FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT']),
+        snapshotId: uuid.nullable(),
+        milestoneId: id.optional(),
+        acceptanceMatches: z.boolean().optional(),
+        evidence: correctionEvidence,
       }),
     ]);
     const report = z
@@ -595,8 +609,8 @@ export const invoiceDrafts = {
                 snapshotId: uuid.nullable(),
                 milestoneId: id.optional(),
                 currency: z.string().regex(/^[A-Z]{3}$/),
-                amount,
-                sourceAmount: amount,
+                amount: balanceAmount,
+                sourceAmount: balanceAmount,
                 sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
               })
               .strict(),
@@ -623,22 +637,26 @@ export const invoiceDrafts = {
           x.engagementId !== engagementId ||
           x.sourceMatches !==
             (x.sourceCurrency === x.currency &&
-              canonicalHours(x.sourceAmount) === canonicalHours(x.amount)) ||
-          milestone !== (x.sourceType === 'MILESTONE_ACCEPTANCE') ||
+              balanceUnits(x.sourceAmount) === balanceUnits(x.amount)) ||
+          milestone !== ('milestoneId' in x && !!x.milestoneId) ||
           (x.sourceType === 'MILESTONE_ACCEPTANCE'
             ? x.milestoneId !== x.evidence.milestoneId ||
               x.engagementId !== x.evidence.engagementId ||
               x.eligibilityDecisionId !== x.evidence.decisionId
-            : x.snapshotId !== x.evidence.snapshotId) ||
+            : x.sourceType === 'TM_SNAPSHOT' ? x.snapshotId !== x.evidence.snapshotId
+            : x.evidence.reviewId !== x.eligibilityApprovalId || x.evidence.decisionId !== x.eligibilityDecisionId ||
+              x.evidence.originalSourceType !== (milestone ? 'MILESTONE_ACCEPTANCE' : 'TM_SNAPSHOT') ||
+              (x.snapshotId === null) !== milestone ||
+              (x.sourceType === 'CHARGE_ADJUSTMENT') !== Boolean(x.evidence.adjustmentKind)) ||
           x.currency !== x.evidence.currency ||
-          canonicalHours(x.amount) !== canonicalHours(x.evidence.amount) ||
+          balanceUnits(x.amount) !== balanceUnits(x.evidence.amount) ||
           x.status !== (x.batchId ? 'OCCUPIED' : x.sourceCurrent ? 'AVAILABLE' : 'SOURCE_UNAVAILABLE') ||
           Boolean(x.batchId) !== Boolean(x.lineId) ||
           Boolean(x.batchId) !== Boolean(x.acquisitionRequestId) ||
           Boolean(x.batchId) !== Boolean(x.acquisitionOperationId) ||
           x.controlOk !==
             (x.sourceMatches &&
-              (x.sourceType !== 'MILESTONE_ACCEPTANCE' || x.acceptanceMatches) &&
+              (!milestone || ('acceptanceMatches' in x && x.acceptanceMatches === true)) &&
               x.lineMatches &&
               x.artifactMatches &&
               x.history.every((h) => h.batchState === 'Cancelled' && h.matches) &&
@@ -656,11 +674,11 @@ export const invoiceDrafts = {
       if (keys.has(k)) return bad();
       keys.add(k);
       const selected = value.items.filter((x) => x.currency === t.currency && x.status === t.status),
-        sum = invoiceDraftTotal(selected.map((x) => x.amount));
+        sum = selected.reduce((n, x) => n + balanceUnits(x.amount), 0n);
       if (
         !selected.length ||
-        sum.lineCount !== t.lineCount ||
-        canonicalHours(sum.amount) !== canonicalHours(t.amount)
+        selected.length !== t.lineCount ||
+        sum !== balanceUnits(t.amount)
       )
         return bad();
     }
@@ -697,8 +715,8 @@ export const invoiceDrafts = {
         amounts = grouped.get(k);
       if (!amounts || seen.has(k)) return bad();
       seen.add(k);
-      const total = invoiceDraftTotal(amounts);
-      if (total.lineCount !== t.lineCount || canonicalHours(total.amount) !== canonicalHours(t.amount))
+      const total = amounts.reduce((n, x) => n + balanceUnits(x), 0n);
+      if (amounts.length !== t.lineCount || total !== balanceUnits(t.amount))
         return bad();
     }
     if (seen.size !== grouped.size) return bad();
