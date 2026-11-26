@@ -1905,7 +1905,7 @@ export const adminService = {
     const backendAvailable = await checkBackend();
     assertExpectedImportScope(expectedScope);
     if (backendAvailable) {
-      const raw = await api.postWithScope<Record<string, unknown>>('/api/import-export-logs', {
+      const [raw] = await api.postWithScope<Record<string, unknown>[]>('/api/import-export-logs', {
         operation: log.operation,
         channel: log.channel,
         fileName: log.fileName,
@@ -1915,25 +1915,6 @@ export const adminService = {
         errorRows: log.errorRows,
         errors: log.errors,
       }, expectedScope);
-      // Both writes remain bound to the operation's captured organization/entity even
-      // if the UI switches scopes while the first request is in flight.
-      const auditWrite = api.postWithScope('/api/audit-events', {
-        action: log.operation,
-        module: 'Import / Export',
-        details: `${log.operation} ${log.fileName} through ${log.channel} with ${log.totalRows} row${log.totalRows === 1 ? '' : 's'} (${log.status})`,
-        entityType: 'ImportExportLog',
-        entityId: String(raw.id || log.fileName),
-        newValue: {
-          channel: log.channel,
-          fileName: log.fileName,
-          status: log.status,
-          totalRows: log.totalRows,
-          validRows: log.validRows,
-          errorRows: log.errorRows,
-        },
-      }, expectedScope);
-      if (requireAuditConfirmation) await auditWrite;
-      else await auditWrite.catch(() => {});
       return normalizeImportExportLog(raw);
     }
     if (requireAuditConfirmation) throw new Error('Export history and audit require an available backend.');

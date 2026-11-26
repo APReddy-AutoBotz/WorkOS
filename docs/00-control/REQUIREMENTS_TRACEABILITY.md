@@ -370,6 +370,10 @@ The read-only calendar portion of WOS-ORG-008 and only the calendar entry point 
 
 ## Integrated import-to-audit acceptance increment
 
+WOS-CORE-005 and WOS-IAM-010. Deployment-wide job role definition saves record the actor and before/after values in the same transaction as the change. The existing migration-runner API journey covers create, edit, blocked deactivation, successful deactivation and scoped audit visibility.
+
+WOS-CORE-005. The manual import/export history API creates one scoped audit event in the same transaction as the history row. The existing two-alias API fixture verifies the persisted actor, role, scope and generated ID, and checks rollback on audit failure. Report export browser journeys exercise the single request.
+
 The [integrated journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md), forwardported and accepted in PR41 with PR50 retaining historical evidence after PR49 acceptance, provides coherent evidence for WOS-CORE-003/005 and WOS-GOV-002/004: actual React Import / Export, versioned API, disposable migrated PostgreSQL, retained history after reload and a second named account's actual Audit Trail provenance. It distinguishes saved dry-run/success event context from later GET traces, checks another legal entity and denied unassigned scope, and asserts no inspection mutation. No production behavior/schema/permission/grant/dependency change or whole-requirement acceptance is implied. All twelve existing browser suites and formal dependency/review/UAT/release gates remain retained.
 
 ## PR-007A commercial drafting evidence (development-only exception)
