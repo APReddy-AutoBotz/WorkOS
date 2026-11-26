@@ -69,10 +69,15 @@ export const scopedWorkApproval = async (c, req, id, o, lock = false, includeSou
       from work_approval_overdue_stages d left join lateral(select a.attempt,a.failure from work_approval_overdue_attempts a
         where a.instance_id=d.instance_id and a.stage=d.stage order by a.attempt desc limit 1) last on true
       where d.instance_id=$1 order by d.stage`,[id])).rows : [];
-    return { i, policy, transitions, overdueDeliveries, state: approvalState(policy.definition.stages, transitions), worker, notificationFailures, source };
+    const stageReminders = includeSource && policy.definition.reminderLeadMinutes != null
+        ? (await c.query(`select n.transition_sequence as stage,n.created_at as "deliveredAt",r.read_at as "readAt"
+            from work_approval_reminder_inbox n left join work_approval_overdue_reads r on r.recipient_id=n.id and r.user_id=n.user_id
+            where n.instance_id=$1 and n.organization_id=$2 and n.legal_entity_id=$3 order by n.transition_sequence`,
+            [id,...workApprovalScope(req)])).rows : [];
+    return { i, policy, transitions, stageReminders, overdueDeliveries, state: approvalState(policy.definition.stages, transitions), worker, notificationFailures, source };
 };
 export const workApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at });
-export const workApprovalView = v => ({ id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, ...(v.overdueDeliveries.length ? {overdueDeliveries:v.overdueDeliveries} : {}), source: v.source });
+export const workApprovalView = v => ({ id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, ...(v.stageReminders.length ? {stageReminders:v.stageReminders} : {}), ...(v.overdueDeliveries.length ? {overdueDeliveries:v.overdueDeliveries} : {}), source: v.source });
 export const workApprovalRecipientScope = async (c,req,id,workerIds,o) => {
     const user=await workApprovalUser(c,req,id,o), remaining=new Set(workerIds);
     for (const role of user.roles) {

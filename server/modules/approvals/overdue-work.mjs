@@ -61,15 +61,27 @@ async function dispatchNext(c,o) {
   return true;
 }
 
+export function collectWorkStageReminders(pool) {
+  return pool.query(`insert into work_approval_stage_reminders(recipient_id)
+    select c.recipient_id from work_approval_reminder_candidates c
+    where c.remind_at<=now() and c.due_at>now()
+      and not exists(select from work_approval_stage_reminders d where d.recipient_id=c.recipient_id)
+    order by c.due_at,c.recipient_id limit 100 on conflict do nothing`);
+}
+
 export async function processOverdueWork(pool,o) {
   await collectOverdueWorkStages(pool);
   for (let n=0;n<10;n++) if (!await processRiskTransaction(pool,c=>dispatchNext(c,o))) break;
+  if ((await pool.query("select to_regclass('work_approval_stage_reminders') is not null as ready")).rows[0].ready)
+    await collectWorkStageReminders(pool);
 }
 
-export async function overdueWorkInboxRows(c,req,o,{after=null,id=null}={}) {
-  if (!(await c.query("select to_regclass('public.work_approval_overdue_inbox') is not null as available")).rows[0].available) return [];
+export async function timedWorkInboxRows(c,req,o,{after=null,id=null}={}) {
+  const {rows:[schema]}=await c.query(`select to_regclass('public.work_approval_overdue_inbox') is not null as overdue,
+    to_regclass('public.work_approval_reminder_inbox') is not null as reminders`);
+  if (!schema.overdue) return [];
   const params=[req.user.sub,...workApprovalScope(req),after,id],where=o.buildEmployeeScopeWhere(req,params,'e');
-  return (await c.query(`select r.id,'work-approval/'||r.instance_id||'/'||r.stage||'/approval.overdue_or_escalated/deadline' as "eventId",
+  const overdue=(await c.query(`select r.id,'work-approval/'||r.instance_id||'/'||r.stage||'/approval.overdue_or_escalated/deadline' as "eventId",
     r.instance_id as "instanceId", r.timesheet_id as "timesheetId",r.submission_id as "submissionId",r.stage as "transitionSequence",
     'approval.overdue_or_escalated' as "eventKey",'CONTROL_MANDATORY' as "policyClass",r.template_id as "templateId",
     'deadline' as "operationId",r.locale,r.title,r.body,r.reasons,'Required' as "channelDecision",r.created_at as "createdAt",rd.read_at as "readAt"
@@ -77,6 +89,16 @@ export async function overdueWorkInboxRows(c,req,o,{after=null,id=null}={}) {
     left join work_approval_overdue_reads rd on rd.recipient_id=r.id and rd.user_id=r.user_id
     where r.user_id=$1 and r.organization_id=$2 and r.legal_entity_id=$3 and ($4::uuid is null or r.id>$4)
     and ($5::uuid is null or r.id=$5) and ${where} order by r.id limit 21`,params)).rows;
+  if (!schema.reminders) return overdue;
+  const reminders=(await c.query(`select r.id,r.event_id as "eventId",r.instance_id as "instanceId",r.timesheet_id as "timesheetId",
+    r.submission_id as "submissionId",r.transition_sequence as "transitionSequence",r.event_key as "eventKey",
+    r.policy_class as "policyClass",r.template_id as "templateId",r.operation_id as "operationId",r.locale,r.title,r.body,r.reasons,
+    r.channel_decision as "channelDecision",r.created_at as "createdAt",rd.read_at as "readAt",true as reminder
+    from work_approval_reminder_inbox r join employees e on e.id=r.employee_id and e.organization_id=r.organization_id and e.legal_entity_id=r.legal_entity_id
+    left join work_approval_overdue_reads rd on rd.recipient_id=r.id and rd.user_id=r.user_id
+    where r.user_id=$1 and r.organization_id=$2 and r.legal_entity_id=$3 and ($4::uuid is null or r.id>$4)
+    and ($5::uuid is null or r.id=$5) and ${where} order by r.id limit 21`,params)).rows;
+  return [...overdue,...reminders];
 }
 
 export function startOverdueWorkWorker(pool,server,o) {
