@@ -1,7 +1,9 @@
+import {verifyRiskNoticePolicy} from './fixed-fee-risk-policy-journey.mjs';
 import assert from 'node:assert/strict';
 import {adoptHourlyRate} from './adopt-hourly-rate.mjs';
 
 export async function verifyServiceMargin({pool,request,post,capture,review,receipt,accepted,base,identities,today,end,engagement,workerId}) {
+  await verifyRiskNoticePolicy({pool,request,identities,engagement,today,model:'managed_service'});
   const path='/engagements/'+engagement.id+'/service-period-margin';
   const monthStart=today.slice(0,7)+'-01',query=path+'?monthStart='+monthStart;
   const read=async(suffix='')=>{const r=await request(query+suffix);assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};
@@ -41,7 +43,10 @@ export async function verifyServiceMargin({pool,request,post,capture,review,rece
     ['4.5',3,'100','55.5552','44.4448','44.44']);
   const [a,b]=await Promise.all([retain(preview.token),retain(preview.token)]);
   assert.equal(a.version,2);assert.deepEqual(a,b);
-  assert.deepEqual((await read('&version=1')).report,v1.report);
+  const retained=await read('&version=1&monthEnd=true');
+  assert.deepEqual(retained.report,v1.report);
+  assert.equal(retained.monthEndAssessment.status,'Open');
+  assert.equal(retained.monthEndAssessment.thresholdPercent,null);
   for (const [version,threshold,status] of [[1,'90','Unavailable'],[2,'44.45','Below'],[2,'44.44','AtOrAbove'],[2,'-2.5','AtOrAbove']]) {
     assert.deepEqual((await read('&version='+version+'&thresholdPercent='+threshold)).thresholdComparison,{thresholdPercent:threshold,status});
   }

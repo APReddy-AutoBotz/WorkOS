@@ -4,6 +4,7 @@ import {commercialFixture, withCommercialDatabase, migrateCommercialDatabase, wi
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
 import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
+import {verifyMonthEndDelivery} from './support/month-end-margin-delivery.mjs';
 import {verifyServiceMargin} from './support/service-margin-test.mjs';
 for (const marginScenario of [false,true]) await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await migrateCommercialDatabase(pool);
@@ -53,6 +54,7 @@ for (const marginScenario of [false,true]) await withCommercialDatabase(async ({
     assert.deepEqual(await read(),{evidenceId:receipt.id,status:'matched',approvedHours:'3.75',recordedHours:'3.75',entryCount:2});
     if (marginScenario) {
       await verifyServiceMargin({pool,request,post,capture,review,receipt,accepted,base,identities,today,end,engagement,workerId:commercialFixture.ownerId});
+      await verifyMonthEndDelivery(databaseUrl,engagement.id,identities);
       return;
     }
     const mismatch=await capture('CALL','OPS-43','1');
