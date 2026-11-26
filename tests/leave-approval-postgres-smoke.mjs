@@ -70,3 +70,26 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   console.log('Configured leave PostgreSQL/API source revisions, pinned policy, no intermediate availability, current-stage/source guards, complete mandatory rollback, replay/concurrency, rejection, final balance, cancellation and owned inbox/read passed.');
  });
 });
+
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ await migrateCommercialDatabase(pool);
+ const fx=await seedWorkApproval(pool), ids=fx.identities;
+ await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Employee','leave.self_service',true) on conflict(role_name,permission_key) do update set enabled=true");
+ await withCommercialApi({databaseUrl,identities:ids},async({request})=>{
+  await adoptActualInputs(request,fx.today);
+  const policy=leaveDefinition(ids);
+  await adoptLeavePolicy(request,fx,{...policy,stages:policy.stages.slice(0,1)});
+  const {leave,instance}=await createLeave(request,fx);
+  const balance=async()=>(await pool.query("select used_days::numeric::float8 used from leave_balances where employee_id=$1 and leave_type_id='leave-type-annual'",[f.ownerId])).rows[0].used;
+  const previous=await balance();
+  ok(await decideLeave(request,ids.manager,instance),201);
+  const final=await readLeaveReview(request,instance.id);
+  assert.equal(final.state.status,'Approved');
+  assert.equal(final.transitions.length,1);
+  assert.equal((await pool.query('select status from leave_requests where id=$1',[leave.id])).rows[0].status,'Approved');
+  assert.equal((await pool.query("select status from approval_records where entity_type='LeaveRequest' and entity_id=$1",[leave.id])).rows[0].status,'Approved');
+  assert.equal(await balance(),previous+1);
+  assert.equal(await leaveCapacity(request,fx.today,ids.reader),'0');
+  assert((await canonicalLeaveInbox(request,ids.reader)).some(n=>n.instanceId===instance.id && n.eventKey==='approval.completed'));
+ });
+});
