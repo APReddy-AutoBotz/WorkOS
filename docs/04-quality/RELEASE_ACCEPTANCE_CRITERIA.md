@@ -74,11 +74,15 @@ The buyer or deployment owner confirms:
 
 Acceptance is recorded against a commit/tag and artifact; later changes require renewed evidence.
 
-## WOS-00F release hold
+## WOS-00F release hold history
 
-The historical merged WOS-00 baseline is under corrective hold until WOS-00F PR #14 is closed cleanly. Release evidence must prove invoice-batch approval finality, forbidden reopen states, protected cancellation/replacement, forward-only post-export correction, immutable history, occupancy correctness, failed-export behavior, bounded authoritative recipient resolution, atomic zero-partial protected-recipient persistence, fail-closed relationship failures, caller non-redirection, deduplication/idempotency and same-decision event exclusivity. PR-009, PR-012 and PR-013 retain their assigned executable evidence.
+The controller recorded the corrected WOS-00 baseline at `1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea` after PR #14 passed independent review and merged. PR #12 closed unmerged. The controller reauthorized WOS-01A and the recreated bootstrap merged in PR #16. [Controller record](https://github.com/APReddy-AutoBotz/WorkOS/issues/3) · [Bootstrap merge](https://github.com/APReddy-AutoBotz/WorkOS/pull/16)
 
-WOS-01A PR #12 remains Draft and dependency-blocked until **all five** prerequisites are satisfied:
+The following conditions governed that historical hold.
+
+The historical merged WOS-00 baseline was under corrective hold pending clean closure of WOS-00F PR #14. Release evidence must prove invoice-batch approval finality, forbidden reopen states, protected cancellation/replacement, forward-only post-export correction, immutable history, occupancy correctness, failed-export behavior, bounded authoritative recipient resolution, atomic zero-partial protected-recipient persistence, fail-closed relationship failures, caller non-redirection, deduplication/idempotency and same-decision event exclusivity. PR-009, PR-012 and PR-013 retain their assigned executable evidence.
+
+WOS-01A was dependency-blocked until **all five** prerequisites were satisfied:
 
 1. PR #14 receives a fresh independent exact-head review with no P0/P1/P2 findings.
 2. PR #14 is merged under an expected-head guard against that reviewed SHA.

@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { captureRateContext, invoiceDrafts } from '../services/invoiceDrafts';
+import { captureRateContext, invoiceDrafts, reconciliationGrants, type ChargeReportSource } from '../services/invoiceDrafts';
 import { hasRatePermission, isRateContextCurrent, type RateContext } from '../services/rateCandidates';
 
 type Report = Awaited<ReturnType<typeof invoiceDrafts.reconciliation>>;
-type Choice = { id: string; label: string; fixedFee?: boolean };
+type Choice = { id: string; label: string; source?: ChargeReportSource; selectionId?: string };
 
 export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
   const [engagement, setEngagement] = useState('');
+  const selected=choices.find(choice=>(choice.selectionId ?? choice.id)===engagement);
+  const chargeLabel=selected?.source==='fixed-fee'?'Fixed-fee':selected?.source==='retainer'?'Retainer':selected?.source==='service-units'?'Managed-service unit':'Managed-service period';
   const [report, setReport] = useState<Report | null>(null);
-  const [balances,setBalances]=useState<Awaited<ReturnType<typeof invoiceDrafts.fixedFeeBalances>> | null>(null);
+  const [balances,setBalances]=useState<Awaited<ReturnType<typeof invoiceDrafts.chargeReport>> | null>(null);
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState('');
   const [portfolioReason, setPortfolioReason] = useState('');
@@ -88,8 +90,8 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
     setReport(null); setBalances(null);
     setMessage('');
     try {
-      if (choices.find(choice => choice.id === engagement)?.fixedFee) {
-        const rows=await invoiceDrafts.fixedFeeBalances(engagement,context);
+      if (selected?.source) {
+        const rows=await invoiceDrafts.chargeReport(selected.id,context,selected.source);
         if (generation.current===run) setBalances(rows);
         return;
       }
@@ -138,9 +140,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
     <section aria-label="Billing reconciliation" className="my-4 space-y-3 rounded-xl border p-4">
       <h2>Billing reconciliation</h2>
       <p>
-        Reconcile approved T&amp;M work or accepted milestones across the portfolio or within one engagement,
-        from eligibility through invoice reservation, export and manual confirmation. Select a fixed-fee engagement to see its registered installments and credits by billing state. Totals reflect your
-        current access and stay in the original currency.
+        Select a billing source and date range for the portfolio, or choose an engagement below. Amounts stay in their original currency.
       </p>
       {!allowed ? (
         <p role="status">Scoped invoice and export view access are required.</p>
@@ -179,6 +179,8 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                   setSource(e.target.value as Portfolio['source']);
                 }}
               >
+                {Object.entries(reconciliationGrants).filter(([,permission])=>hasRatePermission(permission)).map(([key])=>
+                  <option key={key} value={key}>{{'fixed-fee':'Fixed-fee installments',retainer:'Retainer periods','service-units':'Managed-service units','service-periods':'Managed-service periods'}[key]}</option>)}
                 <option value="time_and_materials">Time and materials</option>
                 {hasRatePermission('commercial.milestone_billing.view') && (
                   <>
@@ -214,8 +216,10 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                       <tr>
                         <th>Currency</th>
                         <th>Boundary</th>
-                        <th>Lines</th>
+                        {portfolio.source in reconciliationGrants && <th>Expected records</th>}
+                        <th>Observed records</th>
                         <th>Amount</th>
+                        {portfolio.source in reconciliationGrants && <th>Exceptions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -223,8 +227,10 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                         <tr key={x.currency + x.boundary}>
                           <td>{x.currency}</td>
                           <th scope="row">{x.boundary.replaceAll('_', ' ').toLowerCase()}</th>
+                          {'expected' in x && <td>{x.expected}</td>}
                           <td>{x.lineCount}</td>
                           <td>{x.amount}</td>
+                          {'exceptions' in x && <td>{x.exceptions}</td>}
                         </tr>
                       ))}
                     </tbody>
@@ -277,7 +283,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
             >
               <option value="">Choose an engagement</option>
               {choices.map((c) => (
-                <option key={c.id} value={c.id}>
+                <option key={c.selectionId ?? c.id} value={c.selectionId ?? c.id}>
                   {c.label}
                 </option>
               ))}
@@ -287,16 +293,24 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
             Load billing reconciliation
           </button>
           {message && <p role="status">{message}</p>}
-          {balances && hasRatePermission('commercial.fixed_fee_eligibility.issue') && <section aria-label="Fixed-fee billing balances">
-            <h3>Registered installments and credits</h3>
-            {balances.length ? <table>
+          {balances && selected?.source && hasRatePermission(reconciliationGrants[selected.source]) && <section aria-label={chargeLabel+' billing balances'}>
+            <h3>Registered {selected.source==='fixed-fee'?'installments':'charges'} and credits</h3>
+            {balances.balances.length ? <table>
               <caption>Current register balances by currency and billing state</caption>
-              <thead><tr>{['Currency','State','Installments','Credits','Gross charges','Credit amount','Net amount'].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
-              <tbody>{balances.map(row=><tr key={row.currency+row.status}>
-                <td>{row.currency}</td><td>{row.status}</td><td>{row.installments}</td><td>{row.credits}</td>
+              <thead><tr>{['Currency','State',selected.source==='fixed-fee'?'Installments':'Charges','Credits','Gross charges','Credit amount','Net amount'].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
+              <tbody>{balances.balances.map(row=><tr key={row.currency+row.status}>
+                <td>{row.currency}</td><td>{row.status}</td><td>{row.charges}</td><td>{row.credits}</td>
                 <td>{row.gross}</td><td>{row.adjustments}</td><td>{row.net}</td>
               </tr>)}</tbody>
-            </table> : <p>No registered installments or credits for this engagement.</p>}
+            </table> : <p>No registered charges or credits for this engagement.</p>}
+            {balances.controls.length>0 && <table>
+              <caption>{chargeLabel} reconciliation controls by currency</caption>
+              <thead><tr>{['Currency','Boundary','Expected records','Observed records','Net amount','Exceptions'].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
+              <tbody>{balances.controls.map(row=><tr key={row.currency+row.boundary}>
+                <td>{row.currency}</td><td>{row.boundary}</td><td>{row.expected}</td><td>{row.observed}</td>
+                <td>{row.amount}</td><td>{row.exceptions}</td>
+              </tr>)}</tbody>
+            </table>}
           </section>}
           {report && (
             <div>

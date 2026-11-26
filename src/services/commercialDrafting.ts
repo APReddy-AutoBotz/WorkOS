@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigureRetainerRisk?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigureRetainerRisk?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canConfigureMarginRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -118,6 +118,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
       ['employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
     canConfigureRetainerRisk:permissions.includes('commercial.retainer_risk.configure'),
     canConfigurePoRiskNotices:permissions.includes('commercial.po_risk.configure'),
+    canConfigureMarginRiskNotices:permissions.includes('commercial.service_margin_risk.configure'),
     canConfigureRiskNotices:permissions.includes('commercial.fixed_fee_risk.configure'),
     canSignFixedFeeStatement:permissions.includes('commercial.fixed_fee_statement.sign'),
     canApproveFixedFeeTransition:permissions.includes('commercial.fixed_fee_transition.approve'),
@@ -445,15 +446,16 @@ export const commercialDraftingService = {
       return data;
     },false);
   },
-  riskDeliveryStatus(eng:string,context:CommercialDraftingContext) {
-    if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
+  riskDeliveryStatus(eng:string,context:CommercialDraftingContext,model:'fixed_fee'|'managed_service'='fixed_fee') {
+    const monthly=model==='managed_service',current=assertCommercialDraftingContext(context);
+    if (!(monthly?current.canConfigureMarginRiskNotices:current.canConfigureRiskNotices)) throw invalid();
     const scan=z.object({scanDate:z.string().date(),scanFailure:z.literal('EVALUATION_UNAVAILABLE').nullable()}).strict();
     const history=z.object({attempt:z.number().int().positive(),at:z.string().datetime({offset:true}),
       failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable()}).strict();
-    const event=z.object({history:z.array(history).max(5),metric:z.enum(['effort','laborCost']),through:z.string().date(),sourceAmendmentId:z.string(),
+    const event=z.object({history:z.array(history).max(5),metric:monthly?z.literal('margin'):z.enum(['effort','laborCost']),...(monthly?{marginVersionId:z.string().uuid()}:{}),through:z.string().date(),sourceAmendmentId:z.string(),
       attempts:z.number().int().nonnegative(),failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable(),
       deliveredAt:z.string().datetime().nullable(),nextAttempt:z.string().datetime().nullable()}).strict();
-    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk-deliveries',undefined,
+    return request(context,'GET',serviceEngPath(eng)+(monthly?'/service-margin-risk-deliveries':'/fixed-fee-risk-deliveries'),undefined,
       value=>z.object({engagementId:z.literal(eng),scan:scan.nullable(),events:z.array(event).max(20)}).strict().parse(value),false);
   },
   retainerDeliveryStatus(versionId:string,context:CommercialDraftingContext) {
@@ -501,12 +503,13 @@ export const commercialDraftingService = {
   riskNoticePolicy(eng:string,context:CommercialDraftingContext,command?:{
     expectedVersion:number;effectiveFrom:string;locale:string;title:string;body:string;reason:string;
     manager:{userId:string;role:string};finance:{userId:string;role:string}
-  }) {
-    if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
+  },model:'fixed_fee'|'managed_service'='fixed_fee') {
+    const current=assertCommercialDraftingContext(context);
+    if (!(model==='managed_service'?current.canConfigureMarginRiskNotices:current.canConfigureRiskNotices)) throw invalid();
     const recipient=z.object({userId:z.string().uuid(),role:z.string().min(1)}).strict();
     const policy=z.object({id:z.string().uuid(),version:z.number().int().positive(),effectiveFrom:z.string().date(),
       manager:recipient,finance:recipient,locale:z.string(),title:z.string(),body:z.string()}).strict();
-    return request(context,command?'POST':'GET',serviceEngPath(eng)+'/fixed-fee-risk-notice-policy',command,
+    return request(context,command?'POST':'GET',serviceEngPath(eng)+(model==='managed_service'?'/service-margin-risk-notice-policy':'/fixed-fee-risk-notice-policy'),command,
       value=>z.object({engagementId:z.literal(eng),latest:policy.nullable()}).strict().parse(value),false);
   },
   fixedFeeStatement(eng:string,through:string,frequency:'Weekly'|'Monthly'|'Fiscal',context:CommercialDraftingContext,
@@ -685,9 +688,10 @@ export const commercialDraftingService = {
         status:z.enum(['Unretained','Unavailable','Below','AtOrAbove'])}).strict()).max(50)
     }).strict().parse(value),false);
   },
-  serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string;thresholdPercent?:string}={}) {
+  serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string;thresholdPercent?:string;monthEnd?:boolean}={}) {
     if (!assertCommercialDraftingContext(context).canViewServiceMargin || (options.expectedToken && !context.canRetainServiceMargin)) throw invalid();
     const query=new URLSearchParams({monthStart});
+    if (options.monthEnd) query.set('monthEnd','true');
     if (options.version) query.set('version',String(options.version));
     if (options.thresholdPercent!==undefined) query.set('thresholdPercent',options.thresholdPercent);
     const path=serviceEngPath(eng)+'/service-period-margin';
@@ -698,6 +702,10 @@ export const commercialDraftingService = {
           !/^[A-Z]{3}$/.test(text(p.currency)) || !/^[0-9a-f]{64}$/.test(text(r.token))) throw invalid();
         const exact=(v:unknown)=>{const s=text(v);if (!/^-?(0|[1-9]\d*)(\.\d+)?$/.test(s)) throw invalid();return s;};
         return {version:r.version===null?null:integer(r.version,1),latestVersion:integer(r.latestVersion),token:text(r.token),
+          monthEndAssessment:!options.monthEnd?null:z.object({
+            monthEnd:z.string().date(),thresholdPercent:z.string().nullable(),
+            status:z.enum(['Open','Inactive','Unavailable','Below','AtOrAbove'])
+          }).strict().parse(r.monthEndAssessment),
           comparison:options.thresholdPercent===undefined?null:z.object({thresholdPercent:z.literal(options.thresholdPercent),status:z.enum(['Unavailable','Below','AtOrAbove'])}).strict().parse(r.thresholdComparison),
           currency:text(p.currency),billable:exact(p.billable),cost:exact(p.retainedCost),margin:p.margin===null?null:exact(p.margin),
           percent:p.marginPercent===null?null:exact(p.marginPercent),hours:exact(p.approvedHours),entries:integer(p.approvedEntries),

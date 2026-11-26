@@ -1,5 +1,24 @@
 # WorkOS implementation status
 
+## Launch acceptance checkpoint
+
+Two of ten programme workstreams are formally accepted (WOS-00 and WOS-02). They account for 18% of the charter weight. Eight workstreams remain open and have different amounts of implementation and acceptance work outstanding. The previous engineering percentage was an estimate. [Programme weights](PROGRAM_CHARTER.md#10-weighted-programme-plan) and [open work by owner](../05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md#launch-work-by-accountable-role).
+
+**Verified engineering candidate.** On 25 November the release branch at `c9176e9` included commercial main and the reviewed revisions of drafts #357 through #373. The application, 181-entry migration, container readiness, performance and restore checks passed. The downloaded image matched its source revision and all seven handover checksums. [Hosted application evidence](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45661002850/job/139370759896) and [verified archive](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45661002850/artifacts/15047118650).
+
+**Release decisions.** Finance must select the source for actual non-labor costs. Security must confirm any external use of the historical fixture credential and dispose of the five matched findings. Gate C requires independent PR-012 review, the required merges and product-owner acceptance. Gate D requires buyer assignment, role UAT and sign-off. [Commercial acceptance](https://github.com/APReddy-AutoBotz/WorkOS/issues/8), [security disposition](https://github.com/APReddy-AutoBotz/WorkOS/issues/10) and [buyer handover](https://github.com/APReddy-AutoBotz/WorkOS/issues/11).
+
+| Open workstreams | Weight | What remains to verify for launch |
+|---|---:|---|
+| Source and branding, platform | 20% | Reconcile source, branding and platform acceptance records with the merged implementation. |
+| Work capture, approvals | 24% | Close the outstanding capture, approval and period-policy criteria across roles. |
+| Commercial, reporting and integrations | 26% | Reconcile commercial controls and totals, complete outstanding risk reporting and delivery, and obtain Gate C acceptance. |
+| Security and operations, buyer handover | 12% | Dispose of outstanding findings, verify the selected release and recovery on buyer infrastructure, complete role UAT and record Gate D. |
+
+The product owner confirmed on 24 November 2026 that the pilot buyer is awaiting assignment. The first delivery milestone is an engineering release candidate with a named revision, artifact digest and completed product-owned evidence. Buyer-specific configuration, UAT and Gate D sign-off follow assignment.
+
+The buyer handover template contains 44 unchecked items across eight areas. Record buyer decisions against a named release and artifact before declaring handover complete. [Release criteria](../04-quality/RELEASE_ACCEPTANCE_CRITERIA.md) · [Buyer checklist](../05-delivery/BUYER_HANDOVER_CHECKLIST.md)
+
 ## Utilization evidence
 
 Forecast pressure and project allocation indicators now use the same dated eligible workforce and project population. A checkpoint without capacity cannot generate a hiring assessment.
@@ -16,13 +35,13 @@ The application build and runtime share one pinned Node image index. The buyer P
 
 ## Managed-service margin policy
 
-The governed engagement amendment workflow supports an optional standing threshold, dated adoption and explicit disablement. The [margin portfolio](https://github.com/APReddy-AutoBotz/WorkOS/pull/349) remains available for ad hoc comparisons. Historical alert evaluation and mandatory delivery are open.
+The governed engagement amendment workflow supports an optional standing threshold, dated adoption and explicit disablement. The [margin portfolio](https://github.com/APReddy-AutoBotz/WorkOS/pull/349) remains available for ad hoc comparisons. The month-end alert candidate adds historical evaluation, scoped delivery, retries and inbox acknowledgement. Release acceptance requires integration and independent review.
 
 ## Commercial reporting checkpoint on 24 November 2026
 
 On main at `1f45ddd49a56df67296b1f12130804135f167262`, finance can compare an individual retained managed-service monthly margin with an entered threshold. [Reporting PR](https://github.com/APReddy-AutoBotz/WorkOS/pull/348) and [validation run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45250489157).
 
-The portfolio view extends this evidence across engagements. Automated margin notifications, fixed-fee actual expenses and buyer release acceptance remain open. The retainer risk register and alert delivery have successful candidate checks and await integration in [PR 346](https://github.com/APReddy-AutoBotz/WorkOS/pull/346) and [PR 347](https://github.com/APReddy-AutoBotz/WorkOS/pull/347).
+The portfolio view extends this evidence across engagements. Automated margin notifications, fixed-fee actual expenses and buyer release acceptance remain open. The retainer risk register and version-specific alert delivery merged in [PR 346](https://github.com/APReddy-AutoBotz/WorkOS/pull/346) and [PR 347](https://github.com/APReddy-AutoBotz/WorkOS/pull/347).
 
 ## Delivery status on 24 November 2026
 

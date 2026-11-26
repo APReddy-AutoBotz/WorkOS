@@ -255,7 +255,7 @@ export const createInvoiceCsvRouter = (o) => {
       entityId: id,
       newValue,
       reason: 'Scoped invoice-ready CSV operation.',
-      details: 'No cost, ledger posting or provider delivery.',
+      details: 'Retained invoice export evidence.',
     });
   registerCorrectionReviewEvidence(router,{handle,authorize,batch,envelope});
   registerCorrectionDrafts(router,{handle,authorize,batch,envelope,audit:o.audit});
@@ -363,26 +363,170 @@ export const createInvoiceCsvRouter = (o) => {
       };
     }),
   );
+  const providerAudit = (c, r, action, id, newValue) => o.audit(c, r, {
+    module:'Invoice Export', entityType:'InvoiceProviderExport', entityId:id, action, newValue,
+    reason:'Scoped delivery of an approved invoice batch.', details:action,
+  });
+  const acceptArtifact = async (c, r, { d, row, notificationPolicy, rendered, fp, artifactId }) => {
+      await context(c, r, { batchId: d.batchId, artifactId });
+      const a = (
+        await c.query(
+          'insert into invoice_csv_artifacts(id,batch_id,organization_id,legal_entity_id,approval_id,final_transition_id,lineage_hash,schema_version,version,payload,sha256,line_count,currency,total,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)returning *',
+          [
+            artifactId,
+            d.batchId,
+            ...scope(r),
+            d.approvalId,
+            d.finalTransitionId,
+            d.lineageHash,
+            d.schemaVersion,
+            rendered.bytes,
+            rendered.sha256,
+            rendered.lineCount,
+            rendered.currency,
+            rendered.total,
+            r.user.sub,
+            r.user.activeRole,
+            d.requestId,
+            fp,
+            d.reason,
+            r.operationId,
+          ],
+        )
+      ).rows[0];
+      await audit(c, r, 'Accept CSV', artifactId, {
+        batchId: d.batchId,
+        artifactId,
+        sha256: rendered.sha256,
+      });
+      await emitInvoiceExportNotice(c, r, {
+        batch: row,
+        policy: notificationPolicy,
+        resultId: artifactId,
+        kind: 'artifact',
+      });
+      return { ...(await envelope(c, r)), artifact: artifactView(a), failure: null, replayed: false };
+  };
+  const exportRequest = z
+  .object({
+    expectedOwnerKey: key,
+    requestId: uuid,
+    batchId: uuid,
+    approvalId: uuid,
+    finalTransitionId: uuid,
+    lineageHash: key,
+    schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA,RETAINER_CSV_SCHEMA,SERVICE_CSV_SCHEMA,PERIOD_CSV_SCHEMA,FIXED_CSV_SCHEMA]),
+    expectedLineCount: z.number().int().min(1).max(1000000),
+    expectedTotal: z.union([money,z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/)]),
+    reason,
+  })
+  .strict();
+
+  router.post('/provider-exports', handle(true, async (c, r) => {
+    const d = parse(exportRequest, r.body);
+    if (workApprovalOwner(r) !== d.expectedOwnerKey)
+      throw fail(409, 'INVOICE_CSV_CONTEXT', 'Account, role or scope changed. Reload.');
+    await authorize(c, r, 'create');
+    await assertCommercialAuthority(c, r, 'commercial.invoice_export.deliver');
+    const { row, source, review } = await exportBatch(c, r, d.batchId, true);
+    const fp = fingerprint(d);
+    const prior = (await c.query(
+      'select id, batch_id, active_role, request_fingerprint from invoice_provider_exports where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and request_id=$4',
+      [...scope(r), r.user.sub, d.requestId],
+    )).rows[0];
+    if (prior) {
+      if (prior.batch_id !== d.batchId || prior.request_fingerprint !== fp || prior.active_role !== r.user.activeRole)
+        throw fail(409, 'INVOICE_PROVIDER_KEY', 'Original delivery request differs.');
+      return { ...(await envelope(c, r)), exportId: prior.id, replayed: true };
+    }
+    if (!o.financeProvider?.destinationHash)
+      throw fail(503, 'INVOICE_PROVIDER_UNAVAILABLE', 'Finance provider is unavailable.');
+    if (row.state !== 'Approved' || !review?.current || review.id !== d.approvalId ||
+        review.final_transition_id !== d.finalTransitionId || review.lineage_hash !== d.lineageHash)
+      throw fail(409, 'INVOICE_CSV_SOURCE', 'Current approved source or final decision changed.');
+    const rendered = await renderExport(c, source);
+    if (rendered.schemaVersion !== d.schemaVersion || rendered.lineCount !== d.expectedLineCount ||
+        rendered.total !== d.expectedTotal)
+      throw fail(409, 'INVOICE_CSV_TOTAL', 'The approved control totals changed.');
+    const exportId = randomUUID();
+    await c.query(
+      `insert into invoice_provider_exports(id,batch_id,organization_id,legal_entity_id,actor_id,active_role,
+        request_id,request_fingerprint,destination_hash,approval_id,final_transition_id,lineage_hash,
+        schema_version,payload,line_count,currency,total,reason)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+      [exportId,d.batchId,...scope(r),r.user.sub,r.user.activeRole,d.requestId,fp,
+        o.financeProvider.destinationHash,d.approvalId,d.finalTransitionId,d.lineageHash,
+        rendered.schemaVersion,rendered.bytes,rendered.lineCount,rendered.currency,rendered.total,d.reason],
+    );
+    await providerAudit(c, r, 'Reserve provider delivery', exportId, {batchId: d.batchId, sha256: rendered.sha256});
+    return { ...(await envelope(c, r)), exportId, replayed: false };
+  }));
+
+
+  router.post('/provider-exports/:id/deliver', handle(true, async (c, r) => {
+    const exportId = parse(uuid, r.params.id);
+    const { expectedOwnerKey } = parse(z.object({expectedOwnerKey: key}).strict(), r.body);
+    if (workApprovalOwner(r) !== expectedOwnerKey)
+      throw fail(409, 'INVOICE_CSV_CONTEXT', 'Account, role or scope changed. Reload.');
+    await authorize(c, r, 'create');
+    await assertCommercialAuthority(c, r, 'commercial.invoice_export.deliver');
+    const reservation = (await c.query(
+      'select * from invoice_provider_exports where id=$1 and organization_id=$2 and legal_entity_id=$3',
+      [exportId,...scope(r)],
+    )).rows[0];
+    if (!reservation) throw fail(404, 'INVOICE_PROVIDER_UNKNOWN', 'Delivery unavailable.');
+    const { row, review } = await exportBatch(c, r, reservation.batch_id, true);
+    const accepted = (await c.query(
+      'select a.* from invoice_provider_attempts p join invoice_csv_artifacts a on a.id=p.artifact_id where p.export_id=$1',
+      [exportId],
+    )).rows[0];
+    if (accepted) return { ...(await envelope(c,r)), artifact: artifactView(accepted), replayed: true };
+    const rejected = await c.query("select 1 from invoice_provider_attempts where export_id=$1 and result='permanently_rejected'", [exportId]);
+    if (rejected.rowCount) return { ...(await envelope(c,r)), exportId, deliveryStatus:'permanently_rejected', replayed:true };
+    if (row.state !== 'Approved' || !review?.current || review.id !== reservation.approval_id ||
+        review.final_transition_id !== reservation.final_transition_id || review.lineage_hash !== reservation.lineage_hash)
+      throw fail(409, 'INVOICE_CSV_SOURCE', 'Current approved source or final decision changed.');
+    if (o.financeProvider?.destinationHash !== reservation.destination_hash)
+      throw fail(503, 'INVOICE_PROVIDER_UNAVAILABLE', 'Original finance provider is unavailable.');
+    const notificationPolicy = await currentInvoiceNoticePolicy(c, row);
+    const rendered = {schemaVersion: reservation.schema_version, bytes: reservation.payload,
+      sha256: reservation.sha256, lineCount: reservation.line_count, currency: reservation.currency, total: String(reservation.total)};
+    const attemptId = randomUUID();
+    let deliveryStatus;
+    try {
+      const receipt = await o.financeProvider.deliver({operationId: exportId, batchId: row.id, artifact: rendered});
+      deliveryStatus = receipt.status;
+    } catch {
+      deliveryStatus = 'unconfirmed';
+    }
+    const artifactId = deliveryStatus === 'accepted' ? randomUUID() : null;
+    await c.query(
+      'insert into invoice_provider_attempts(id,export_id,actor_id,active_role,result,artifact_id) values($1,$2,$3,$4,$5,$6)',
+      [attemptId,exportId,r.user.sub,r.user.activeRole,deliveryStatus,artifactId],
+    );
+    await providerAudit(c,r,'Record provider delivery result',exportId,
+      {batchId:row.id,attemptId,artifactId,deliveryStatus});
+    if (!artifactId) {
+      const code = deliveryStatus === 'permanently_rejected' ? 'PROVIDER_DELIVERY_REJECTED' : 'PROVIDER_DELIVERY_UNCONFIRMED';
+      await context(c,r,{batchId:row.id,failureId:attemptId});
+      await c.query(
+        `insert into invoice_csv_failures(id,batch_id,organization_id,legal_entity_id,actor_id,active_role,
+          request_id,request_fingerprint,reason,code,operation_id) values($1,$2,$3,$4,$5,$6,$1,$7,$8,$9,$10)`,
+        [attemptId,row.id,...scope(r),r.user.sub,r.user.activeRole,reservation.request_fingerprint,
+          reservation.reason,code,r.operationId],
+      );
+      await audit(c,r,'Record CSV Failure',attemptId,{batchId:row.id,failureId:attemptId,code});
+      await emitInvoiceExportNotice(c,r,{batch:row,policy:notificationPolicy,resultId:attemptId,kind:'failure'});
+      return {...await envelope(c,r), exportId, deliveryStatus, replayed:false};
+    }
+    const d = {batchId:row.id,approvalId:reservation.approval_id,finalTransitionId:reservation.final_transition_id,
+      lineageHash:reservation.lineage_hash,schemaVersion:reservation.schema_version,reason:reservation.reason,requestId:exportId};
+    return acceptArtifact(c,r,{d,row,notificationPolicy,rendered,fp:reservation.request_fingerprint,artifactId});
+  }));
   router.post(
     '/exports',
     handle(true, async (c, r) => {
-      const d = parse(
-        z
-          .object({
-            expectedOwnerKey: key,
-            requestId: uuid,
-            batchId: uuid,
-            approvalId: uuid,
-            finalTransitionId: uuid,
-            lineageHash: key,
-            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA,RETAINER_CSV_SCHEMA,SERVICE_CSV_SCHEMA,PERIOD_CSV_SCHEMA,FIXED_CSV_SCHEMA]),
-            expectedLineCount: z.number().int().min(1).max(1000000),
-            expectedTotal: z.union([money,z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/)]),
-            reason,
-          })
-          .strict(),
-        r.body,
-      );
+      const d = parse(exportRequest, r.body);
       if (workApprovalOwner(r) !== d.expectedOwnerKey)
         throw fail(409, 'INVOICE_CSV_CONTEXT', 'Account, role or scope changed. Reload.');
       await authorize(c, r, 'create');
@@ -463,45 +607,7 @@ export const createInvoiceCsvRouter = (o) => {
         rendered.total !== d.expectedTotal
       )
         throw fail(409, 'INVOICE_CSV_TOTAL', 'The approved control totals changed.');
-      const artifactId = randomUUID();
-      await context(c, r, { batchId: d.batchId, artifactId });
-      const a = (
-        await c.query(
-          'insert into invoice_csv_artifacts(id,batch_id,organization_id,legal_entity_id,approval_id,final_transition_id,lineage_hash,schema_version,version,payload,sha256,line_count,currency,total,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)returning *',
-          [
-            artifactId,
-            d.batchId,
-            ...scope(r),
-            d.approvalId,
-            d.finalTransitionId,
-            d.lineageHash,
-            d.schemaVersion,
-            rendered.bytes,
-            rendered.sha256,
-            rendered.lineCount,
-            rendered.currency,
-            rendered.total,
-            r.user.sub,
-            r.user.activeRole,
-            d.requestId,
-            fp,
-            d.reason,
-            r.operationId,
-          ],
-        )
-      ).rows[0];
-      await audit(c, r, 'Accept CSV', artifactId, {
-        batchId: d.batchId,
-        artifactId,
-        sha256: rendered.sha256,
-      });
-      await emitInvoiceExportNotice(c, r, {
-        batch: row,
-        policy: notificationPolicy,
-        resultId: artifactId,
-        kind: 'artifact',
-      });
-      return { ...(await envelope(c, r)), artifact: artifactView(a), failure: null, replayed: false };
+      return acceptArtifact(c, r, { d, row, notificationPolicy, rendered, fp, artifactId: randomUUID() });
     }),
   );
   const confirmationSchema = (sourceType = 'TM_SNAPSHOT') => ({
