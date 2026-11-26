@@ -331,6 +331,10 @@ Rollback is a code-only revert of the viewer/service/navigation/two GET projecti
 
 ## Synthetic integrated import-to-audit acceptance
 
+For job role definition changes, an authorized deployment auditor can inspect the creation, edit or deactivation under `RoleDefinition` in deployment audit history. Application rollback preserves recorded events.
+
+Manual import/export history and its audit record commit together. Look up the returned history ID under `ImportExportLog` in the selected entity's audit history. A failed history acknowledgement after a CSV download means the recording outcome needs checking before retry. Roll back the server and frontend together to restore the previous two-request flow.
+
 With locked dependencies and Playwright Chromium installed in the hosted test environment, set WORKOS_TEST_DATABASE_URL to disposable local PostgreSQL and run `npm run test:import-audit-journey`. The command owns actual API/Vite listeners, randomized migrated database, synthetic reference records and two short-lived named test sessions, then tears them down. It explicitly configures the loopback API proxy and disables demo seed/reset/fallback and live providers. Never point it at a shared, customer or production database; nonlocal destinations/options fail closed. No credentials or session material should be retained in evidence.
 
 The [bounded journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md) covers actual Project Master CSV dry-run/apply, PostgreSQL project/batch/audit/idempotency witnesses, retained history after reload, independent named reviewer saved provenance and other-legal/denied-scope exclusion. Inspection performs no business/audit mutation or export. Both accounts use canonical migrated Admin permissions, with no new role or grants. This is not production OIDC, owner UAT, full WOS-03B or release acceptance. Product defects require separate disposition and are not repaired by this tests-only increment.

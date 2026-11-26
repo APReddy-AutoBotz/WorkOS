@@ -4025,9 +4025,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(blockedRoleDefinitionDelete.status, 409,
       'a role definition used by an employee must remain undeactivatable');
     const blockedRoleDefinitionAudit = await pool.query(`select action,organization_id,legal_entity_id
-      from audit_logs where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2`,
+      from audit_logs where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2 order by created_at`,
     [multiScopeActorId, blockedRoleDefinitionId]);
     assert.deepEqual(blockedRoleDefinitionAudit.rows, [
+      {action: 'Create Role Definition', organization_id: null, legal_entity_id: null},
       {action: 'Delete Blocked', organization_id: null, legal_entity_id: null},
     ], 'a blocked deployment-wide role deactivation must be recorded at deployment scope');
     await pool.query(`delete from role_definitions where id=$1`, [blockedRoleDefinitionId]);
@@ -4043,6 +4044,15 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       });
     assert.equal(successfulRoleDefinitionCreate.status, 200,
       'deployment-wide role-definition creation must retain its existing API behavior');
+    const [createdRole] = await successfulRoleDefinitionCreate.json();
+    const roleEdit = await postScopedJson('/api/role-definitions', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {...createdRole, department: 'Delivery'});
+    assert.equal(roleEdit.status, 200);
+    const [updatedRole] = await roleEdit.json();
+    const roleEditAudit = await pool.query(`select old_value, new_value from audit_logs
+      where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2 and action='Update Role Definition'`,
+    [multiScopeActorId, successfulRoleDefinitionId]);
+    assert.deepEqual(roleEditAudit.rows, [{old_value: createdRole, new_value: updatedRole}]);
     const roleDefinitionDelete = await fetch(`${baseUrl}/api/role-definitions/${encodeURIComponent(successfulRoleDefinitionId)}`, {
       method: 'DELETE', headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
       signal: AbortSignal.timeout(5000),
@@ -4053,6 +4063,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       from audit_logs where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2 order by created_at`,
     [multiScopeActorId, successfulRoleDefinitionId]);
     assert.deepEqual(roleDefinitionAuditRows.rows, [
+      {action: 'Create Role Definition', organization_id: null, legal_entity_id: null},
+      {action: 'Update Role Definition', organization_id: null, legal_entity_id: null},
       {action: 'Deactivate Role Definition', organization_id: null, legal_entity_id: null},
     ], 'successful deployment-wide role deactivation must be recorded at deployment scope');
 
@@ -4447,6 +4459,30 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'both routes must persist and return equivalent data except generated ID/timestamp');
     const persistedWrites = await pool.query('select * from import_export_logs where id=any($1::uuid[])',
       [importWriteResults.map(row => row.id)]);
+    const savedHistoryAudit = await pool.query(`select entity_id, active_role, organization_id, legal_entity_id, new_value
+      from audit_logs where entity_type='ImportExportLog' and entity_id=any($1::text[]) and user_id=$2`,
+    [importWriteResults.map(row => row.id), actorId]);
+    assert.equal(savedHistoryAudit.rowCount, 2);
+    await pool.query(`create function reject_test_history_audit() returns trigger language plpgsql as $$
+      begin raise exception 'Synthetic audit unavailable'; end $$;
+      create trigger reject_test_history_audit before insert on audit_logs for each row
+      when (new.entity_type='ImportExportLog') execute function reject_test_history_audit()`);
+    try {
+      const fileName = 'synthetic-atomic-history-rollback.csv';
+      const failed = await postScopedJson('/api/import-export-logs', token, 'org-default', 'legal-default',
+        {...versionedImportPayload, fileName});
+      assert.equal(failed.status, 500);
+      assert.equal((await pool.query('select id from import_export_logs where file_name=$1', [fileName])).rowCount, 0);
+    } finally {
+      await pool.query('drop trigger reject_test_history_audit on audit_logs; drop function reject_test_history_audit()');
+    }
+    for (const event of savedHistoryAudit.rows) {
+      const history = importWriteResults.find(row => row.id === event.entity_id);
+      assert.equal(event.new_value.fileName, history.file_name);
+      assert.equal(event.active_role, 'Admin');
+      assert.equal(event.organization_id, history.organization_id);
+      assert.equal(event.legal_entity_id, history.legal_entity_id);
+    }
     assert.equal(persistedWrites.rows.length, 2);
     assert(persistedWrites.rows.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
 

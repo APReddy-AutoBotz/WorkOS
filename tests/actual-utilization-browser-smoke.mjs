@@ -225,20 +225,14 @@ const expectExport = async (name, source, expectedHours = 40) => {
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   assert.equal(Buffer.concat(chunks).toString('utf8'), expectedCsv(name, source, expectedHours), 'real CSV preserves distinct columns, scope, formatting, escaping and row order');
-  await page.waitForFunction(count => window.actualHarness.writes.length >= count, before.writes + 2);
-  assert.deepEqual(await effects(), {downloads: before.downloads + 1, writes: before.writes + 2});
-  const [history, audit] = await page.evaluate(start => window.actualHarness.writes.slice(start), before.writes);
+  await page.waitForFunction(count => window.actualHarness.writes.length >= count, before.writes + 1);
+  assert.deepEqual(await effects(), {downloads: before.downloads + 1, writes: before.writes + 1});
+  const [history] = await page.evaluate(start => window.actualHarness.writes.slice(start), before.writes);
   const scope = {organizationId: 'synthetic-organization', legalEntityId: 'synthetic-legal-entity'};
   assert.deepEqual(history, {path: '/api/import-export-logs', scope, body: {
     operation: 'Export', channel: 'Actual Utilization', fileName, status: 'Success',
     totalRows: source.length, validRows: source.length, errorRows: 0,
   }});
-  assert.deepEqual(audit, {path: '/api/audit-events', scope, body: {
-    action: 'Export', module: 'Import / Export',
-    details: `Export ${fileName} through Actual Utilization with ${source.length} row${source.length === 1 ? '' : 's'} (Success)`,
-    entityType: 'ImportExportLog', entityId: `synthetic-export-${before.writes + 1}`,
-    newValue: {channel: 'Actual Utilization', fileName, status: 'Success', totalRows: source.length, validRows: source.length, errorRows: 0},
-  }}, 'unchanged saveImportExportLog writes exact scoped history and confirmed audit');
   deliberateExports++;
 };
 const expectNarrowFit = async locator => {
@@ -584,7 +578,7 @@ try {
   }
   assert.equal(await page.evaluate(() => window.actualHarness.pending.length), 0);
   assert.equal(downloads.length, deliberateExports, 'only deliberate current-ready exports downloaded files');
-  assert.equal(await page.evaluate(() => window.actualHarness.writes.length), deliberateExports * 2, 'only completed exports wrote synthetic history plus audit');
+  assert.equal(await page.evaluate(() => window.actualHarness.writes.length), deliberateExports, 'only completed exports wrote synthetic history plus audit');
   assert.deepEqual(await page.evaluate(() => window.actualHarness.legacyAuditCalls), [], 'unchanged helper adds no duplicate legacy audit');
   assert((await page.evaluate(() => window.actualHarness.healthReads.length)) > 0, 'successful export exercises actual checkBackend through synthetic health');
   assert.deepEqual(await page.evaluate(() => window.actualHarness.unexpectedFetches), []);

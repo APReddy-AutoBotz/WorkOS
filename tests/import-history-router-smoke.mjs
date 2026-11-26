@@ -23,6 +23,15 @@ const rows = [{
 const poolQueries = [];
 let failQuery = false;
 const pool = {
+  async connect() {
+    return {
+      async query(sql, params) {
+        if (['begin', 'commit', 'rollback'].includes(sql) || sql.includes('insert into audit_logs')) return {rows: []};
+        return pool.query(sql, params);
+      },
+      release() {},
+    };
+  },
   async query(sql, params) {
     poolQueries.push({sql, params});
     if (failQuery) throw new Error('synthetic database detail');

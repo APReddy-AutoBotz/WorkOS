@@ -61,7 +61,7 @@ globalThis.fetch = async (url, init = {}) => {
   }
   const body = JSON.parse(init.body);
   calls.push({url, init, body});
-  if (url === '/api/audit-events' && failNextAuditWrite) {
+  if (url === '/api/import-export-logs' && failNextAuditWrite) {
     failNextAuditWrite = false;
     calls.at(-1).failed = true;
     return new Response(JSON.stringify({error: {code: 'SYNTHETIC_AUDIT_FAILURE', message: 'Synthetic audit failure.'}}), {
@@ -73,6 +73,9 @@ globalThis.fetch = async (url, init = {}) => {
     resolveHistoryWriteStarted();
     await historyWriteGate;
   }
+  if (url === '/api/import-export-logs') return Response.json([{id:'batch-synthetic',
+    operation:body.operation, channel:body.channel, file_name:body.fileName, status:body.status,
+    total_rows:body.totalRows, valid_rows:body.validRows, error_rows:body.errorRows}]);
   const channel = ({
     'client-master/1': 'Client Master',
     'project-master/1': 'Project Master',
@@ -291,22 +294,14 @@ releaseHistoryWrite();
 assert.equal(await scopedCsvExport, 'completed-original-scope',
   'a scope switch during history persistence reports the completed export in its captured original scope');
 const scopedHistoryWrite = calls.find(call => call.url === '/api/import-export-logs');
-const scopedAuditWrite = calls.find(call => call.url === '/api/audit-events');
 assert.equal(scopedHistoryWrite.init.headers['X-Organization-Id'], originalScope.organizationId);
 assert.equal(scopedHistoryWrite.init.headers['X-Legal-Entity-Id'], originalScope.legalEntityId);
-assert.equal(scopedAuditWrite.init.headers['X-Organization-Id'], originalScope.organizationId,
-  'the audit event stays in the scope that owns the captured export history row');
-assert.equal(scopedAuditWrite.init.headers['X-Legal-Entity-Id'], originalScope.legalEntityId);
-
 sessionValues.set('workos_organization_scope', JSON.stringify(originalScope));
 failNextAuditWrite = true;
-await adminService.saveImportExportLog({
+await assert.rejects(adminService.saveImportExportLog({
   operation: 'Import', channel: 'Employee Master', fileName: 'employees-legacy-synthetic.csv', status: 'Dry Run',
   totalRows: 1, validRows: 1, errorRows: 0, errors: [],
-}, originalScope);
-assert.equal(calls.at(-1).url, '/api/audit-events');
-assert.equal(calls.at(-1).failed, true,
-  'legacy import/preflight history preserves its existing success behavior when the separate audit request fails');
+}, originalScope));
 
 failNextAuditWrite = true;
 assert.equal(await downloadAuditedCsv('audit-unconfirmed-export.csv', [], 'Synthetic Export', 'Success', originalScope), 'history-unconfirmed',
@@ -346,10 +341,9 @@ try {
 }
 assert.equal(calls.filter(call => call.url === '/api/import-export-logs').length, 3,
   'the completed export and two intentional audit-failure cases each write a scoped history row');
-assert.equal(calls.filter(call => call.url === '/api/audit-events').length, 3,
-  'each test history row attempts its paired audit event, including the report export failure case');
-assert.equal(calls.filter(call => call.url === '/api/audit-events' && call.failed).length, 2,
-  'a failed separate audit is tolerated for legacy import history but surfaced for report exports');
+assert.equal(calls.filter(call => call.url === '/api/audit-events').length, 0,
+  'history and audit are persisted by one server command');
+assert.equal(calls.filter(call => call.url === '/api/import-export-logs' && call.failed).length, 2);
 
 URL.createObjectURL = originalCreateObjectURL;
 URL.revokeObjectURL = originalRevokeObjectURL;
