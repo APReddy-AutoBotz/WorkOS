@@ -5,6 +5,7 @@ A handover is complete only when product evidence and buyer-owned environment de
 ## 1. Commercial and source package
 
 - [ ] Exact release tag, source commit and artifact checksums recorded.
+- [ ] Match the candidate archive to the CI run that served the compiled app and verified production readiness, build revision, identity outage and recovery from that image.
 - [ ] Licence/assignment scope and excluded third-party components documented separately from technical evidence.
 - [ ] Provenance, dependency inventory, third-party notices and SBOM supplied.
 - [ ] Changelog, release notes, known limitations and deferred scope supplied.
