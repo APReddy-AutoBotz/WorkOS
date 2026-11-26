@@ -57,6 +57,11 @@ export const downloadAuditedCsv = async (
   return matchesScope(expectedScope, getOrganizationScope()) ? 'completed' : 'completed-original-scope';
 };
 
+export const brandedReportFilename = (filename: string) => {
+  const brand = productConfig.reportBrand.replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '');
+  return brand ? brand + '-' + filename : filename;
+};
+
 export const downloadReportExport = async (id: string) => {
   const expectedScope = getOrganizationScope();
   const option = getReportExportOptions().find(item => item.id === id);
@@ -88,7 +93,6 @@ export const downloadReportExport = async (id: string) => {
     }));
   }
 
-  const brand = productConfig.reportBrand.replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '');
-  const fileName = brand ? brand + '-' + option.fileName : option.fileName;
+  const fileName = brandedReportFilename(option.fileName);
   return downloadAuditedCsv(fileName, rows, option.title, 'Success', expectedScope);
 };

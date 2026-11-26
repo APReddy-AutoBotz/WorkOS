@@ -363,20 +363,23 @@ jobs:
             fi
             sleep 1
           done
-          npm run test:import-history-browser
-          npm run test:project-import-ui-browser
-          npm run test:scoped-audit-browser
-          npm run test:organization-audit-browser
-          npm run test:deployment-audit-browser
-          npm run test:utilization-overview-browser
-          npm run test:planned-utilization-browser
-          npm run test:actual-utilization-browser
-          npm run test:forecast-utilization-browser
-          npm run test:organization-profile-browser
-          npm run test:terminology-configuration-browser
-          npm run test:working-calendar-browser
-          npm run test:commercial-drafting-browser
-          npm run test:client-profiles-browser
+          # Each browser owns its session. The shared fixture server serves static test pages.
+          xargs -n 1 -P 2 npm run <<'BROWSER_JOURNEYS'
+          test:import-history-browser
+          test:project-import-ui-browser
+          test:scoped-audit-browser
+          test:organization-audit-browser
+          test:deployment-audit-browser
+          test:utilization-overview-browser
+          test:planned-utilization-browser
+          test:actual-utilization-browser
+          test:forecast-utilization-browser
+          test:organization-profile-browser
+          test:terminology-configuration-browser
+          test:working-calendar-browser
+          test:commercial-drafting-browser
+          test:client-profiles-browser
+          BROWSER_JOURNEYS
 
       - name: Verify commercial ownership, approvals, adopted rates, valuation and eligibility in PostgreSQL
         run: |
