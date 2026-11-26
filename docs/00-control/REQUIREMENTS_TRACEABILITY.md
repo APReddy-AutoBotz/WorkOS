@@ -821,3 +821,7 @@ WOS-COM-009 and WOS-RPT-004. The commercial drafting PostgreSQL/browser journey 
 ### Retainer risk delivery evidence
 
 WOS-COM-009, WOS-RPT-004, WOS-INT-002 and WOS-INT-005. Migration 113 retains explicit assignments, observed quantities, notice policies, attempts and acknowledgements. The retainer PostgreSQL journey verifies concurrent overconsumption detection. The commercial browser journey exercises expiry before first use, a shared version, duplicate roles, missing assignments, retry and access revocation.
+
+### Fixed-fee engagement billing controls
+
+WOS-RPT-007 and WOS-INV-008. Fixed-fee engagement reconciliation compares pinned installments and approved line reversals with eligibility events, register items, current occupancy, invoice lines, exports and confirmations. The commercial drafting browser journey follows a charge and credit through those states.

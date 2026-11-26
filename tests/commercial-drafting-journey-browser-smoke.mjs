@@ -730,6 +730,19 @@ const verifyCommercialDrafting = async reversalScenario => {
         const credit={currency:a.currency,status,installments:0,credits:1,gross:'0',adjustments:'-'+amount,net:'-'+amount};
         const expected=status==='Confirmed'?[{...charge,credits:1,adjustments:'-'+amount,net:'0'}]:status?[credit,charge]:[charge];
         assert.deepEqual(result.body.balances,expected);
+        const details=await apiRequest(installmentReport+'&controls=1',{identity:finance});
+        assert.equal(details.status,200,JSON.stringify(details.body));
+        assert.deepEqual(details.body.balances,expected);
+        const boundaries=['Source','Eligibility event','Register item','Current occupancy','Current line','Exported line','Confirmed line'];
+        const activeControls=boundaries.map((boundary,index)=>{
+          const includesCredit=Boolean(status) && (index<3 || index<5 && status!=='Available'
+            || index===5 && ['Exported','Confirmed'].includes(status) || status==='Confirmed');
+          const count=includesCredit ? 2 : 1;
+          return {currency:a.currency,boundary,expected:count,observed:count,amount:includesCredit ? '0' : amount,exceptions:0};
+        });
+        assert.deepEqual(details.body.controls,[...activeControls,{
+          currency:a.currency,boundary:'Released historical line',expected:1,observed:1,amount,exceptions:0,
+        }]);
       };
       await checkInstallmentBalance(null);
       const reversalPath=csv+'/batches/'+batchId+'/lines/'+lineId+'/reversal-request';
@@ -744,7 +757,10 @@ const verifyCommercialDrafting = async reversalScenario => {
         finally {if (fixed) await pool.query('update role_permissions set enabled=true where role_name=$1 and permission_key=$2',[employee.role,grant]);}
       };
       await assertSourceAccessDenied(reversalPath);
-      if (sourceType==='FIXED_FEE_INSTALLMENT') await assertSourceAccessDenied(installmentReport);
+      if (sourceType==='FIXED_FEE_INSTALLMENT') {
+        await assertSourceAccessDenied(installmentReport);
+        await assertSourceAccessDenied(installmentReport+'&controls=1');
+      }
       await csvDesk.getByLabel('Invoice export engagement').selectOption(engagementId);
       await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
       await csvDesk.getByLabel('Invoice export batch').selectOption(batchId);
@@ -893,6 +909,9 @@ const verifyCommercialDrafting = async reversalScenario => {
           const row=report.getByRole('region',{name:'Fixed-fee billing balances'}).getByRole('row').nth(1);
           await row.waitFor();
           assert.deepEqual(await row.getByRole('cell').allTextContents(),[a.currency,'Confirmed','1','1',amount,'-'+amount,'0']);
+          const controls=report.getByRole('table',{name:'Fixed-fee reconciliation controls by currency'});
+          const confirmed=controls.getByRole('row').filter({hasText:'Confirmed line'});
+          assert.deepEqual(await confirmed.getByRole('cell').allTextContents(),[a.currency,'Confirmed line','2','2','0','0']);
         }
         assert.equal(ok(await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:finance}),200).confirmation.id,receipt.id);
         const csvText=Buffer.from(creditArtifact.payloadBase64,'base64').toString('utf8');

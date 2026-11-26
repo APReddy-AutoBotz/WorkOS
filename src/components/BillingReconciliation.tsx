@@ -8,7 +8,7 @@ type Choice = { id: string; label: string; fixedFee?: boolean };
 export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
   const [engagement, setEngagement] = useState('');
   const [report, setReport] = useState<Report | null>(null);
-  const [balances,setBalances]=useState<Awaited<ReturnType<typeof invoiceDrafts.fixedFeeBalances>> | null>(null);
+  const [balances,setBalances]=useState<Awaited<ReturnType<typeof invoiceDrafts.fixedFeeReport>> | null>(null);
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState('');
   const [portfolioReason, setPortfolioReason] = useState('');
@@ -89,7 +89,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
     setMessage('');
     try {
       if (choices.find(choice => choice.id === engagement)?.fixedFee) {
-        const rows=await invoiceDrafts.fixedFeeBalances(engagement,context);
+        const rows=await invoiceDrafts.fixedFeeReport(engagement,context);
         if (generation.current===run) setBalances(rows);
         return;
       }
@@ -289,14 +289,22 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
           {message && <p role="status">{message}</p>}
           {balances && hasRatePermission('commercial.fixed_fee_eligibility.issue') && <section aria-label="Fixed-fee billing balances">
             <h3>Registered installments and credits</h3>
-            {balances.length ? <table>
+            {balances.balances.length ? <table>
               <caption>Current register balances by currency and billing state</caption>
               <thead><tr>{['Currency','State','Installments','Credits','Gross charges','Credit amount','Net amount'].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
-              <tbody>{balances.map(row=><tr key={row.currency+row.status}>
+              <tbody>{balances.balances.map(row=><tr key={row.currency+row.status}>
                 <td>{row.currency}</td><td>{row.status}</td><td>{row.installments}</td><td>{row.credits}</td>
                 <td>{row.gross}</td><td>{row.adjustments}</td><td>{row.net}</td>
               </tr>)}</tbody>
             </table> : <p>No registered installments or credits for this engagement.</p>}
+            {balances.controls.length>0 && <table>
+              <caption>Fixed-fee reconciliation controls by currency</caption>
+              <thead><tr>{['Currency','Boundary','Expected records','Observed records','Net amount','Exceptions'].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
+              <tbody>{balances.controls.map(row=><tr key={row.currency+row.boundary}>
+                <td>{row.currency}</td><td>{row.boundary}</td><td>{row.expected}</td><td>{row.observed}</td>
+                <td>{row.amount}</td><td>{row.exceptions}</td>
+              </tr>)}</tbody>
+            </table>}
           </section>}
           {report && (
             <div>

@@ -28,3 +28,7 @@ After final approval, a finance preparer with the explicitly granted `commercial
 ### T&M invoice line pricing
 
 Inspect a batch in Invoice CSV export and select **Inspect line pricing** on a T&M line. The read requires invoice export access, billing-rate access and current visibility of the batch workers. It shows the original work date, adopted billing rate and its effective dates, valuation policy, unrounded product, applicable ceiling and final rounded amount. It uses the pricing snapshot pinned to the selected line. This supports WOS-COM-003/004/006 and WOS-INV-003/007. The projection excludes cost rates and margin.
+
+### Fixed-fee engagement billing controls
+
+Select a fixed-fee engagement to inspect installment and credit balances and per-currency controls. Each control shows its expected record count, observed record count, signed net amount and exception count. Amount and currency comparisons run per item before aggregation so equal and opposite discrepancies remain visible. The source amount uses the retained contract version and installment ordinal, or the approved reversal of an original line. Export checks use the complete invoice batch. The existing balance response remains available without the controls query parameter. This read-only change requires no migration. Revert the application change to restore the previous report.
