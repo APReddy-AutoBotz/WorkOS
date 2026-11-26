@@ -831,7 +831,7 @@ WOS-COM-009, WOS-RPT-004, WOS-INT-002 and WOS-INT-005. Migration 113 retains exp
 WOS-OPS-007 covers the progress-document CI path in `.github/workflows/workos-ci.yml`. The pinned Gitleaks CLI scans all fetched refs for every event. The release runbook describes the scope and full-validation fallback.
 
 
-WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment and migration 115 for managed-service recipient-policy authority. The existing service margin API journey exercises policy authorization, current recipients, replay and immutable history. Migration 116 retains month-end breaches and enforces the complete recipient set on dispatch. The existing service-effort acceptance exercises failed delivery, concurrent replay, current-scope denial and recipient acknowledgement through the inbox.
+WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment and migration 115 for managed-service recipient-policy authority. The existing service margin API journey exercises policy authorization, current recipients, replay and immutable history. Migration 116 retains month-end breaches and enforces the complete recipient set on dispatch. The existing service-effort acceptance exercises failed delivery, concurrent replay, current-scope denial and recipient acknowledgement through the inbox. Migration 130 also requires the configured manager and finance roles to have governed inbox access before accepting the recipient set.
 
 ### Governed work approval deadlines
 
