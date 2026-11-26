@@ -1,3 +1,5 @@
+import {ROUTE_ROLES} from '../services/accessControl';
+import {hasPermission} from '../services/permissions';
 import {buildTimesheetCsv} from '../lib/timesheetCsv';
 import {ApiClientError, getToken, getOrganizationScope} from '../services/apiClient';
 import {WorkCategory} from '../components/WorkCategory';
@@ -267,7 +269,8 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
       const outcomes = await Promise.allSettled(batch.map(ts => timesheetService.approve(sheetKey(ts), undefined, isCurrent, ts.writeToken)));
       outcomes.forEach((outcome, index) => {
         const message = outcome.status === 'fulfilled' ? 'Decision acknowledged' :
-          reviewChanged(outcome.reason) ? 'Work changed. Review the revised timesheet.' : 'No acknowledgement';
+          reviewChanged(outcome.reason) ? 'Work changed. Review the revised timesheet.' :
+          outcome.reason instanceof ApiClientError && outcome.reason.status === 403 ? 'Approval denied' : 'No acknowledgement';
         decisionOutcomes.set(sheetKey(batch[index]), message);
       });
     }
@@ -352,7 +355,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
              >
                 <Download size={14} /> {exporting ? 'Preparing export…' : 'Ops Export'}
              </button>
-             {user?.role === 'Admin' && (
+             {ROUTE_ROLES.timesheetApproval.some(role => role === user?.role) && hasPermission(user, 'timesheets.approve') && (
                <button
                   disabled={busy || needsReload || !!preview || !!rejectionTarget || !submittedFilteredTimesheets.length}
                   onClick={() => { if (isCurrent()) { setResults([]); setActionNotice(''); setPreview(submittedFilteredTimesheets); } }}
