@@ -4053,7 +4053,7 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
       }
       const record = approval.rows[0];
       const actorIds = [req.user.employeeRecordId, req.user.employeeId].filter(Boolean);
-      if (!req.user.permissions.includes('approvals.view') || actorIds.includes(record.subject_employee_id) || actorIds.includes(record.requester_id)) {
+      if (!req.user.permissions.includes('approvals.view') || actorIds.includes(record.subject_employee_id) || (record.requester_id === req.user.sub || actorIds.includes(record.requester_id))) {
         await client.query('rollback');
         return res.status(403).json({error: 'Independent approval authority is required'});
       }

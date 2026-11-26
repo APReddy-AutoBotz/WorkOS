@@ -59,6 +59,24 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
      entity_type:'ApprovalRecord',entity_id:'synthetic-teams-review',action:'reject',expires_at:new Date(Date.now()+3600000).toISOString(),
    }});
    assert.equal(issued.status,200);
+   const executePath='/api/integrations/teams-action-tokens/'+issued.body.token+'/execute';
+   const refused=async(identity,label)=>{
+    const snapshot=async()=>Promise.all(['approval_records','teams_action_tokens','audit_logs','notification_events'].map(async table=>
+      (await pool.query(`select to_jsonb(t) value from ${table} t order by to_jsonb(t)::text`)).rows));
+    const before=await snapshot();
+    const result=await request(executePath,{identity,method:'POST',body:{comments:reason}});
+    assert.equal(result.status,403,label);
+    assert.match(JSON.stringify(result.body),/Independent approval authority/);
+    assert.deepEqual(await snapshot(),before);
+   };
+   await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','approvals.view',false) on conflict(role_name,permission_key) do update set enabled=false");
+   try {await refused(ids.manager,'missing approval grant');} finally {
+    await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='approvals.view'");
+   }
+   await pool.query("update approval_records set requester_id=$1 where id='synthetic-teams-review'",[ids.manager.id]);
+   try {await refused(ids.manager,'requester cannot decide');} finally {
+    await pool.query("update approval_records set requester_id=null where id='synthetic-teams-review'");
+   }
    await page.goto(origin+'/teams/actions/'+issued.body.token);
    const execute = page.getByRole('button',{name:'Execute Action',exact:true});
    await execute.click();
