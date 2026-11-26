@@ -327,6 +327,10 @@ Rollback is a code-only revert of the viewer/service/navigation/two GET projecti
 
 ## Synthetic integrated import-to-audit acceptance
 
+For job role definition changes, an authorized deployment auditor can inspect the creation, edit or deactivation under `RoleDefinition` in deployment audit history. Application rollback preserves recorded events.
+
+Manual import/export history and its audit record commit together. Look up the returned history ID under `ImportExportLog` in the selected entity's audit history. A failed history acknowledgement after a CSV download means the recording outcome needs checking before retry. Roll back the server and frontend together to restore the previous two-request flow.
+
 With locked dependencies and Playwright Chromium installed in the hosted test environment, set WORKOS_TEST_DATABASE_URL to disposable local PostgreSQL and run `npm run test:import-audit-journey`. The command owns actual API/Vite listeners, randomized migrated database, synthetic reference records and two short-lived named test sessions, then tears them down. It explicitly configures the loopback API proxy and disables demo seed/reset/fallback and live providers. Never point it at a shared, customer or production database; nonlocal destinations/options fail closed. No credentials or session material should be retained in evidence.
 
 The [bounded journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md) covers actual Project Master CSV dry-run/apply, PostgreSQL project/batch/audit/idempotency witnesses, retained history after reload, independent named reviewer saved provenance and other-legal/denied-scope exclusion. Inspection performs no business/audit mutation or export. Both accounts use canonical migrated Admin permissions, with no new role or grants. This is not production OIDC, owner UAT, full WOS-03B or release acceptance. Product defects require separate disposition and are not repaired by this tests-only increment.
@@ -903,7 +907,3 @@ Assign the managed-service margin notice configuration permission to the authori
 After UTC month-end, the worker evaluates the last version retained during the month and subsequent revisions against the closing threshold. An uninterrupted breach produces one event. A verified recovery followed by a new breach produces another. Use **Check warning deliveries** to inspect the reporting date, attempts, last outcome and next retry. Restore the missing policy or recipient access to resume pending delivery. A failed attempt leaves all recipients without a partial receipt. Earlier binaries can ignore the additive event and receipt tables. Retain their data on rollback so delivery can resume without duplicating receipts.
 
 For an approved fixed-fee installment, inspect the line in the invoice CSV workspace and enter its released purchase-order number and allocation reason. Check the displayed committed and available values. To suspend new allocations, revoke purchase-order release access for the affected preparers. Retain existing commitments, balance evidence and migration history during application rollback.
-
-For job role definition changes, an authorized deployment auditor can inspect the creation, edit or deactivation under `RoleDefinition` in deployment audit history. Application rollback preserves recorded events.
-
-Manual import/export history and its audit record commit together. Look up the returned history ID under `ImportExportLog` in the selected entity's audit history. A failed history acknowledgement after a CSV download means the recording outcome needs checking before retry. Roll back the server and frontend together to restore the previous two-request flow.
