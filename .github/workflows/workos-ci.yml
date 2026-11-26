@@ -246,6 +246,7 @@ jobs:
       - name: Verify calendar leave browser journey
         run: |
           npm run test:calendar-leave-journey
+          node tests/reviewed-approval-batch-journey-browser-smoke.mjs
           npm run test:leave-approval-journey
 
       - name: Native percentage forecast planner browser acceptance
