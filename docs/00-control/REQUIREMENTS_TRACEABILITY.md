@@ -370,6 +370,10 @@ The read-only calendar portion of WOS-ORG-008 and only the calendar entry point 
 
 ## Integrated import-to-audit acceptance increment
 
+WOS-CORE-005 and WOS-IAM-010. Deployment-wide job role definition saves record the actor and before/after values in the same transaction as the change. The existing migration-runner API journey covers create, edit, blocked deactivation, successful deactivation and scoped audit visibility.
+
+WOS-CORE-005. The manual import/export history API creates one scoped audit event in the same transaction as the history row. The existing two-alias API fixture verifies the persisted actor, role, scope and generated ID, and checks rollback on audit failure. Report export browser journeys exercise the single request.
+
 The [integrated journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md), forwardported and accepted in PR41 with PR50 retaining historical evidence after PR49 acceptance, provides coherent evidence for WOS-CORE-003/005 and WOS-GOV-002/004: actual React Import / Export, versioned API, disposable migrated PostgreSQL, retained history after reload and a second named account's actual Audit Trail provenance. It distinguishes saved dry-run/success event context from later GET traces, checks another legal entity and denied unassigned scope, and asserts no inspection mutation. No production behavior/schema/permission/grant/dependency change or whole-requirement acceptance is implied. All twelve existing browser suites and formal dependency/review/UAT/release gates remain retained.
 
 ## PR-007A commercial drafting evidence (development-only exception)
@@ -828,18 +832,7 @@ WOS-COM-009 and WOS-RPT-004. The commercial drafting PostgreSQL/browser journey 
 
 WOS-COM-009, WOS-RPT-004, WOS-INT-002 and WOS-INT-005. Migration 113 retains explicit assignments, observed quantities, notice policies, attempts and acknowledgements. The retainer PostgreSQL journey verifies concurrent overconsumption detection. The commercial browser journey exercises expiry before first use, a shared version, duplicate roles, missing assignments, retry and access revocation.
 
-WOS-OPS-007 covers the progress-document CI path in `.github/workflows/workos-ci.yml`. The pinned Gitleaks CLI scans all fetched refs for every event. The release runbook describes the scope and full-validation fallback.
-
-
 WOS-RPT-004 and WOS-INT-002 use migration 114 for month-end threshold assessment and migration 115 for managed-service recipient-policy authority. The existing service margin API journey exercises policy authorization, current recipients, replay and immutable history. Migration 116 retains month-end breaches and enforces the complete recipient set on dispatch. The existing service-effort acceptance exercises failed delivery, concurrent replay, current-scope denial and recipient acknowledgement through the inbox. Migration 130 also requires the configured manager and finance roles to have governed inbox access before accepting the recipient set.
-
-### Governed work approval deadlines
-
-WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Pre-deadline reminders and mandatory overdue delivery are covered below.
-
-### Scoped bulk timesheet approval
-
-WOS-APR-008. The timesheet bulk action requires a configured approval role and the existing approval permission. The timesheet export and approval browser journey changes one reporting relationship after a Team Lead previews two rows, then verifies the HTTP denial and both stored outcomes.
 
 ### Fixed-fee engagement billing controls
 
@@ -853,11 +846,19 @@ WOS-RPT-007. The portfolio report accepts an eligible date range for registered 
 
 WOS-CTR-002 and WOS-COM-013 extend purchase-order commitments to approved fixed-fee installments in migration 131. The existing commercial drafting journey exercises the approved line, an over-limit refusal, a successful browser allocation, replay and revoked source access.
 
-### Mandatory overdue timesheet notices
+### Governed work approval deadlines
+
+WOS-APR-005. Governed timesheet policies can set an optional elapsed-minute deadline per stage. The scoped approval SLA report uses the retained start of the active stage. Pre-deadline reminders and mandatory overdue delivery are covered below.
+
+### Scoped bulk timesheet approval
+
+WOS-APR-008. The timesheet bulk action requires a configured approval role and the existing approval permission. The timesheet export and approval browser journey changes one reporting relationship after a Team Lead previews two rows, then verifies the HTTP denial and both stored outcomes.
 
 WOS-APR-005 and WOS-INT-002. Timed timesheet policies retain an optional escalation recipient. The existing approval browser journey records that choice, and PostgreSQL acceptance rejects adoption when the recipient cannot see all selected workers. Migration 122 records mandatory in-app delivery attempts and acknowledgements. The real-clock approval journey verifies a temporarily unavailable escalation recipient, atomic retry, recipient-only visibility and acknowledgement.
 
 WOS-APR-005. Migration 121 and the overdue worker retain elapsed stage deadlines once, including late decisions between scans. The existing approval browser journey checks premature writes are rejected. Its optional real-clock rehearsal uses a one-minute stage and concurrent discovery calls.
+
+WOS-OPS-007 covers the progress-document CI path in `.github/workflows/workos-ci.yml`. The pinned Gitleaks CLI scans all fetched refs for every event. The release runbook describes the scope and full-validation fallback.
 
 ### Discounts and write-offs against an original charge
 

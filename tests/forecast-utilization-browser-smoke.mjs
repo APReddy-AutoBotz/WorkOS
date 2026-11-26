@@ -338,18 +338,13 @@ const expectExport = async (name, tag, horizon = 3, chosen = golden, expectedCon
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   assert.equal(Buffer.concat(chunks).toString('utf8'), expectedContent ?? expectedCsv(tag, horizon, chosen), 'exact unchanged CSV fields, dynamic horizon keys, row order, raw numbers, quoting and formula protection');
-  await page.waitForFunction(count => window.forecastHarness.writes.length >= count, before.writes + 2);
-  assert.deepEqual(await effects(), {downloads: before.downloads + 1, writes: before.writes + 2});
-  const [history, audit] = await page.evaluate(start => window.forecastHarness.writes.slice(start), before.writes);
+  await page.waitForFunction(count => window.forecastHarness.writes.length >= count, before.writes + 1);
+  assert.deepEqual(await effects(), {downloads: before.downloads + 1, writes: before.writes + 1});
+  const [history] = await page.evaluate(start => window.forecastHarness.writes.slice(start), before.writes);
   const scope = {organizationId: 'synthetic-organization', legalEntityId: 'synthetic-legal-entity'};
   assert.deepEqual(history, {path: '/api/import-export-logs', scope, body: {
     operation: 'Export', channel: 'Forecast Utilization', fileName, status: 'Success', totalRows: chosen.length, validRows: chosen.length, errorRows: 0,
   }});
-  assert.deepEqual(audit, {path: '/api/audit-events', scope, body: {
-    action: 'Export', module: 'Import / Export', details: `Export ${fileName} through Forecast Utilization with ${chosen.length} row${chosen.length === 1 ? '' : 's'} (Success)`,
-    entityType: 'ImportExportLog', entityId: `synthetic-export-${before.writes + 1}`,
-    newValue: {channel: 'Forecast Utilization', fileName, status: 'Success', totalRows: chosen.length, validRows: chosen.length, errorRows: 0},
-  }}, 'actual saveImportExportLog writes exactly one scoped history and confirmed audit');
   deliberateExports++;
 };
 const expectChart = async horizon => {
@@ -744,7 +739,7 @@ try {
   }
   assert.equal(await page.evaluate(() => window.forecastHarness.pending.length), 0);
   assert.equal(downloads.length, deliberateExports, 'only deliberate current-ready exports produce files');
-  assert.equal(await page.evaluate(() => window.forecastHarness.writes.length), deliberateExports * 2, 'only deliberate exports produce exact scoped history and audit');
+  assert.equal(await page.evaluate(() => window.forecastHarness.writes.length), deliberateExports, 'only deliberate exports produce exact scoped history and audit');
   assert.deepEqual(await page.evaluate(() => window.forecastHarness.legacyAuditCalls), []);
   assert((await page.evaluate(() => window.forecastHarness.healthReads.length)) > 0, 'unchanged helper performs actual cached health through the synthetic boundary');
   assert.deepEqual(await page.evaluate(() => window.forecastHarness.unexpectedFetches), []);
