@@ -143,6 +143,7 @@ const expected = [
   '116_wos07_month_end_margin_breaches',
   '117_wos06_invoice_provider_delivery',
   '118_wos02_organization_branding',
+  '130_wos07_risk_recipient_inbox_access',
 ];
 
 export function expectedMigrationsFrom(first) {
