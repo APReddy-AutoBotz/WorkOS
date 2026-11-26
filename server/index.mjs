@@ -25,6 +25,7 @@ import {createSessionLogoutHandler} from './modules/identity-access/session-life
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
 import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createPersistentLoginRateLimit} from './modules/identity-access/persistent-login-rate-limit.mjs';
+import {assertLegacyLeaveApproval} from './modules/approvals/leave-approval-service.mjs';
 import {createWorkApprovalRouter} from './modules/approvals/work-approval-router.mjs';
 import {startWorkApproval,assertLegacyWorkApproval} from './modules/approvals/work-approval-service.mjs';
 import {assertCalendarLeaveDecision,calendarLeaveError} from './modules/leave/calendar-leave-service.mjs';
@@ -647,6 +648,7 @@ const upsertApprovalRecord = async (client, req, {
   comments = null,
   source = 'Web',
   dueAt = null,
+  suppressNotification = false,
 }) => {
   const result = await client.query(`
     insert into approval_records (
@@ -680,7 +682,7 @@ const upsertApprovalRecord = async (client, req, {
     dueAt,
   ]);
   if(status==='Pending'&&entityType==='Timesheet'&&await startWorkApproval(client,req,entityId,workApprovalOptions))return result.rows[0];
-  if (status === 'Pending') {
+  if (status === 'Pending' && !suppressNotification) {
     await sendNotification(client, req, {
       recipientEmployeeId: subjectEmployeeId,
       eventType: 'ApprovalRequested',
@@ -3393,6 +3395,8 @@ app.use('/api', createLeaveRouter({
   refreshLeaveBalancesForEmployee,
   upsertApprovalRecord,
   decideApprovalRecord,
+  fetchUserAuthRowByWhere,
+  getEffectivePermissionsForUser,
 }));
 
 app.use('/api', createAvailabilityReportRouter({
@@ -3405,7 +3409,7 @@ app.use('/api', createAvailabilityReportRouter({
 
 const buildApprovalScopeWhere = (req, params) => legacyApprovalScope(req, params, {isGlobalRole, buildEmployeeScopeWhere});
 
-const workApprovalOptions={getSetting,buildProjectScopeWhere,fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord};
+const workApprovalOptions={getSetting,buildProjectScopeWhere,fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord,upsertApprovalRecord,getBusinessLeaveDays,getLeaveYear,ensureLeaveBalanceForRequest,refreshLeaveBalancesForEmployee};
 
 const approvalSelect = `
   select ar.*, e.name as subject_employee_name
@@ -3515,6 +3519,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
 
     if (approval.entity_type === 'LeaveRequest') {
       if (!req.user.permissions.includes('leave.approve')) { await client.query('rollback'); res.status(403).json({error:'Insufficient permission privileges'}); return; }
+      await assertLegacyLeaveApproval(client,approval.entity_id);
       const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [approval.entity_id])).rows[0];
       if (!previous || previous.status !== 'Submitted') {
         await client.query('rollback');

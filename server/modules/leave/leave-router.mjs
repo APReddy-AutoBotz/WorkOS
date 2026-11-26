@@ -1,3 +1,4 @@
+import {startLeaveApproval,prepareLeaveSourceEdit,retainLeaveCancellation,assertLegacyLeaveApproval,lockLeaveApprovalScope,unlockLeaveApprovalScope} from '../approvals/leave-approval-service.mjs';
 import {Router} from 'express';
 import {z} from 'zod';
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './decision-independence.mjs';
@@ -17,6 +18,8 @@ export const createLeaveRouter = ({
   refreshLeaveBalancesForEmployee,
   upsertApprovalRecord,
   decideApprovalRecord,
+  fetchUserAuthRowByWhere,
+  getEffectivePermissionsForUser,
 }) => {
   if (!pool || typeof pool.query !== 'function' || typeof pool.connect !== 'function'
       || ![run, buildEmployeeScopeWhere, audit, getBusinessLeaveDays, getLeaveYear,
@@ -26,6 +29,8 @@ export const createLeaveRouter = ({
     throw new TypeError('Leave routes require a database, identity guards, scope resolver, leave services, and audit writer.');
   }
 
+  const approvalOptions={buildEmployeeScopeWhere,audit,getBusinessLeaveDays,getLeaveYear,ensureLeaveBalanceForRequest,refreshLeaveBalancesForEmployee,upsertApprovalRecord,decideApprovalRecord,fetchUserAuthRowByWhere,getEffectivePermissionsForUser};
+  const approvalError=(res,error)=>{if(String(error.code).startsWith('LEAVE_APPROVAL_')){res.status(error.statusCode||409).json({error:error.message,code:error.code});return true;}if(['LGA01','LGA02','LGA03','LGA04','40001','40P01'].includes(error.code)){res.status(409).json({error:'Leave source or current approval authority changed. Inspect history before retrying.',code:'LEAVE_APPROVAL_CONFLICT'});return true;}return false;};
   const router = Router();
   router.get('/v1/leave-calendar/workers/:id/period', requireDatabase, requireAuth, requirePermission('leave.self_service'), async(req,res)=>{
     let c;try{c=await pool.connect();await c.query('begin isolation level repeatable read');const q=z.object({startsOn:z.string(),endsOn:z.string()}).strict().safeParse(req.query);if(!q.success){await c.query('rollback');res.status(400).json({error:'Choose explicit leave dates.'});return;}const computed=await quoteCalendarLeave(c,req,req.params.id,q.data.startsOn,q.data.endsOn,buildEmployeeScopeWhere,getBusinessLeaveDays);await c.query('commit');res.json({contractVersion:'calendar-leave/1',organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,quote:computed.quote});}catch(e){if(c)await c.query('rollback').catch(()=>{});if(!calendarLeaveError(res,e))res.status(e.statusCode||503).json({error:'Calendar leave quote could not be confirmed. Reload explicitly.'});}finally{c?.release();}
@@ -339,7 +344,7 @@ export const createLeaveRouter = ({
     const params = [];
     const where = buildEmployeeScopeWhere(req, params, 'e');
     await run(res, `
-      select lr.*, lr.start_date::text as start_date,lr.end_date::text as end_date,ce.quote as calendar_quote, e.name as employee_name, lt.name as leave_type_name
+      select lr.*, lr.start_date::text as start_date,lr.end_date::text as end_date,ce.quote as calendar_quote,(select id from leave_approval_instances where request_id=lr.id order by sequence desc limit 1)as approval_instance_id, e.name as employee_name, lt.name as leave_type_name
       from leave_requests lr
       left join leave_calendar_evidence ce on ce.id=lr.calendar_evidence_id and ce.request_id=lr.id and ce.employee_id=lr.employee_id
       join employees e on e.id = lr.employee_id
@@ -380,6 +385,7 @@ export const createLeaveRouter = ({
     }
     const client = await pool.connect();
     try {
+      await lockLeaveApprovalScope(client,req);
       await client.query('begin');
       const employee = (await client.query('select * from employees where id = $1 or employee_id = $1', [parsed.data.employee_id])).rows[0];
       if (!employee || employee.status === 'Exited') {
@@ -428,8 +434,9 @@ export const createLeaveRouter = ({
         returning *
       `, [employee.id, parsed.data.leave_type_id, parsed.data.start_date, parsed.data.end_date, totalDays, parsed.data.reason || null]);
       result.rows[0]=await retainCalendarLeave(client,req,result.rows[0],calendar);
+      const governed=await startLeaveApproval(client,req,result.rows[0],approvalOptions,true);
       await refreshLeaveBalancesForEmployee(client, employee.id, startYear);
-      await upsertApprovalRecord(client, req, {
+      if(!governed)await upsertApprovalRecord(client, req, {
         entityType: 'LeaveRequest',
         entityId: result.rows[0].id,
         subjectEmployeeId: employee.id,
@@ -451,11 +458,11 @@ export const createLeaveRouter = ({
       res.json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
-      if(calendarLeaveError(res,error))return;
+      if(approvalError(res,error)||calendarLeaveError(res,error))return;
       console.error(error);
       res.status(error.status || 500).json({ error: error.status ? error.message : 'Leave request submit failed' });
     } finally {
-      client.release();
+      let discard=false;try{await unlockLeaveApprovalScope(client,req);}catch{discard=true;}client.release(discard);
     }
   });
 
@@ -485,6 +492,7 @@ export const createLeaveRouter = ({
     }
     const client = await pool.connect();
     try {
+      await lockLeaveApprovalScope(client,req);
       await client.query('begin');
       const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
@@ -535,6 +543,7 @@ export const createLeaveRouter = ({
         res.status(422).json({ error: `Insufficient leave balance. Available: ${Number(balance.available_days || 0)} day(s), requested: ${totalDays} day(s)` });
         return;
       }
+      await prepareLeaveSourceEdit(client,req,req.params.id);
       const result = await client.query(`
         update leave_requests
         set leave_type_id = $2,
@@ -547,6 +556,7 @@ export const createLeaveRouter = ({
         returning *
       `, [req.params.id, parsed.data.leave_type_id, parsed.data.start_date, parsed.data.end_date, totalDays, parsed.data.reason || null]);
       result.rows[0]=await retainCalendarLeave(client,req,result.rows[0],calendar);
+      await startLeaveApproval(client,req,result.rows[0],approvalOptions,false);
       const previousYear = getLeaveYear(previous.start_date);
       await refreshLeaveBalancesForEmployee(client, previous.employee_id, previousYear);
       if (startYear !== previousYear) {
@@ -565,11 +575,11 @@ export const createLeaveRouter = ({
       res.json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
-      if(calendarLeaveError(res,error))return;
+      if(approvalError(res,error)||calendarLeaveError(res,error))return;
       console.error(error);
       res.status(error.status || 500).json({ error: error.status ? error.message : 'Leave request update failed' });
     } finally {
-      client.release();
+      let discard=false;try{await unlockLeaveApprovalScope(client,req);}catch{discard=true;}client.release(discard);
     }
   });
 
@@ -584,6 +594,7 @@ export const createLeaveRouter = ({
     }
     const client = await pool.connect();
     try {
+      await lockLeaveApprovalScope(client,req);
       await client.query('begin');
       const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
@@ -601,6 +612,7 @@ export const createLeaveRouter = ({
         res.status(403).json({ error: 'Employees can cancel only their own leave requests' });
         return;
       }
+      const governed=await retainLeaveCancellation(client,req,previous,parsed.data.comments);
       const result = await client.query(`
         update leave_requests
         set status = 'Cancelled',
@@ -616,6 +628,7 @@ export const createLeaveRouter = ({
         entityId: req.params.id,
         status: 'Cancelled',
         comments: parsed.data.comments || null,
+        ...(governed?{suppressNotification:true}:{}),
       });
       await audit(client, req, {
         module: 'Leave',
@@ -631,10 +644,11 @@ export const createLeaveRouter = ({
       res.json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
+      if(approvalError(res,error))return;
       console.error(error);
       res.status(500).json({ error: 'Leave request cancellation failed' });
     } finally {
-      client.release();
+      let discard=false;try{await unlockLeaveApprovalScope(client,req);}catch{discard=true;}client.release(discard);
     }
   });
 
@@ -654,6 +668,7 @@ export const createLeaveRouter = ({
     }
     const client = await pool.connect();
     try {
+      await lockLeaveApprovalScope(client,req);
       await client.query('begin');
       const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
@@ -706,6 +721,8 @@ export const createLeaveRouter = ({
         }
       }
       if (parsed.data.status !== 'Cancelled') await assertIndependentLeaveDecision(client, req, previous, buildEmployeeScopeWhere);
+      let governed=false;
+      if(parsed.data.status==='Cancelled')governed=Boolean(await retainLeaveCancellation(client,req,previous,parsed.data.comments));else await assertLegacyLeaveApproval(client,previous.id);
       await assertCalendarLeaveDecision(client,req,previous,parsed.data.status,buildEmployeeScopeWhere,getBusinessLeaveDays);
       const result = await client.query(`
         update leave_requests
@@ -734,17 +751,18 @@ export const createLeaveRouter = ({
         entityId: req.params.id,
         status: parsed.data.status,
         comments: parsed.data.comments || null,
+        ...(governed?{suppressNotification:true}:{}),
       });
       await client.query('commit');
       res.json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
       if (sendLeaveDecisionError(res, error)) return;
-      if(calendarLeaveError(res,error))return;
+      if(approvalError(res,error)||calendarLeaveError(res,error))return;
       console.error(error);
       res.status(500).json({ error: 'Leave request status update failed' });
     } finally {
-      client.release();
+      let discard=false;try{await unlockLeaveApprovalScope(client,req);}catch{discard=true;}client.release(discard);
     }
   });
 

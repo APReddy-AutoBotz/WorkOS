@@ -942,3 +942,7 @@ For timed timesheet approvals, set **Remind approver before deadline** to a posi
 ### Assignment creation approval
 
 Enable creation approval in the scoped assignment policy and select the workers and named stages. Request an assignment in Allocation Control. A pending request reserves no capacity. Final approval rechecks current authority and overlap limits before writing the assignment and its first version together. To return to direct creation, adopt a new effective policy with creation approval disabled. Preserve decision history and keep migration 127 installed.
+
+### Configured leave approval
+
+In Approvals, adopt an effective leave policy for the selected workers and name the stage reviewers. Reviewers open the current request revision. Only the final approval changes the leave balance and availability. An edit restarts review on a new revision. For rollback, retain migration 128 and the application version capable of resolving pending stages. Disable prospective routing using a new policy with an empty worker selection.
