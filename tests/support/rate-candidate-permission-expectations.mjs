@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 const expected=[
  {permission_key:'commercial.fixed_fee_risk.configure',module:'Commercial',label:'Configure fixed-fee risk notices',description:'Set scoped mandatory recipients and the engagement notice template.',protected:false},
  {permission_key:'commercial.po_risk.configure',module:'Commercial',label:'Configure purchase-order risk notices',description:'Set scoped mandatory recipients and the purchase-order notice template.',protected:false},
+ {permission_key:'commercial.service_margin_risk.configure',module:'Commercial',label:'Configure managed-service margin notices',description:'Set mandatory margin breach recipients and the engagement notice template.',protected:false},
  {permission_key:'commercial.retainer_risk.configure',module:'Commercial',label:'Configure retainer risk notices',description:'Set explicit version assignments and scoped mandatory retainer recipients.',protected:false},
  {permission_key:'commercial.fixed_fee_cost.view',module:'Commercial',label:'View fixed-fee worker costs',description:'Inspect scoped approved fixed-fee work and adopted hourly costs.',protected:false},
  {permission_key:'commercial.service_cost.view',module:'Commercial',label:'View managed-service effort cost',description:'Inspect scoped worker costs for accepted service effort.',protected:false},
@@ -39,6 +40,7 @@ const expected=[
  {permission_key:'integrations.invoice_alert_routes.manage',module:'Integrations',label:'Manage invoice alert routes',description:'Configure prospective invoice operational-alert outbox routes.',protected:false},
  {permission_key:'commercial.invoice_export.view',module:'Commercial',label:'View invoice CSV artifacts',description:'Retrieve scoped retained invoice-ready CSV artifact bytes.',protected:false},
  {permission_key:'commercial.invoice_export.create',module:'Commercial',label:'Create invoice CSV artifacts',description:'Accept one approved scoped invoice-ready CSV artifact.',protected:false},
+ {permission_key:'commercial.invoice_export.deliver',module:'Commercial',label:'Deliver approved invoices',description:'Send an approved invoice payload to the configured finance provider.',protected:false},
  {permission_key:'commercial.invoice_approval.manage',module:'Commercial',label:'Manage invoice batch approvals',description:'Configure prospective scoped invoice batch approval and submit Drafts.',protected:false},
  {permission_key:'commercial.invoice_approval.decide',module:'Commercial',label:'Decide invoice batch approvals',description:'Decide an explicitly assigned current scoped invoice batch approval stage.',protected:false},
  {permission_key:'commercial.invoice_drafts.view',module:'Commercial',label:'View invoice-ready drafts',description:'View scoped draft batches and their billing-safe item lineage.',protected:false},

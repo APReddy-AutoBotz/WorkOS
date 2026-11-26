@@ -1,3 +1,4 @@
+import {processMonthEndMarginAlerts} from './modules/commercial-drafting/month-end-margin-alerts.mjs';
 import {startRetainerRiskWorker} from './modules/commercial-drafting/retainer-risk-worker.mjs';
 import {startPurchaseOrderRiskWorker} from './modules/commercial-drafting/purchase-order-risk-worker.mjs';
 import {startFixedFeeWarningWorker} from './modules/commercial-drafting/fixed-fee-risk-worker.mjs';
@@ -5,6 +6,7 @@ import {createMilestoneBillingRouter} from './modules/milestone-billing/router.m
 import {createInvoiceActionRouter} from './modules/invoice-action/router.mjs';
 import {createInvoiceNoticeConfigRouter} from './modules/invoice-export/notice-config-router.mjs';
 import {createInvoiceCsvRouter} from './modules/invoice-export/router.mjs';
+import {createFinanceExportProvider} from './modules/invoice-export/finance-provider.mjs';
 import {createInvoiceBatchApprovalRouter} from './modules/invoice-approval/router.mjs';
 import {createInvoiceDraftRouter} from './modules/invoice-drafts/router.mjs';
 import {createGovernedTmRouter} from './modules/commercial-tm/router.mjs';
@@ -6486,7 +6488,10 @@ app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,require
 app.use('/api/v1/commercial-candidate-approvals',createCommercialCandidateApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Commercial candidate approval failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-batch-approvals',createInvoiceBatchApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice batch approval failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-export-notice-config',createInvoiceNoticeConfigRouter({pool,requireDatabase,requireAuth,audit,logError:e=>console.error('Invoice notification configuration failed',e?.code||'UNKNOWN')}));
-app.use('/api/v1/invoice-csv',createInvoiceCsvRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice CSV failed',e?.code||'UNKNOWN')}));
+const financeProvider = process.env.FINANCE_EXPORT_ENDPOINT || process.env.FINANCE_EXPORT_TOKEN
+  ? createFinanceExportProvider({endpoint:process.env.FINANCE_EXPORT_ENDPOINT,token:process.env.FINANCE_EXPORT_TOKEN})
+  : null;
+app.use('/api/v1/invoice-csv',createInvoiceCsvRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,financeProvider,logError:e=>console.error('Invoice CSV failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/milestone-billing',createMilestoneBillingRouter({pool,requireDatabase,requireAuth,audit,logError:e=>console.error('Milestone billing eligibility failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-action-notices',createInvoiceActionRouter({pool,requireDatabase,requireAuth,audit,buildEmployeeScopeWhere,logError:e=>console.error('Invoice action notification failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-drafts',createInvoiceDraftRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice draft failed',e?.code||'UNKNOWN')}));
@@ -6543,7 +6548,7 @@ const server = app.listen(port, () => {
 });
 
 if (pool && process.env.NODE_ENV!=='test') {
-  startFixedFeeWarningWorker(pool,server);
+  startFixedFeeWarningWorker(pool,server,processMonthEndMarginAlerts);
   startPurchaseOrderRiskWorker(pool,server);
   startRetainerRiskWorker(pool,server);
 }
