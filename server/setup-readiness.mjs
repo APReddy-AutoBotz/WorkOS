@@ -1,3 +1,5 @@
+import {EnvironmentValidationError, validateRuntimeEnvironment} from './environment.mjs';
+
 export const REQUIRED_SETUP_CHECKS = [
   'organization',
   'legal_entity',
@@ -20,23 +22,13 @@ export const identityReadinessFromEnvironment = (environment = process.env) =>
   && ['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET', 'ENTRA_REDIRECT_URI'].every(key => present(environment[key]));
 
 export const productionReadinessFromEnvironment = (environment = process.env) => {
-  let applicationUrlIsSecure = false;
+  if (environment.LOCAL_LOGIN_ENABLED !== 'false') return false;
   try {
-    applicationUrlIsSecure = new URL(String(environment.APP_URL || '')).protocol === 'https:';
-  } catch {
-    applicationUrlIsSecure = false;
+    return validateRuntimeEnvironment(environment).production;
+  } catch (error) {
+    if (error instanceof EnvironmentValidationError) return false;
+    throw error;
   }
-
-  const safeSessionSecret = present(environment.API_SESSION_SECRET)
-    && environment.API_SESSION_SECRET !== 'dev-only-change-me';
-  const productionMode = environment.NODE_ENV === 'production' && environment.APP_MODE === 'production';
-  const noUnsafeFallback = environment.ALLOW_TEST_FALLBACK !== 'true'
-    && environment.AUTO_SEED_DEMO !== 'true'
-    && environment.LOCAL_LOGIN_ENABLED === 'false';
-  const productionIdentity = identityReadinessFromEnvironment(environment);
-
-  return productionMode && noUnsafeFallback && present(environment.DATABASE_URL) && safeSessionSecret
-    && applicationUrlIsSecure && productionIdentity;
 };
 
 export const buildSetupReadiness = (facts, environment = process.env) => {

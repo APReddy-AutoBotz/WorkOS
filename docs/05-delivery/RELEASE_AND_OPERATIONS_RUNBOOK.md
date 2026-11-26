@@ -37,6 +37,8 @@ test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainer
 
 The bundle includes the installed application's production npm dependency graph in CycloneDX format and an Alpine package inventory. The checksummed npm-third-party-notices.json preserves installed npm notice files, including vendored notices and root README licence sections. Review any packagesWithoutRootNotice entries and separately reconcile frontend assets, base-image components and source-distribution terms before buyer handover. Keep the accepted bundle and its Actions artifact digest in buyer-owned storage before the seven-day CI retention window ends. Use the previously accepted image ID for application rollback, following the release-specific database compatibility plan. Image checksums verify file integrity. Buyer approval and release signing remain separate gates.
 
+The frontend build records the installed Tailwind versions and their licence texts in `dist/stylesheet-notices.txt`. Release packaging extracts that file from the tested image and includes it in `SHA256SUMS` alongside the runtime npm notices.
+
 ## Maintaining a standing margin threshold
 
 In Commercial Amendments select the managed-service engagement and a newer contract version adopted by its parent. Enter the threshold, effective date, reason and approval reference. Review the before and after terms, confirm, and verify the saved version in protected history. Clear an existing threshold to disable it through a subsequent amendment. Roll back the setting with a later effective amendment so the prior approval remains auditable. No schema migration is required.
@@ -202,7 +204,7 @@ The repository provides a Node 22 production image and a PostgreSQL Compose prof
 
 ### Production environment reference
 
-The production profile reads the following values from `.env.production`. Secret values stay in the deployment environment and must never be copied into logs or support tickets. Values marked required are enforced by the production startup validator or Compose interpolation. The Entra fields are mandatory for production and must identify a real configured application; format validation cannot prove that the provider will accept its credentials.
+The production profile reads the following values from `.env.production`. Secret values stay in the deployment environment and must never be copied into logs or support tickets. The guided setup production check uses the startup validator and requires local login to be disabled. Values marked required are enforced by the production startup validator or Compose interpolation. The Entra fields are mandatory for production and must identify a real configured application; format validation cannot prove that the provider will accept its credentials.
 
 | Variable | Purpose | Sensitivity | Required | Allowed values |
 |---|---|---|---|---|
@@ -906,15 +908,17 @@ The full suite installs the lockfile-selected Chromium build and attempts a head
 
 ## Configure managed-service margin notices
 
-Assign the managed-service margin notice configuration permission to the authorized commercial operator. In the managed-service engagement workspace, open the monthly margin alert recipients, select the effective date, named commercial manager and finance owner with their held roles, and save the buyer template and change reason. The engagement owner comes from the engagement record. Check membership and scope if the configuration is refused. Reverting the application leaves saved policy revisions and the historical month-end assessment available to a compatible version.
+Assign the managed-service margin notice configuration permission to the authorized commercial operator. In the managed-service engagement workspace, open the monthly margin alert recipients, select the effective date, named commercial manager and finance owner with their held roles, and save the buyer template and change reason. The engagement owner comes from the engagement record. Check membership, scope and governed inbox access for each named role if configuration is refused or a delivery is waiting for recipients. Restore the intended access or select an authorized replacement in a new policy revision. The worker retries pending deliveries. For earlier deliveries, inspect the retained recipients and restore authorized read access as appropriate. Keep migration 130 on application rollback. Reverting the application leaves saved policy revisions and the historical month-end assessment available to a compatible version.
 
 After UTC month-end, the worker evaluates the last version retained during the month and subsequent revisions against the closing threshold. An uninterrupted breach produces one event. A verified recovery followed by a new breach produces another. Use **Check warning deliveries** to inspect the reporting date, attempts, last outcome and next retry. Restore the missing policy or recipient access to resume pending delivery. A failed attempt leaves all recipients without a partial receipt. Earlier binaries can ignore the additive event and receipt tables. Retain their data on rollback so delivery can resume without duplicating receipts.
+
+For an approved fixed-fee installment, inspect the line in the invoice CSV workspace and enter its released purchase-order number and allocation reason. Check the displayed committed and available values. To suspend new allocations, revoke purchase-order release access for the affected preparers. Retain existing commitments, balance evidence and migration history during application rollback.
 
 ## Buyer branding (WOS-ORG-005)
 
 Open **Governance Settings → Customize Branding** with settings-management authority. Supply image paths served by the buyer's frontend, review the preview, select the effective date and save the organization profile. Both accent colors need at least 4.5:1 contrast against white. Empty asset and color fields use deployment defaults. The report label prefixes report export filenames and the email label prefixes Graph notification subjects.
 
-To publish the effective product name, login logo, favicon and accents before authentication, set `PUBLIC_BRANDING_ORGANIZATION_ID` to the deployment's buyer organization. An unset selector leaves the deployment login brand in use. The login endpoint takes no organization selector from the browser. For rollback, restore the prior values through the profile editor and retain the profile versions and audit records.
+To publish the effective product name, login logo, favicon and accents before authentication, set `PUBLIC_BRANDING_ORGANIZATION_ID` to the deployment's buyer organization. An unset selector leaves the deployment login brand in use. A profile without a favicon uses the deployment logo configured by `VITE_PRODUCT_LOGO_URL`. The login endpoint takes no organization selector from the browser. For rollback, restore the prior values through the profile editor and retain the profile versions and audit records.
 
 ### Governed work approval deadlines
 
