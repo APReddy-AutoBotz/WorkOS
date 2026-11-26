@@ -354,7 +354,7 @@ const verifyCommercialDrafting = async reversalScenario => {
     assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rowCount,0);
     assert.equal((await pool.query('select 1 from invoice_draft_lines where id=$1 and event_id=$2',[fixedLine.id,registered.eventId])).rowCount,1);
     const fixedDelivery=await verifyFixedFeeBatchApproval({pool,apiRequest,createContext,baseUrl,identities,engagementId:engagement.result.id,today,draftGrants,
-      grant,createCommand:created.request().postDataJSON(),lineCommand:original,registered,reversalScenario});
+      grant,createCommand:created.request().postDataJSON(),lineCommand:original,registered,reversalScenario,order:po.body,releaseCommand});
     const identityReceipt=await pool.query('select author_worker_id,reviewer_worker_id,origin from fixed_fee_installment_identities where event_id=$1',[registered.eventId]);
     assert.deepEqual(identityReceipt.rows,[{author_worker_id:ownerId,reviewer_worker_id:'syn-installment-reviewer',origin:'issue'}]);
     await linkReviewer(null);
