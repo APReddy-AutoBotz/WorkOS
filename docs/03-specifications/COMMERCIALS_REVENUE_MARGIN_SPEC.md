@@ -395,3 +395,5 @@ The entity-scoped register inspects up to ten activated or explicitly adopted co
 ### Retainer risk recipients
 
 The buyer requires explicit engagement assignments per contract version, including unused versions. The owner of a sibling engagement gains no access through the contract alone. Current owners are resolved at delivery and receipt access. A same-contract retainer engagement can be assigned before it adopts new terms. Assignment to one version does not confer access to another. Finance sees missing assignments and unavailable owners. Mandatory recipients also include the named scoped commercial manager and finance/billing owner. One person filling multiple roles receives one receipt.
+
+An approved fixed-fee installment can reserve a released purchase order in the invoice export workspace. Coverage uses the eligibility date, pinned contract version, currency and full installment amount. The database locks the order and checks its available balance before recording the commitment.
