@@ -20,6 +20,8 @@ import {
   createAmendmentHierarchy,
 } from './support/commercial-amendments-test.mjs';
 import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
+const permanentRejection = process.argv.includes('--provider-rejected');
+const providerJourney = permanentRejection || process.argv.includes('--provider');
 const base = '/api/v1/governed-tm-valuations',
   candidates = '/api/v1/rate-candidates',
   approvals = '/api/v1/commercial-candidate-approvals',
@@ -77,7 +79,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       [k],
     );
   await withCommercialApi(
-    { databaseUrl, identities: ids, onServerError: (s) => process.stderr.write(s) },
+    { databaseUrl, identities: ids, financeProviderFixture: permanentRejection ? 'reject' : providerJourney, onServerError: (s) => process.stderr.write(s) },
     async ({ request }) => {
       const end = shift(fx.today, 30),
         roots = await createAmendmentHierarchy(request, 'SYN-TM-VAL', {
@@ -1010,6 +1012,52 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           expectedTotal: sourceCsv.control.total,
           reason: 'Synthetic invoice export',
         };
+        if (providerJourney) {
+          const reserve = () => request(csv + '/provider-exports', {method:'POST', body:cmd});
+          assert.equal((await reserve()).status,403);
+          await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.invoice_export.deliver',true)");
+          const reservation = ok(await reserve(),201);
+          const deliver = () => request(csv + '/provider-exports/' + reservation.exportId + '/deliver',
+            {method:'POST',body:{expectedOwnerKey:cmd.expectedOwnerKey}});
+          assert.equal(ok(await reserve()).exportId,reservation.exportId);
+          const cancel = async () => {
+            const inspected = ok(await request(route + '/batches/' + cmd.batchId + '?forCancellation=true'));
+            return request(route + '/batches/' + cmd.batchId + '/cancellations',{method:'POST',
+              body:{expectedOwnerKey:inspected.ownerKey,expectedCancellationToken:inspected.cancellationToken,
+                requestId:randomUUID(),expectedLineCount:1,reason:'Replace rejected export'}});
+          };
+          if (permanentRejection) {
+            assert.equal(ok(await deliver(),201).deliveryStatus,'permanently_rejected');
+            assert.equal(ok(await deliver()).replayed,true);
+            assert.equal(ok(await request(csv + '/batches/' + cmd.batchId)).batch.state,'Approved');
+            assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[cmd.batchId])).rowCount,1);
+            ok(await cancel(),201);
+            assert.equal(ok(await request(csv + '/batches/' + cmd.batchId)).batch.state,'Cancelled');
+            assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[cmd.batchId])).rowCount,0);
+            assert.equal((await pool.query('select 1 from invoice_provider_attempts where export_id=$1',[reservation.exportId])).rowCount,1);
+            console.log('Exact permanent rejection, replay and protected cancellation releasing occupancy passed.');
+            return;
+          }
+          assert.equal(ok(await deliver(),201).deliveryStatus,'unconfirmed');
+          const failureEvents = await pool.query(
+            `select e.id from invoice_export_notice_events e join invoice_csv_failures f on f.id=e.failure_id
+             where f.batch_id=$1 and f.code='PROVIDER_DELIVERY_UNCONFIRMED'`, [cmd.batchId]);
+          assert.equal(failureEvents.rowCount,1);
+          assert.equal(ok(await request(csv + '/batches/' + cmd.batchId)).batch.state,'Approved');
+          assert.equal((await request(csv + '/exports',{method:'POST',body:cmd})).status,409);
+          const pendingCancellation = await cancel();
+          assert.equal(pendingCancellation.status,409);
+          assert.equal(pendingCancellation.body.error.code,'INVOICE_PROVIDER_PENDING');
+          const accepted = ok(await deliver(),201);
+          assert.equal(ok(await deliver()).artifact.id,accepted.artifact.id);
+          assert.equal(ok(await request(csv + '/batches/' + cmd.batchId)).batch.state,'Exported');
+          const attempts = await pool.query('select result from invoice_provider_attempts where export_id=$1 order by attempted_at',[reservation.exportId]);
+          assert.deepEqual(attempts.rows.map(x=>x.result),['unconfirmed','accepted']);
+          assert.equal((await pool.query('select id from invoice_export_notice_events where artifact_id=$1',
+            [accepted.artifact.id])).rowCount,1);
+          console.log('Provider receipt loss, protected retry, CSV/cancellation exclusion and final replay passed.');
+          return;
+        }
         await assert.rejects(
           pool.query(
             "insert into invoice_csv_request_keys(organization_id,legal_entity_id,actor_id,request_id,result_kind,result_id)values($1,$2,$3,$4,'artifact',$5)",

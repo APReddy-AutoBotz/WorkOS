@@ -1,13 +1,14 @@
+import {expectedMigrationsFrom} from './expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {verifyFixedFeeExport} from './fixed-fee-export-journey.mjs';
 import {runMigrations} from '../../server/migrate.mjs';
 import {withCommercialMigrationsThrough,migrateCommercialDatabase} from './commercial-drafting-test.mjs';
 import {randomUUID} from 'node:crypto';
 
-export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext,baseUrl,identities,engagementId,today,draftGrants,grant,createCommand,lineCommand,registered,reversalScenario}) {
+export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext,baseUrl,identities,engagementId,today,draftGrants,grant,createCommand,lineCommand,registered,reversalScenario,order,releaseCommand}) {
   const preparer=identities.reader,reviewer=identities.manager;
   const access=[...draftGrants,grant,'commercial.contracts.manage','commercial.invoice_approval.manage','commercial.invoice_approval.decide','approvals.view'];
-  access.push('commercial.invoice_batch.confirm','reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
+  access.push('commercial.purchase_orders.release','commercial.invoice_batch.confirm','reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
     'commercial.invoice_export.configure','integrations.invoice_alert_routes.manage');
   const roles=[preparer.role,reviewer.role];
   const saved=(await pool.query('select role_name,permission_key,enabled from role_permissions where role_name=any($1) and permission_key=any($2)',[roles,access])).rows;
@@ -85,11 +86,37 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
           join invoice_draft_occupancies o on o.line_id=l.id where a.id=$1`,[delivery.a.id])).rows;
         const before=await evidence();
         assert.equal(before.length,1);
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['098_wos06_fixed_fee_credit_corrections','099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies','108_wos06_fixed_fee_risk_delivery','109_wos06_risk_delivery_attempt_history','110_wos06_po_commitment_balance_evidence','111_wos06_po_risk_engagement_assignments','112_wos06_purchase_order_risk_events','113_wos06_retainer_risk_routing']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('098_wos06_fixed_fee_credit_corrections'));
         assert.deepEqual(await evidence(),before);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
         return {...delivery,batchId:batch.id,lineId:line.line.id,policyId:policy.id};
       }
+      const retry=ok(await submit(policy.id)).approval;
+      ok(await act('/instances/'+retry.id+'/decisions',reviewer,{expectedOwnerKey:reviewerKey,requestId:randomUUID(),
+        expectedSequence:0,decision:'Approved',reason:'Reviewed the installment again before assigning an order'}));
+      const poPath='/api/v1/invoice-csv/batches/'+batch.id+'/lines/'+line.line.id+'/purchase-order';
+      const commitment={expectedOwnerKey:reviewerKey,number:order.number,reason:'Reserve the approved installment'};
+      const postOrder=body=>apiRequest(poPath,{identity:reviewer,method:'POST',body});
+      const exceeded=await postOrder(commitment);
+      assert.equal(exceeded.status,409,JSON.stringify(exceeded.body));
+      assert.equal(exceeded.body.error.code,'PO_LIMIT_EXCEEDED');
+      const number='SYN-FIXED-FEE-COVERAGE';
+      const covering=ok(await apiRequest('/purchase-orders',{method:'POST',identity:reviewer,
+        body:{...order,number,contractVersionId:registered.contractVersionId,startsOn:today,value:'12300.6789'}}));
+      ok(await apiRequest('/purchase-orders/'+covering.id+'/release',{method:'POST',identity:preparer,body:releaseCommand}));
+      const csv=page.getByRole('region',{name:'Invoice CSV export'});
+      await csv.getByLabel('Invoice export engagement').selectOption(engagementId);
+      await csv.getByRole('button',{name:'Load invoice export batches'}).click();
+      await csv.getByLabel('Invoice export batch').selectOption(batch.id);
+      await csv.getByRole('button',{name:'Inspect invoice export source'}).click();
+      await csv.getByRole('button',{name:'Inspect order allocation'}).click();
+      await csv.getByLabel('Released order number').fill(number);
+      await csv.getByLabel('Allocation reason').fill(commitment.reason);
+      await csv.getByRole('button',{name:'Commit invoice line'}).click();
+      await csv.getByText(/Order committed 12000.0000.*Available 300.6789.*Warning threshold reached/).waitFor();
+      assert.equal(ok(await postOrder({...commitment,number}),200).replayed,true);
+      await change(reviewer.role,[grant],false);
+      assert.equal((await apiRequest(poPath,{identity:reviewer})).status,403);
       assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1 and batch_id=$2',[registered.itemId,batch.id])).rowCount,1);
     } finally {await browser.context.close();}
   } finally {

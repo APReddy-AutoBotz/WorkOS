@@ -52,8 +52,9 @@ async function scanNext(client) {
   return true;
 }
 
-async function dispatchNext(client) {
-  const {rows:[event]}=await client.query(`select e.* from fixed_fee_risk_dispatch d join fixed_fee_risk_events e on e.id=d.event_id
+export async function dispatchEngagementRisk(client,model='fixed_fee') {
+  const tables=model==='managed_service'?'service_margin_risk':'fixed_fee_risk';
+  const {rows:[event]}=await client.query(`select e.* from ${tables}_dispatch d join ${tables}_events e on e.id=d.event_id
     where d.delivered_at is null and d.next_attempt<=now() order by d.next_attempt,d.event_id limit 1 for update of d skip locked`);
   if (!event) return false;
   const scope=[event.organization_id,event.legal_entity_id,event.engagement_id];
@@ -63,20 +64,21 @@ async function dispatchNext(client) {
     const {rows:[policy]}=await client.query(`select * from fixed_fee_risk_notice_policies where organization_id=$1
       and legal_entity_id=$2 and engagement_id=$3 and effective_from<=(now() at time zone 'UTC')::date order by version desc limit 1`,scope);
     if (!policy) {failure='POLICY_UNAVAILABLE';throw Error();}
-    const recipients=await client.query(`select user_id,array_agg(reason order by reason) reasons from fixed_fee_risk_recipients($1,$2,$3,$4,$5,$6,$7)
+    const recipientFunction=model==='managed_service'?"engagement_risk_recipients('managed_service',":"fixed_fee_risk_recipients(";
+    const recipients=await client.query(`select user_id,array_agg(reason order by reason) reasons from ${recipientFunction}$1,$2,$3,$4,$5,$6,$7)
       group by user_id order by user_id`,[...scope,policy.manager_id,policy.manager_role,policy.finance_id,policy.finance_role]);
     if (recipients.rows.flatMap(row=>row.reasons).length!==3) {failure='RECIPIENTS_UNAVAILABLE';throw Error();}
     for (const recipient of recipients.rows) {
-      await client.query('insert into fixed_fee_risk_inbox(id,event_id,user_id,reasons) values($1,$2,$3,$4)',
+      await client.query(`insert into ${tables}_inbox(id,event_id,user_id,reasons) values($1,$2,$3,$4)`,
         [randomUUID(),event.id,recipient.user_id,recipient.reasons]);
     }
-    await client.query('update fixed_fee_risk_dispatch set attempts=attempts+1,policy_id=$2,delivered_at=clock_timestamp(),failure=null where event_id=$1',
+    await client.query(`update ${tables}_dispatch set attempts=attempts+1,policy_id=$2,delivered_at=clock_timestamp(),failure=null where event_id=$1`,
       [event.id,policy.id]);
     // The receipt-set constraint requires the final dispatch row and every recipient.
     await client.query('set constraints all immediate');
   } catch {
     await client.query('rollback to savepoint risk_delivery');
-    await client.query(`update fixed_fee_risk_dispatch set attempts=attempts+1,failure=$2,
+    await client.query(`update ${tables}_dispatch set attempts=attempts+1,failure=$2,
       next_attempt=now()+interval '1 minute'*least(60,power(2,least(6,attempts))) where event_id=$1`,[event.id,failure]);
   }
   return true;
@@ -109,18 +111,20 @@ export async function processFixedFeeWarnings(pool,limit=10) {
     order by min(a.effective_on),a.entity_id limit 100 on conflict do nothing`);
   for (let n=0;n<limit;n++) {
     const scanned=await processRiskTransaction(pool,scanNext);
-    const dispatched=await processRiskTransaction(pool,dispatchNext);
+    const dispatched=await processRiskTransaction(pool,dispatchEngagementRisk);
     if (!scanned && !dispatched) break;
   }
 }
 
-export function startFixedFeeWarningWorker(pool,server) {
+export function startFixedFeeWarningWorker(pool,server,processMonthlyAlerts) {
   let running=false;
   const tick=async()=>{
     if (running) return;
     running=true;
     try {await processFixedFeeWarnings(pool);}
     catch {console.error('Fixed-fee risk notification processing unavailable.');}
+    try {if (processMonthlyAlerts) await processMonthlyAlerts(pool);}
+    catch {console.error('Monthly margin notification processing unavailable.');}
     finally {running=false;}
   };
   const timer=setInterval(tick,30_000);
