@@ -9,14 +9,16 @@ const command = z.object({
 }).strict();
 const fail = (statusCode, message) => Object.assign(new Error(message), {statusCode, code:'REVERSAL_ELIGIBILITY'});
 
-export function registerReversalEligibility(router, { path, handle, inspect, envelope, audit }) {
+export function registerReversalEligibility(router, { path, handle, inspect, envelope, audit, partial = false }) {
   const route = path + '/eligibility';
+  // Full reversals remain available on databases predating partial adjustments.
+  const sourceFunction = partial ? 'invoice_credit_source' : 'full_line_reversal_source';
   const load = async (c,r,write) => {
     const { existing, row } = await inspect(c,r,write,write ? 'issue-reversal' : 'reversal');
     if (!existing) throw fail(404,'Reversal request unavailable.');
     const source = (await c.query(
       `select s.id as "reviewId",v.final_decision as "decisionId",v.original_event as "originalEventId",v.confirmation as "confirmationId",
-        v.currency,trim_scale(v.amount)::text amount from invoice_reversal_reviews s cross join lateral full_line_reversal_source(s.id) v
+        v.currency,trim_scale(v.amount)::text amount from invoice_reversal_reviews s cross join lateral ${sourceFunction}(s.id) v
         where s.request_id=$1 and s.organization_id=$2 and s.legal_entity_id=$3`,[existing.id,row.organization_id,row.legal_entity_id],
     )).rows[0] ?? null;
     const receipt = source ? (await c.query(
@@ -24,7 +26,7 @@ export function registerReversalEligibility(router, { path, handle, inspect, env
         ev.reversal_decision_id as "decisionId",ev.reverses_event_id as "originalEventId",ev.billing_evidence->>'confirmationId' as "confirmationId",
         ev.actor_id as "actorId",ev.active_role as "activeRole",a.reason
         from billing_eligibility_events ev join approved_unbilled_items item on item.event_id=ev.id
-        join audit_logs a on a.entity_id=ev.id::text and a.operation_id=ev.operation_id and a.action='Issue Full Line Reversal'
+        join audit_logs a on a.entity_id=ev.id::text and a.operation_id=ev.operation_id and a.action=case when ev.source_type='CHARGE_ADJUSTMENT' then 'Issue Charge Adjustment' else 'Issue Full Line Reversal' end
         where ev.reversal_decision_id=$1 and ev.organization_id=$2 and ev.legal_entity_id=$3`,
       [source.decisionId,row.organization_id,row.legal_entity_id])).rows[0] ?? null : null;
     return { existing,row,source,receipt };
@@ -53,11 +55,11 @@ export function registerReversalEligibility(router, { path, handle, inspect, env
     const eventId=randomUUID();
     await c.query(`insert into billing_eligibility_events(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,source_type,
       version,eligible_on,currency,amount,billing_evidence,actor_id,active_role,operation_id,reverses_event_id,reversal_decision_id)
-      select $1,organization_id,legal_entity_id,client_id,contract_id,engagement_id,'FULL_LINE_REVERSAL',1,$2,currency,amount,evidence,
-      $3,$4,$5,original_event,final_decision from full_line_reversal_source($6)`,
+      select $1,organization_id,legal_entity_id,client_id,contract_id,engagement_id,case when evidence ? 'adjustmentKind' then 'CHARGE_ADJUSTMENT' else 'FULL_LINE_REVERSAL' end,1,$2,currency,amount,evidence,
+      $3,$4,$5,original_event,final_decision from ${sourceFunction}($6)`,
       [eventId,d.eligibleOn,r.user.sub,r.user.activeRole,r.operationId,source.reviewId]);
     const itemId=(await c.query('select id from approved_unbilled_items where event_id=$1',[eventId])).rows[0].id;
-    await audit(c,r,{module:'Invoice Corrections',action:'Issue Full Line Reversal',entityType:'Billing Eligibility Event',entityId:eventId,
+    await audit(c,r,{module:'Invoice Corrections',action:existing.kind?'Issue Charge Adjustment':'Issue Full Line Reversal',entityType:'Billing Eligibility Event',entityId:eventId,
       reason:d.reason,newValue:{itemId,decisionId:d.decisionId,originalEventId:source.originalEventId,currency:source.currency,amount:source.amount,eligibleOn:d.eligibleOn},
       details:'Issued an approved-unbilled credit against the original retained line.'});
     return {...context,requestId:existing.id,source,receipt:{eventId,itemId,eligibleOn:d.eligibleOn,currency:source.currency,amount:source.amount,

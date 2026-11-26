@@ -56,6 +56,10 @@ The server creates a versioned `billing_eligibility_event` only after one author
 - **Managed service:** an approved fixed-period charge or accepted service-unit event version.
 - **Adjustment:** an approved commercial adjustment, credit, discount, write-off or correction version.
 
+For WOS-INV-004, finance must identify one original charge for each discount or write-off. Use the charge currency. At final approval, the server checks the requested amount against the original amount less all previously approved credits against that charge, including full reversals. Approval consumes that balance immediately, even if the credit has yet to reach the invoice register. Rejection consumes nothing. Issuing or exporting an approved credit must not deduct it a second time.
+
+For example, a charge of 100 with an approved discount of 30 can support a write-off of up to 70. Two reviewers approving adjustments against the same charge concurrently must see the same cap enforced across both decisions. A retry of an accepted decision uses the recorded approval.
+
 Every eligibility event records source type and immutable source version, organization/legal entity, client/contract/engagement, approval or contractual-due/acceptance evidence, eligible date, currency, decimal amount, calculation/policy/rounding evidence where applicable, event version/status, and reversal/supersession lineage.
 
 ## Approved-unbilled register

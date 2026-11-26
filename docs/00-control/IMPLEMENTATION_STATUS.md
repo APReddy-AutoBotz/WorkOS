@@ -21,6 +21,8 @@ The buyer handover template contains 44 unchecked items across eight areas. Reco
 
 ## Delivery acceleration
 
+The [finance draft](https://github.com/APReddy-AutoBotz/WorkOS/pull/368) carries named-charge discounts and write-offs through independent approval, credit registration, correction-batch export and confirmation. Independent Gate C acceptance remains open.
+
 The WOS-OPS-007 candidate scopes application validation for progress-only PRs. The previous Gitleaks action scanned a PR commit range on pull requests. Its green PR checks establish evidence for that range only. The candidate explicitly scans all fetched refs, including merge changes. Buyer acceptance and release evidence still use the full release path.
 
 ## Utilization evidence

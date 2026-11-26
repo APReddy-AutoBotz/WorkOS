@@ -59,7 +59,7 @@ export function registerReversalReview(router, { path, handle, inspect, envelope
     const submitted = result.rows[0];
     if (!submitted) throw fail(409, 'Review policy unavailable.');
     await audit(c, r, { module: 'Invoice Corrections', entityType: 'Invoice Reversal Review',
-      action: 'Submit Full Line Reversal', entityId: submitted.id, reason: existing.reason,
+      action: existing.kind ? 'Submit Charge Adjustment' : 'Submit Full Line Reversal', entityId: submitted.id, reason: existing.reason,
       newValue: { requestId: existing.id, policyId: submitted.policyId, confirmationId: submitted.confirmationId,
         reviewerId: submitted.reviewerId, reviewerRole: submitted.reviewerRole, deliveryId },
       details: 'Submitted the retained reversal request to its first named reviewer.' });

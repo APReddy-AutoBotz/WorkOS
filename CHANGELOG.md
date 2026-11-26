@@ -4,8 +4,11 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
-- Added governed month-end managed-service margin alerts, buyer recipient configuration, delivery history and inbox acknowledgement.
+- Finance can approve discounts and write-offs against a named original charge, export the resulting credits and record their downstream application. Each approval consumes the remaining balance on that charge.
+
 - Allow prose-only progress PRs to complete CI with whitespace validation and a secret scan of all fetched Git history.
+
+- Added governed month-end managed-service margin alerts, buyer recipient configuration, delivery history and inbox acknowledgement.
 
 - Corrected forecast pressure and project allocation indicators for out-of-term projects and missing capacity.
 

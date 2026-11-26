@@ -3,7 +3,7 @@ import { verifyMilestoneInvoiceCsv,verifyRetainerInvoiceCsv,verifyServiceInvoice
 import { validInvoiceConfirmationCommand, validConfirmationTotal } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
-import { canonicalHours } from '../../shared/work-hours.mjs';
+import { canonicalHours, compareHours } from '../../shared/work-hours.mjs';
 import { api, ApiClientError } from './apiClient';
 import { captureRateContext } from './rateCandidates';
 import { hasRatePermission, isRateContextCurrent, type RateContext } from './rateCandidates';
@@ -492,10 +492,14 @@ export type InvoiceConfirmationOperation = {
   reason: string;
 };
 export { captureRateContext };
+const chargeAdjustment = z.enum(['Discount','Write-off']);
 const reversalRequest = z.object({
+  kind: chargeAdjustment.optional(), amount: money.optional(),
   id: uuid, lineId: uuid, artifactId: uuid, confirmationId: uuid.nullable(),
   reason: z.string().min(3).max(1000), actorId: uuid, activeRole: z.string().min(1), createdAt: z.string().datetime(),
 }).strict();
+const reviewPath = (batchId:string, request:z.infer<typeof reversalRequest>) =>
+  '/batches/' + batchId + '/lines/' + request.lineId + (request.kind ? '/adjustments/' + request.id : '/reversal-request');
 export type InvoiceLineReversalRequest = z.infer<typeof reversalRequest>;
 const reviewRoute = z.discriminatedUnion('status', [
   z.object({ status: z.literal('NO_REVERSAL_POLICY') }).strict(),
@@ -518,6 +522,7 @@ const creditReceipt = z.object({eventId:uuid,itemId:uuid,eligibleOn:date,currenc
   decisionId:uuid,originalEventId:uuid,confirmationId:uuid.nullable(),actorId:uuid,activeRole:id,reason:z.string().min(3).max(1000)}).strict();
 export type ReversalCredit = {source:z.infer<typeof creditSource>;receipt:z.infer<typeof creditReceipt>|null;eligibleOn:string};
 const issuedCredit = z.object({
+  kind:z.enum(['Discount','Write-off']).optional(),
   itemId:uuid, eventId:uuid, eligibleOn:date, currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount,
   originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(), correctionState:z.enum(['Draft','Under Review','Approved','Exported','Billed/Confirmed']).nullable(),
 }).strict();
@@ -531,7 +536,7 @@ const correctionEvidence=z.object({
     artifactId:uuid,artifactSha256:hash,reserved:z.boolean()}).strict()).min(1).max(50),
 }).strict();
 export type CorrectionEvidence=z.infer<typeof correctionEvidence>;
-const creditLink=z.object({applicationAttested:z.boolean(),originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
+const creditLink=z.object({kind:z.enum(['Discount','Write-off']).optional(),applicationAttested:z.boolean(),originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
 export type CreditExportLink=z.infer<typeof creditLink>;
 const exactProduct = z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,8})?$/);
 const linePricing = z.object({
@@ -582,7 +587,7 @@ export const invoiceCsv = {
     const raw=await call('GET','/batches/'+original.id+'/exported-credits'+(after?'?after='+after:''),c,'view');
     const result=z.object({...envelope,originalBatchId:uuid,nextAfter:uuid.nullable(),lines:z.array(creditLink).max(50)}).strict().safeParse(raw);
     if(!result.success || result.data.originalBatchId!==original.id || result.data.lines.some(x=>x.originalArtifactId!==original.artifactId ||
-      !original.lines.some(l=>l.lineId===x.originalLineId && l.currency===x.currency && x.amount==='-'+l.amount)))return bad();
+      !original.lines.some(l=>l.lineId===x.originalLineId && l.currency===x.currency && (x.kind ? compareHours(x.amount.slice(1),l.amount)<=0 : x.amount==='-'+l.amount))))return bad();
     return result.data;
   },
   correctionEvidence: async (item:IssuedCredit,engagementId:string,ctx:RateContext) => {
@@ -621,16 +626,16 @@ export const invoiceCsv = {
       (nextAfter!==null && (credits.length!==50 || credits[49].itemId!==nextAfter))) return bad();
     return {credits,nextAfter};
   },
-  reversalCredit: async (batch:InvoiceCsvSource, lineId:string, requestId:string, reviewId:string, c:RateContext, write?:{credit:ReversalCredit;reason:string}):Promise<ReversalCredit> => {
+  reversalCredit: async (batch:InvoiceCsvSource, lineId:string, requestId:string, reviewId:string, c:RateContext, write?:{credit:ReversalCredit;reason:string}, adjustmentAmount?:string):Promise<ReversalCredit> => {
     const line=batch.lines.find(l=>l.lineId===lineId);
     if (!line || !hasRatePermission('commercial.invoice_drafts.prepare') || (write && !hasRatePermission('commercial.reversal_eligibility.create'))) return bad();
-    const path='/batches/'+batch.id+'/lines/'+lineId+'/reversal-request/eligibility';
+    const path='/batches/'+batch.id+'/lines/'+lineId+(adjustmentAmount ? '/adjustments/'+uuid.parse(requestId) : '/reversal-request')+'/eligibility';
     const data=write?{reviewId,decisionId:write.credit.source.decisionId,confirmationId:write.credit.source.confirmationId,eligibleOn:write.credit.eligibleOn,reason:write.reason}:undefined;
     const raw=await call(write?'POST':'GET',path,c,'view',data);
     const result=z.object({...envelope,requestId:uuid,source:creditSource.nullable(),receipt:creditReceipt.nullable(),...(write?{replayed:z.boolean()}:{})}).strict().safeParse(raw);
     if(!result.success || result.data.requestId!==requestId || !result.data.source) return bad();
     const {source,receipt,serverDate}=result.data;
-    if(source.reviewId!==reviewId || source.originalEventId!==line.eventId || source.currency!==line.currency || source.amount!=='-'+line.amount ||
+    if(source.reviewId!==reviewId || source.originalEventId!==line.eventId || source.currency!==line.currency || source.amount!=='-'+(adjustmentAmount ?? line.amount) ||
       (receipt && (receipt.decisionId!==source.decisionId || receipt.originalEventId!==source.originalEventId || receipt.currency!==source.currency || receipt.amount!==source.amount))) return bad();
     if(write && (!receipt || receipt.actorId!==result.data.actorUserId || receipt.activeRole!==result.data.activeRole ||
       receipt.eligibleOn!==data?.eligibleOn || receipt.reason!==write.reason || receipt.confirmationId!==data.confirmationId || receipt.decisionId!==data.decisionId)) return bad();
@@ -640,7 +645,7 @@ export const invoiceCsv = {
     policyId: string; inspectedState: 'Exported' | 'Billed/Confirmed'; firstReviewer: {userId: string; role: string};
   }) => {
     if (!hasRatePermission('commercial.invoice_drafts.prepare') || !uuid.safeParse(batchId).success) return bad();
-    const path = '/batches/' + batchId + '/lines/' + request.lineId + '/reversal-request/review';
+    const path = reviewPath(batchId,request) + '/review';
     if (submission) {
       const raw = await call('POST', path, c, 'view', {
         requestId: request.id, policyId: submission.policyId, inspectedState: submission.inspectedState,
@@ -659,22 +664,29 @@ export const invoiceCsv = {
   },
   reversalReviewRoute: async (batchId: string, request: InvoiceLineReversalRequest, c: RateContext) => {
     if (!hasRatePermission('commercial.invoice_drafts.prepare') || !uuid.safeParse(batchId).success) return bad();
-    const raw = await call('GET', '/batches/' + batchId + '/lines/' + request.lineId + '/reversal-request/review-route', c, 'view');
+    const raw = await call('GET', reviewPath(batchId,request) + '/review-route', c, 'view');
     const out = z.object({ ...envelope, requestId: uuid, lineId: uuid, route: reviewRoute }).strict().safeParse(raw);
     if (!out.success || out.data.requestId !== request.id || out.data.lineId !== request.lineId) return bad();
     return out.data.route;
   },
   lineReversal: async (batchId: string, lineId: string, artifactId: string, c: RateContext, write?: {
-    sha256: string; inspectedState: 'Exported' | 'Billed/Confirmed'; reason: string;
+    sha256: string; inspectedState: 'Exported' | 'Billed/Confirmed'; reason: string; adjustment?: { id:string; kind:'Discount'|'Write-off'; amount:string };
   }) => {
     if (!hasRatePermission('commercial.invoice_drafts.prepare') || ![batchId, lineId, artifactId].every(v => uuid.safeParse(v).success)) return bad();
-    const raw = await call(write ? 'POST' : 'GET', '/batches/' + batchId + '/lines/' + lineId + '/reversal-request',
-      c, 'view', write ? { ...write, artifactId } : undefined);
-    const out = z.object({ ...envelope, request: reversalRequest.nullable(), ...(write ? { replayed: z.boolean() } : {}) }).strict().safeParse(raw);
+    const { adjustment, ...data } = write ?? {};
+    const path = '/batches/' + batchId + '/lines/' + lineId + (adjustment ? '/adjustments/' + uuid.parse(adjustment.id) : '/reversal-request');
+    const raw = await call(write ? 'POST' : 'GET', path, c, 'view', write ? {
+      ...data, artifactId, ...(adjustment ? {kind:adjustment.kind,amount:adjustment.amount} : {}),
+    } : undefined);
+    const chargeBalance = z.object({ currency: z.string().regex(/^[A-Z]{3}$/), remaining: money }).strict();
+    const out = z.object({ ...envelope, request: reversalRequest.nullable(), chargeBalance: chargeBalance.nullable().optional(), adjustments:z.array(reversalRequest).optional(), ...(write ? { replayed: z.boolean() } : {}) }).strict().safeParse(raw);
     if (!out.success || (out.data.request && (out.data.request.lineId !== lineId || out.data.request.artifactId !== artifactId))) return bad();
     if (write && (!out.data.request || out.data.request.reason !== write.reason || out.data.request.actorId !== out.data.actorUserId ||
       out.data.request.activeRole !== out.data.activeRole || Boolean(out.data.request.confirmationId) !== (write.inspectedState === 'Billed/Confirmed'))) return bad();
-    return out.data.request;
+    if (adjustment && (out.data.request?.id !== adjustment.id || out.data.request.kind !== adjustment.kind || out.data.request.amount !== adjustment.amount)) return bad();
+    const adjustments = out.data.adjustments ?? [];
+    if (adjustments.some(x => !x.kind || !x.amount || x.lineId !== lineId || x.artifactId !== artifactId)) return bad();
+    return { request: out.data.request, chargeBalance: out.data.chargeBalance, adjustments };
   },
   source: async (batchId: string, c: RateContext | null) => {
     if (!uuid.safeParse(batchId).success) return bad();

@@ -1,6 +1,6 @@
 const chargePopulation = `where ev.organization_id=$1 and ev.legal_entity_id=$2 and ($3::text is null or ev.engagement_id=$3)
         and ($5::date is null or ev.eligible_on between $5 and $6)
-        and (ev.source_type=$4 or (ev.source_type='FULL_LINE_REVERSAL' and exists(
+        and (ev.source_type=$4 or (ev.source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT') and exists(
           select 1 from billing_eligibility_events original where original.id=ev.reverses_event_id
             and original.source_type=$4 and original.organization_id=ev.organization_id
             and original.legal_entity_id=ev.legal_entity_id and original.engagement_id=ev.engagement_id
@@ -34,9 +34,9 @@ export async function readChargeBalances(client, scope, engagementId, source, mo
       ${chargePopulation}
     )
     select currency,status,count(*) filter(where source_type=$4)::int as charges,
-      count(*) filter(where source_type='FULL_LINE_REVERSAL')::int as credits,
+      count(*) filter(where source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT'))::int as credits,
       trim_scale(coalesce(sum(amount) filter(where source_type=$4),0))::text as gross,
-      trim_scale(coalesce(sum(amount) filter(where source_type='FULL_LINE_REVERSAL'),0))::text as adjustments,
+      trim_scale(coalesce(sum(amount) filter(where source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT')),0))::text as adjustments,
       trim_scale(sum(amount))::text as net
     from register group by currency,status order by currency,case status
       when 'Available' then 1 when 'Reserved' then 2 when 'Exported' then 3 else 4 end`,args);
@@ -90,7 +90,7 @@ export async function readChargeControls(client, scope, engagementId, source, ra
         item.id as item_id, item.version=ev.version as item_matches,
         occ.line_id as occupied, l.id as line_id, l.amount as line_amount,l.currency as line_currency,
         l.event_id=ev.id and l.item_version=item.version and l.billing_evidence=ev.billing_evidence
-          and l.source_type=ev.source_type and l.batch_id=occ.batch_id as line_matches,
+          and l.eligibility_source_type=ev.source_type and l.batch_id=occ.batch_id as line_matches,
         b.id as batch_id,b.currency as batch_currency,
         art.id as artifact_id, art.total=bc.line_total and art.line_count=bc.line_count
           and art.currency=ev.currency and art.sha256=encode(digest(art.payload,'sha256'),'hex') as artifact_matches,
@@ -98,7 +98,7 @@ export async function readChargeControls(client, scope, engagementId, source, ra
           and cf.total=art.total and cf.currency=art.currency as confirmation_matches
       from population ev
       left join lateral ${chargeSources[source]} charge on ev.source_type=$4
-      left join lateral full_line_reversal_source(case when ev.source_type='FULL_LINE_REVERSAL'
+      left join lateral invoice_credit_source(case when ev.source_type in ('FULL_LINE_REVERSAL','CHARGE_ADJUSTMENT')
         then (ev.billing_evidence->>'reviewId')::uuid end) credit on credit.final_decision=ev.reversal_decision_id
         and credit.original_event=ev.reverses_event_id and credit.organization_id=$1
         and credit.legal_entity_id=$2 and credit.engagement_id=ev.engagement_id
@@ -108,7 +108,7 @@ export async function readChargeControls(client, scope, engagementId, source, ra
       left join invoice_draft_lines l on l.id=occ.line_id and l.item_id=item.id
         and l.organization_id=$1 and l.legal_entity_id=$2
       left join invoice_draft_batches b on b.id=occ.batch_id and b.organization_id=$1
-        and b.legal_entity_id=$2 and b.engagement_id=ev.engagement_id and b.source_type=ev.source_type
+        and b.legal_entity_id=$2 and b.engagement_id=ev.engagement_id and b.source_type=l.source_type
         and not exists(select 1 from invoice_draft_cancellations x where x.batch_id=b.id)
       left join batch_controls bc on bc.batch_id=occ.batch_id
       left join invoice_csv_artifacts art on art.batch_id=occ.batch_id and art.organization_id=$1 and art.legal_entity_id=$2
@@ -130,7 +130,7 @@ export async function readChargeControls(client, scope, engagementId, source, ra
     union all
     select ev.currency,'Released historical line',case when l.currency=ev.currency then l.amount end,
       cancelled.id is not null and l.amount=ev.amount and l.currency=ev.currency
-        and l.event_id=ev.id and l.source_type=ev.source_type and l.billing_evidence=ev.billing_evidence
+        and l.event_id=ev.id and l.eligibility_source_type=ev.source_type and l.billing_evidence=ev.billing_evidence
     from population ev join approved_unbilled_items item on item.event_id=ev.id
       and item.organization_id=$1 and item.legal_entity_id=$2
     join invoice_draft_lines l on l.item_id=item.id and l.item_version=item.version

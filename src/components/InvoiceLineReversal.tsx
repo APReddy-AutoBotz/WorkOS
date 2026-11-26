@@ -9,6 +9,12 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
 }) {
   const [line, select] = useState(''), [reason, setReason] = useState('');
   const [receipt, setReceipt] = useState<InvoiceLineReversalRequest | null | undefined>();
+  const [adjustments, setAdjustments] = useState<InvoiceLineReversalRequest[]>([]);
+  const [kind, setKind] = useState<'Discount'|'Write-off'>('Discount');
+  const [amount, setAmount] = useState('');
+  const [adjustmentId, setAdjustmentId] = useState(() => crypto.randomUUID());
+  const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [balance, setBalance] = useState<{ currency: string; remaining: string } | null>();
   const [route, setRoute] = useState<InvoiceReversalRoute | null>(null);
   const [review, setReview] = useState<SubmittedReversalReview | null>(null);
   const [canSubmit, setCanSubmit] = useState(false);
@@ -36,7 +42,11 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
     setReview(null);
     setCanSubmit(false);
     setReceipt(undefined);
-    setReceipt(await invoiceCsv.lineReversal(source.id, line, artifact.id, c));
+    setBalance(undefined);
+    const result = await invoiceCsv.lineReversal(source.id, line, artifact.id, c);
+    setReceipt(result.request);
+    setBalance(result.chargeBalance);
+    setAdjustments(result.adjustments);
   });
   const submit = () => void run(async c => {
     setRoute(null);
@@ -46,58 +56,83 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
     const result = await invoiceCsv.lineReversal(source.id, line, artifact.id, c, {
       sha256: artifact.sha256, inspectedState: state, reason: reason.trim(),
     });
-    setReceipt(result);
+    setReceipt(result.request);
     setReason('');
   });
+  const choose = (request: InvoiceLineReversalRequest) => {
+    setReceipt(request); setRoute(null); setReview(null); setCanSubmit(false);
+  };
+  const requestAdjustment = () => void run(async c => {
+    const canonicalAmount = amount.includes('.') ? amount.replace(/0+$/, '').replace(/\.$/, '') : amount;
+    const result = await invoiceCsv.lineReversal(source.id,line,artifact.id,c,{
+      sha256:artifact.sha256, inspectedState:state, reason:adjustmentReason.trim(),
+      adjustment:{ id:adjustmentId, kind, amount:canonicalAmount },
+    });
+    if (result.request) {
+      choose(result.request);
+      const saved = result.request;
+      setAdjustments(items => [...items.filter(item => item.id !== saved.id),saved]);
+      setAdjustmentId(crypto.randomUUID()); setAmount(''); setAdjustmentReason('');
+    }
+  });
   return <fieldset disabled={disabled} className="space-y-2">
-    <legend>Full line reversal request</legend>
+    <legend>Original charge adjustments</legend>
     <p>A request records the reason for finance review. The exported amount and line reservation stay in place.</p>
     <label>Exported line to review
-      <select value={line} onChange={e => {select(e.target.value); setReview(null); setCanSubmit(false); setRoute(null); setReceipt(undefined); setReason('');}}>
+      <select value={line} onChange={e => {select(e.target.value); setReview(null); setCanSubmit(false); setRoute(null); setReceipt(undefined); setReason(''); setBalance(undefined); setAdjustments([]); setAmount(''); setAdjustmentReason(''); setAdjustmentId(crypto.randomUUID());}}>
         <option value="">Choose an exported line</option>
         {source.lines.map(l => <option key={l.lineId} value={l.lineId}>Line {l.sequence} · {l.currency} {l.amount} · {l.lineId}</option>)}
       </select>
     </label>
     <button type="button" disabled={!line} onClick={inspect}>Check reversal request</button>
+    {balance && <p>Remaining on original charge at inspection: {balance.currency} {balance.remaining}</p>}
+    {balance && balance.remaining !== '0' && <fieldset>
+      <legend>Adjust original charge</legend>
+      <label>Adjustment type <select value={kind} onChange={e => setKind(e.target.value as typeof kind)}><option>Discount</option><option>Write-off</option></select></label>
+      <label>Adjustment amount ({balance.currency}) <input inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)}/></label>
+      <label>Adjustment reason <input value={adjustmentReason} maxLength={1000} onChange={e => setAdjustmentReason(e.target.value)}/></label>
+      <button type="button" disabled={!/^(?:0|[1-9]\d{0,15})(?:\.\d{1,4})?$/.test(amount) || !/[1-9]/.test(amount) || adjustmentReason.trim().length<3} onClick={requestAdjustment}>Request adjustment</button>
+    </fieldset>}
+    {adjustments.map(item => <button type="button" key={item.id} onClick={() => choose(item)}>{item.kind} {balance?.currency} {item.amount} · {item.reason}</button>)}
     {receipt === null && <>
       <label>Full reversal reason <input value={reason} maxLength={1000} onChange={e => setReason(e.target.value)} /></label>
       <button type="button" disabled={reason.trim().length < 3} onClick={submit}>Request full line reversal</button>
     </>}
     {receipt && <p role="status">Reversal requested · {receipt.id} · {receipt.createdAt} · {receipt.reason}</p>}
-    {receipt && <button type="button" onClick={inspectRoute}>Check reversal reviewers</button>}
-    {receipt && review && <p role="status">Submitted reversal review {review.id} · {review.state ?? 'Pending'} · policy {review.policyId} · first reviewer {review.reviewerRole} {review.reviewerId}</p>}
-    {review?.state === 'Approved' && receipt && <CorrectiveEligibility key={review.id} batch={source} lineId={line} requestId={receipt.id} reviewId={review.id} run={run}/>}
-    {route?.status === 'NO_REVERSAL_POLICY' && <p>No effective policy enables full-line reversal review.</p>}
+    {receipt && <button type="button" onClick={inspectRoute}>{receipt.kind ? 'Check adjustment reviewers' : 'Check reversal reviewers'}</button>}
+    {receipt && review && <p role="status">Submitted {receipt.kind ? 'adjustment' : 'reversal'} review {review.id} · {review.state ?? 'Pending'} · policy {review.policyId} · first reviewer {review.reviewerRole} {review.reviewerId}</p>}
+    {review?.state === 'Approved' && receipt && <CorrectiveEligibility adjustmentAmount={receipt.amount} key={review.id} batch={source} lineId={line} requestId={receipt.id} reviewId={review.id} run={run}/>}
+    {route?.status === 'NO_REVERSAL_POLICY' && <p>No effective policy enables {receipt?.kind ? 'discount and write-off' : 'full-line reversal'} review.</p>}
     {route?.status === 'REVIEWERS_UNAVAILABLE' && <p>The named reviewers do not meet current access or independence requirements.</p>}
     {route?.status === 'AVAILABLE' && <div>
       <p>Review policy {route.policyId} · effective {route.effectiveFrom}</p>
-      {canSubmit && <button type="button" onClick={submitReview}>Submit reversal for independent review</button>}
+      {canSubmit && <button type="button" onClick={submitReview}>{receipt?.kind ? 'Submit adjustment for independent review' : 'Submit reversal for independent review'}</button>}
       <ol>{route.stages.map(stage => <li key={stage.userId}>{stage.role} · {stage.userId}</li>)}</ol>
     </div>}
   </fieldset>;
 }
 
 
-function CorrectiveEligibility({batch,lineId,requestId,reviewId,run}:{
-  key?:string;batch:InvoiceCsvSource;lineId:string;requestId:string;reviewId:string;
+function CorrectiveEligibility({batch,lineId,requestId,reviewId,run,adjustmentAmount}:{
+  key?:string;adjustmentAmount?:string;batch:InvoiceCsvSource;lineId:string;requestId:string;reviewId:string;
   run:(fn:(context:RateContext)=>Promise<void>)=>Promise<void>;
 }){
   const [credit,setCredit]=useState<ReversalCredit|null>(null);
   const [reason,setReason]=useState('');
   const inspect=()=>void run(async c=>{
     setCredit(null);setReason('');
-    setCredit(await invoiceCsv.reversalCredit(batch,lineId,requestId,reviewId,c));
+    setCredit(await invoiceCsv.reversalCredit(batch,lineId,requestId,reviewId,c,undefined,adjustmentAmount));
   });
   const issue=()=>credit && void run(async c=>{
     const write={credit,reason:reason.trim()};
     setCredit(null);
-    setCredit(await invoiceCsv.reversalCredit(batch,lineId,requestId,reviewId,c,write));
+    setCredit(await invoiceCsv.reversalCredit(batch,lineId,requestId,reviewId,c,write,adjustmentAmount));
     setReason('');
   });
   return <section aria-label="Corrective billing eligibility">
     <button type="button" onClick={inspect}>Inspect corrective billing eligibility</button>
     {credit && <div>
-      <p>Full reversal · {credit.source.currency} {credit.source.amount} · original event {credit.source.originalEventId}</p>
+      <p>{adjustmentAmount ? 'Approved adjustment' : 'Full reversal'} · {credit.source.currency} {credit.source.amount} · original event {credit.source.originalEventId}</p>
       {credit.receipt ? <p role="status">Approved-unbilled credit {credit.receipt.itemId} · eligibility date {credit.receipt.eligibleOn} · {credit.receipt.reason}</p>
         : <><p>UTC eligibility date {credit.eligibleOn}</p>
           {hasRatePermission('commercial.reversal_eligibility.create') && <>

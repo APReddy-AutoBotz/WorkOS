@@ -365,12 +365,12 @@ const InvoiceCsvEngagement = ({
         {credits && (credits.length ? <table>
           <caption>Issued credits for this engagement</caption>
           <thead><tr><th>Eligibility date</th><th>Credit</th><th>Original batch</th><th>Original line</th><th>Register item</th><th>Correction batch</th></tr></thead>
-          <tbody>{credits.map(row=><tr key={row.itemId}><td>{row.eligibleOn}</td><td>{row.currency} {row.amount}</td>
+          <tbody>{credits.map(row=><tr key={row.itemId}><td>{row.eligibleOn}</td><td>{row.kind} {row.currency} {row.amount}</td>
             <td>{row.batchId}</td><td>{row.lineId}</td><td><span>{row.itemId}</span>
               <details><summary>Credit evidence</summary><dl>
                 <dt>Eligibility event</dt><dd>{row.eventId}</dd>
                 <dt>Original eligibility event</dt><dd>{row.originalEventId}</dd>
-                <dt>Final reversal decision</dt><dd>{row.decisionId}</dd>
+                <dt>Final credit decision</dt><dd>{row.decisionId}</dd>
               </dl></details></td><td>{row.correctionBatchId ? <>{row.correctionState} · {row.correctionBatchId}
               <button type="button" disabled={busy || !!pending} onClick={()=>void run(async c=>{
                 setEvidence(null);
@@ -583,7 +583,7 @@ function ExportedCredits({original,run,disabled}:{key?:string;original:InvoiceCs
   });
   return <section aria-label="Exported credits against original lines">
     <button type="button" disabled={disabled} onClick={()=>load(null)}>Check exported credits</button>
-    {links && (links.length ? <ul>{links.map(l=><li key={l.lineId}>{l.currency} {l.amount} · original line {l.originalLineId}
+    {links && (links.length ? <ul>{links.map(l=><li key={l.lineId}>{l.kind && l.kind+' '}{l.currency} {l.amount} · original line {l.originalLineId}
       {' · credit batch '}{l.batchId} · credit artifact {l.artifactId} · SHA-256 {l.sha256} · {l.applicationAttested ? 'Downstream application attested' : 'Awaiting downstream attestation'}</li>)}</ul> : <p>No exported credits on this page.</p>)}
     {next && <button type="button" disabled={disabled} onClick={()=>load(next)}>Next exported credits</button>}
   </section>;
