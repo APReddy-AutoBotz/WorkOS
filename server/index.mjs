@@ -4829,8 +4829,9 @@ app.post('/api/role-definitions', requireDatabase, requireAuth, requirePermissio
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query('begin');
     // Serialize first-time saves as well as updates so the audit predecessor is exact.
     await client.query("select pg_advisory_xact_lock(hashtextextended('role-definition:' || $1, 0))", [parsed.data.id]);
@@ -4859,11 +4860,11 @@ app.post('/api/role-definitions', requireDatabase, requireAuth, requirePermissio
     await client.query('commit');
     res.json(result.rows);
   } catch (error) {
-    await client.query('rollback');
+    await client?.query('rollback').catch(() => {});
     console.error(error);
     res.status(500).json({error: 'Database operation failed'});
   } finally {
-    client.release();
+    client?.release();
   }
 });
 app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePermission('settings.manage'), async (req, res) => {
