@@ -9,6 +9,14 @@ export const approvalUuid = v => typeof v === 'string' && /^[a-f0-9]{8}-[a-f0-9]
 export const approvalHash = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 export const approvalText = (v, max = 200) => typeof v === 'string' && v.length > 0 && v.length <= max && v === v.trim() && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(v);
 export const validApprovalTemplate = t => approvalKeys(t, ['key', 'subject', 'body']) && (APPROVAL_EVENT_KEYS.includes(t.key) || t.key===OVERDUE_KEY) && approvalText(t.subject, 200) && approvalText(t.body, 8000) && [t.subject, t.body].every(s => { const stripped = s.replace(/\{\{([a-zA-Z]+)\}\}/g, (_m, k) => APPROVAL_TEMPLATE_VARIABLES.includes(k) ? '' : 'INVALID_TEMPLATE_VARIABLE'); return !/[{}]/.test(stripped) && !stripped.includes('INVALID_TEMPLATE_VARIABLE'); });
+function validOverdueTemplate(template) {
+    if (!validApprovalTemplate(template) || template.key !== OVERDUE_KEY) return false;
+    const rendered = renderApprovalTemplate(template, {
+        workerCode: 'W'.repeat(200), sourceRef: 'timesheet/' + 'S'.repeat(200),
+        stageNumber: '10', decisionReason: ''
+    });
+    return approvalText(rendered.title, 1200) && approvalText(rendered.body, 12000);
+}
 export const validWorkApprovalPolicy = d => {
     try {
         const keys = ['entityType', 'workerIds', 'stages', 'locale', 'templates', 'completionInApp'];
@@ -26,7 +34,7 @@ export const validWorkApprovalPolicy = d => {
             keys.push('escalationUserId');
         }
         if (Object.hasOwn(d,'overdueTemplate')) {
-            if (!Object.hasOwn(d,'stageDueMinutes') || d.overdueTemplate?.key!==OVERDUE_KEY || !validApprovalTemplate(d.overdueTemplate)) return false;
+            if (!Object.hasOwn(d,'stageDueMinutes') || !validOverdueTemplate(d.overdueTemplate)) return false;
             keys.push('overdueTemplate');
         }
         return approvalKeys(d, keys) && d.entityType === 'Timesheet' && Array.isArray(d.workerIds) && d.workerIds.length >= 0 && d.workerIds.length <= 200 && d.workerIds.every((v, i) => approvalText(v) && (!i || compareCapabilityIds(d.workerIds[i - 1], v) < 0)) && Array.isArray(d.stages) && d.stages.length >= 1 && d.stages.length <= 10 && d.stages.every(s => approvalKeys(s, ['userId', 'role']) && approvalUuid(s.userId) && approvalText(s.role, 100)) && typeof d.locale === 'string' && Intl.getCanonicalLocales(d.locale)[0] === d.locale && Array.isArray(d.templates) && d.templates.length === 3 && d.templates.every(t=>APPROVAL_EVENT_KEYS.includes(t.key) && validApprovalTemplate(t)) && new Set(d.templates.map(t => t.key)).size === 3 && typeof d.completionInApp === 'boolean';
