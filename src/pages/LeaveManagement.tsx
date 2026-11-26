@@ -910,7 +910,10 @@ const LeaveRequestTable = ({
                 <td className="py-3 pr-4 text-body">{request.leaveTypeName || request.leaveTypeId}</td>
                 <td className="py-3 pr-4 text-body">{request.startDate} to {request.endDate}</td>
                 <td className="py-3 pr-4 font-black text-heading">{request.totalDays.toFixed(1)}</td>
-                <td className="py-3 pr-4"><Badge variant={statusVariant(request.status)}>{request.status}</Badge></td>
+                <td className="py-3 pr-4">
+                  <Badge variant={statusVariant(request.status)}>{request.status}</Badge>
+                  {request.status === 'Rejected' && request.comments && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-body">{request.comments}</p>}
+                </td>
                 {hasActions && (
                   <td className="py-3 text-right">
                     <div className="flex justify-end gap-2">
@@ -947,8 +950,14 @@ export const TeamLeaveCalendar = () => {
   const { state, loading, notice, setNotice, refresh } = useLeaveViewState();
 
   const decide = async (request: LeaveRequest, status: 'Approved' | 'Rejected') => {
+    const reason = status === 'Rejected' ? window.prompt('Enter the reason for rejecting this leave request.') : undefined;
+    if (reason === null) return;
+    if (reason !== undefined && !reason.trim()) {
+      setNotice('Enter a rejection reason before submitting the decision.');
+      return;
+    }
     try {
-      await leaveService.updateRequestStatus(request.id, status, status === 'Rejected' ? 'Rejected from team calendar.' : undefined);
+      await leaveService.updateRequestStatus(request.id, status, reason?.trim());
       setNotice(`${status} leave request for ${request.employeeName || request.employeeId}.`);
       await refresh();
     } catch (error) {

@@ -1,5 +1,9 @@
 # WorkOS Release and Operations Runbook
 
+### Rejecting a request
+
+In the shared approval inbox or team leave calendar, select Reject and enter the reason for the requester. Cancel the prompt to leave the request pending. The recorded reason appears alongside the rejected status in Approval History and on the worker’s leave request. For generic approvals opened through a Teams link, enter a decision comment before selecting Execute Action. A missing reason leaves the link available for retry.
+
 ## Interpreting forecast allocation pressure
 
 For each checkpoint, count the eligible workers and multiply by 100 to obtain capacity in allocation percentage points. Compare this with active allocations for those workers on active or proposed projects in term that day. The project indicator counts in-term projects below 100 allocated points at the final checkpoint. Diagnosing an actual staffing shortage requires the project's demand evidence. A zero eligible roster leaves pressure unavailable. Reverting the reporting change requires no migration.
