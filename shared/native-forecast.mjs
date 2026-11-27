@@ -1,3 +1,4 @@
+import {multiplyCapacity} from './worker-capacity.mjs';
 import {canonicalHours,sumHours,compareHours} from './work-hours.mjs';
 import {validCapabilityDate,compareCapabilityIds} from './workforce-capabilities.mjs';
 export const NATIVE_FORECAST_VERSION='native-forecast/1';
@@ -18,6 +19,12 @@ export const calculateNativeForecast=({employeeId,startsOn,endsOn,months,thresho
  const available=points.every(p=>p.status==='available'),endings=assignments===null?null:assignments.filter(a=>a.status==='Active'&&a.endsOn>=startsOn&&a.endsOn<=endsOn).map(a=>({assignmentId:a.id,endsOn:a.endsOn})).sort((a,b)=>a.endsOn.localeCompare(b.endsOn)||compareCapabilityIds(a.assignmentId,b.assignmentId));
  return{calculationVersion:NATIVE_FORECAST_VERSION,employeeId,startsOn,endsOn,months,quantityUnit:'percentage',inclusionRule:'recorded-active-dated-project/1',physicalUtilization:null,physicalReason:'PERCENTAGE_HOURS_BASIS_UNSPECIFIED',thresholds:validNativeThresholds(thresholds)?thresholds:null,assignments,sourceReason:sourceReason??null,points,status:available?'available':points.every(p=>p.status==='not_applicable')?'not_applicable':'unavailable',peakPercentageExact:available?points.reduce((p,c)=>compareHours(c.declaredPercentageExact,p)>0?c.declaredPercentageExact:p,'0'):null,endings};
 };
+export const plannedCheckpointHours = point => {
+ const available = point.capacity.totals.availableHoursExact;
+ if (point.capacity.status !== 'available' || available === null || point.declaredPercentageExact === null) return null;
+ return multiplyCapacity(available, point.declaredPercentageExact, true);
+};
+
 export const readNativeForecast=(v,id,from,to,months)=>{
  const bad=()=>{throw TypeError('Native forecast acknowledgement is invalid. Reload explicitly.');};
  if(!keys(v,['calculationVersion','employeeId','startsOn','endsOn','months','quantityUnit','inclusionRule','physicalUtilization','physicalReason','thresholds','assignments','sourceReason','points','status','peakPercentageExact','endings','sourceToken','observedAt'])||v.calculationVersion!==NATIVE_FORECAST_VERSION||!text(v.employeeId)||id!==undefined&&v.employeeId!==id||!validNativeWindow(v.startsOn,v.endsOn,v.months)||from!==undefined&&v.startsOn!==from||to!==undefined&&v.endsOn!==to||months!==undefined&&v.months!==months||!hash(v.sourceToken)||typeof v.observedAt!=='string'||!/^\d{4}-\d\d-\d\dT.*Z$/.test(v.observedAt)||Number.isNaN(Date.parse(v.observedAt))||v.thresholds!==null&&!validNativeThresholds(v.thresholds)||![null,'SCOPED_SOURCE_UNAVAILABLE','FORECAST_SOURCE_LIMIT'].includes(v.sourceReason)||!Array.isArray(v.points)||v.points.length!==v.months+1)bad();
