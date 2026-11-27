@@ -132,6 +132,10 @@ app.post('/api/approval-delegations', requireDatabase, requireAuth, requirePermi
       insert into approval_delegations (id, delegator_id, delegate_id, role, start_date, end_date, status, reason)
       values (coalesce($1, 'approval-delegation-' || gen_random_uuid()::text), $2, $3, $4, $5, $6, $7, $8)
       on conflict (id) do update set
+        granted_at = case when (approval_delegations.delegate_id, approval_delegations.role,
+          approval_delegations.start_date, approval_delegations.end_date, approval_delegations.status)
+          is distinct from (excluded.delegate_id, excluded.role, excluded.start_date, excluded.end_date, excluded.status)
+          then clock_timestamp() else approval_delegations.granted_at end,
         delegate_id = excluded.delegate_id,
         role = excluded.role,
         start_date = excluded.start_date,

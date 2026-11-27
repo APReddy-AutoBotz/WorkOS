@@ -158,6 +158,7 @@ const expected = [
   '129_wos02_module_release_decisions',
   '130_wos07_risk_recipient_inbox_access',
   '131_wos06_fixed_fee_po_commitments',
+  '132_wos05_prospective_delegations',
   '133_wos04_fixed_assignment_hours',
 ];
 

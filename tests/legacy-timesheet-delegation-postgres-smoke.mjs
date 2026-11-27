@@ -11,14 +11,15 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  await pool.query("insert into user_roles(user_id,role_id)select $1,id from roles where name='TeamLead' on conflict do nothing",[ids.reader.id]);
  await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead','approvals.view',true),('TeamLead','timesheets.approve',false) on conflict(role_name,permission_key)do update set enabled=excluded.enabled");
  await pool.query("insert into user_permission_grants(user_id,permission_key)values($1,'timesheets.approve')",[ids.denied.id]);
- await pool.query(`insert into approval_delegations(delegator_id,delegate_id,role,start_date,end_date,status)
-  values($1,'synthetic-work-delegate','TeamLead',current_date,current_date,'Active')`,[f.ownerId]);
  const sheet=async (worker,date=today)=>{
   const row=(await pool.query(`insert into timesheets(employee_id,week_ending,status,total_hours,billable_hours,organization_id,legal_entity_id)
    values($1,$2,'Submitted',2,2,$3,$4) returning *`,[worker,date,f.organizationId,f.legalEntityId])).rows[0];
   await pool.query("insert into timesheet_entries(timesheet_id,project_id,work_type,work_date,hours,remark,billable)values($1,$2,'Project Work',$3,2,'Synthetic work',true)",[row.id,f.projectId,date]);
   row.approval=(await pool.query("insert into approval_records(entity_type,entity_id,subject_employee_id,requester_id,requester_name,status)values('Timesheet',$1,$2,$2,'Synthetic worker','Pending')returning id",[row.id,worker])).rows[0].id;return row;
  };
+ const preGrant=await sheet('synthetic-work-subject','2026-01-04');
+ await pool.query(`insert into approval_delegations(delegator_id,delegate_id,role,start_date,end_date,status)
+  values($1,'synthetic-work-delegate','TeamLead',current_date,current_date,'Active')`,[f.ownerId]);
  const report=await sheet('synthetic-work-subject'),own=await sheet(f.ownerId);
  const snapshot=async()=>Object.fromEntries(await Promise.all(['timesheets','timesheet_entries','approval_records','work_submission_decisions','audit_logs','notification_events'].map(async table=>[table,(await pool.query(`select to_jsonb(t) v from ${table} t order by to_jsonb(t)::text`)).rows])));
  await withCommercialApi({databaseUrl,identities:ids},async({request})=>{
@@ -26,6 +27,11 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const before=await snapshot();
   const revoked=await decide(report);
   await pool.query("insert into user_permission_grants(user_id,permission_key)values($1,'timesheets.approve')",[ids.reader.id]);
+  const inbox=await request('/api/approvals',{identity:ids.denied});
+  assert.equal(inbox.status,200);
+  assert.ok(inbox.body.some(row=>row.id===report.approval));
+  assert.ok(!inbox.body.some(row=>row.id===preGrant.approval));
+  assert.equal((await decide(preGrant)).status,403,'A new delegation cannot decide a pending instance created before the grant');
   const directSelf=await decide(own,{...ids.reader,role:'TeamLead'});
   const delegatedSelf=await decide(own);
   assert.deepEqual({revoked:revoked.status,directSelf:directSelf.status,delegatedSelf:delegatedSelf.status},{revoked:403,directSelf:403,delegatedSelf:403},'Delegation cannot restore revoked source permission or bypass owner self-approval');

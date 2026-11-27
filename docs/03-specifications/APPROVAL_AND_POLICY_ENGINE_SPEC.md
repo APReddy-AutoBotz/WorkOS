@@ -31,7 +31,7 @@ Generic `Approved → Reopened` is available only when the governing source-type
 
 ## Delegation
 
-Delegations are time-bound, role/entity scoped and cannot exceed the delegator's current permission or data scope. Revocation and leaver changes invalidate future use.
+Delegations are time-bound, role/entity scoped and cannot exceed the delegator's current permission or data scope. Revocation and leaver changes invalidate future use. Under WOS-APR-004 a new grant applies only to approval instances created after the grant. A pending instance stays outside that grant across stage changes. Changing the delegate, role, effective dates or active status starts a new grant boundary. Editing the reason preserves the boundary.
 
 ## Period policy
 
