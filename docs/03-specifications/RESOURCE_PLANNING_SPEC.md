@@ -14,6 +14,8 @@ Workers include type/status, organization structure, manager, dates, utilization
 
 Demand records define engagement/project, role/skill, date range, required percentage/hours and status. Assignments link worker, demand/project, role, percentage/planned hours, dates, billability, treatment and status.
 
+WOS-RES-004 uses available capacity after approved leave for converting percentages to hours and weighting fixed totals across dates. The live percentage forecast shows planned hours for each checkpoint. Its retained native-percentage exports preserve the original observations.
+
 Assignment dates and overlap are server validated. Warning/block thresholds are configurable. Material changes may create approval records.
 
 ## Utilization
