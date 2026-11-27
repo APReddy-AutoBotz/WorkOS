@@ -112,7 +112,7 @@ const cleanEnvironment = (overrides = {}) => {
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
     IDENTITY_DISCOVERY_RECHECK_MS: '5000',
     // Allow the bounded set of positive and negative callbacks from the test provider.
-    LOGIN_RATE_LIMIT: '14',
+    LOGIN_RATE_LIMIT: '15',
     API_SESSION_TTL_HOURS: '8',
     EMAIL_PROVIDER: 'mock',
     TEAMS_PROVIDER: 'mock',
