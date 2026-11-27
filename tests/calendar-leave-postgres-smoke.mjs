@@ -12,12 +12,16 @@ await withCommercialDatabase(async ({pool}) => withPreCalendarLeaveMigrations(as
   await seedActualWork(pool);
   await pool.query(`insert into leave_requests(id,employee_id,leave_type_id,start_date,end_date,total_days,status,reason)
     values('synthetic-before061',$1,'leave-type-annual','2020-01-01','2020-01-02',0.5,'Approved','Synthetic existing ambiguous legacy source')`, [f.ownerId]);
+  await pool.query(`insert into approval_delegations(id,delegator_id,delegate_id,role,start_date,end_date,updated_at)
+    values('synthetic-prior-grant',$1,$2,'TeamLead',current_date,current_date,'2020-05-01T12:34:56Z')`, [f.ownerId,f.otherOwnerId]);
   const keep = ['employees','leave_requests','leave_balances','approval_records','role_permissions','worker_capacity_versions',
     'worker_capacity_evidence','actual_work_evidence','timesheets','timesheet_entries','work_submission_evidence'];
   const snapshot = async () => Object.fromEntries(await Promise.all(keep.map(async t => [t, await table(pool,t)])));
   const before = await snapshot();
   for (const row of before.leave_requests) row.value.calendar_evidence_id = null;
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('061_wos04_calendar_leave_intake'));
+  const migratedGrant = await pool.query("select granted_at = updated_at as preserved from approval_delegations where id='synthetic-prior-grant'");
+  assert.equal(migratedGrant.rows[0].preserved, true);
   assert.deepEqual(await table(pool,'leave_calendar_evidence'),[]);
   const upgraded = await snapshot();
   assertReleaseGrantUpgrade(before.role_permissions.map(row => row.value), upgraded.role_permissions.map(row => row.value));

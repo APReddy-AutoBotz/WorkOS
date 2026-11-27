@@ -3476,11 +3476,11 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
       return;
     }
 
-    const scopeParams = [approval.subject_employee_id];
+    const scopeParams = [approval.id];
     const scoped = (await client.query(`
       select e.name as subject_employee_name
-      from employees e
-      where e.id = $1 and ${buildApprovalScopeWhere(req, scopeParams)}
+      from approval_records ar join employees e on e.id=ar.subject_employee_id
+      where ar.id = $1 and ${buildApprovalScopeWhere(req, scopeParams)}
       limit 1
     `, scopeParams)).rows[0];
     if (!scoped) {
@@ -3509,9 +3509,9 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
         return;
       }
       if (previous.employee_id !== approval.subject_employee_id) { await client.query('rollback'); res.status(409).json({error:'Approval does not match the timesheet worker'}); return; }
-      const decisionParams = [previous.employee_id];
+      const decisionParams = [approval.id];
       const decisionScope = legacyApprovalScope(req, decisionParams, {isGlobalRole, buildEmployeeScopeWhere, timesheetId:previous.id});
-      if (!(await client.query(`select e.id from employees e where e.id=$1 and ${decisionScope}`, decisionParams)).rowCount) {
+      if (!(await client.query(`select e.id from approval_records ar join employees e on e.id=ar.subject_employee_id where ar.id=$1 and ${decisionScope}`, decisionParams)).rowCount) {
         await client.query('rollback'); res.status(403).json({error:'Current timesheet decision authority is unavailable'}); return;
       }
       await assertReportingPeriodAllows(client, {

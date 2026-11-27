@@ -33,11 +33,13 @@ export const assertIndependentLeaveDecision = async (client, req, leave, buildEm
       and os.organization_id=$3 and os.legal_entity_id=$4
     where ad.delegate_id=$2 and ad.role=$5 and ad.status='Active'
       and current_date between ad.start_date and ad.end_date
+      and exists (select 1 from approval_records ar where ar.entity_type='LeaveRequest'
+        and ar.entity_id=$6 and ar.subject_employee_id=target.id and ar.created_at > coalesce((to_jsonb(ad)->>'granted_at')::timestamptz, ad.updated_at))
       and target.organization_id=$3 and target.legal_entity_id=$4
       and delegator.organization_id=$3 and delegator.legal_entity_id=$4
       and delegate.organization_id=$3 and delegate.legal_entity_id=$4
     order by ad.id for share of ad,delegator,delegate,target,u,ur,r,os`,
-  [leave.employee_id, worker.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId, req.user.activeRole])).rows : [];
+  [leave.employee_id, worker.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId, req.user.activeRole, leave.id])).rows : [];
   const authorizedDelegators = new Set();
   for (const delegation of delegations) {
     if (!(await getEffectivePermissions(client, delegation.user_id, req.user.activeRole)).includes('leave.approve')) continue;
