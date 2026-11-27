@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {createFinanceExportProvider} from '../server/modules/invoice-export/finance-provider.mjs';
 
@@ -13,7 +14,7 @@ for (const method of ['deliver', 'lookup']) {
   let response;
   const provider = createFinanceExportProvider({
     endpoint: 'https://finance.example.invalid/export',
-    token: 'synthetic',
+    token: randomUUID(),
     fetchImpl: async (_url, options) => {
       assert.equal(options.headers['idempotency-key'], operation.operationId);
       return response;
