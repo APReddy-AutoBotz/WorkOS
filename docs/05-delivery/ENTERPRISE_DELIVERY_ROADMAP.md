@@ -1,6 +1,6 @@
 # Enterprise delivery and integration roadmap
 
-Finance provider delivery and receipt lookup enforce a 64 KiB response limit. An unreadable receipt leaves the reservation available for reconciliation with the original operation ID.
+Invoice inspection during a populated upgrade discovers whether provider tables are installed before reading reservations. Finance provider delivery and receipt lookup enforce a 64 KiB response limit. An unreadable receipt leaves the reservation available for reconciliation with the original operation ID.
 
 The [launch acceptance checkpoint](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint) lists the weight of each open workstream and the evidence still required for release.
 

@@ -310,7 +310,7 @@ export const createInvoiceCsvRouter = (o) => {
           (await c.query('select id from invoice_csv_artifacts where batch_id=$1', [row.id])).rows[0] ?? null;
       const destination=o.financeProvider?.destinationHash ?? null;
       // The upgrade journey also serves historical schemas from before provider delivery.
-      const supportsProvider=destination || (await c.query("select to_regclass('invoice_provider_exports') is not null supported")).rows[0].supported;
+      const supportsProvider=(await c.query("select to_regclass('invoice_provider_exports') is not null supported")).rows[0].supported;
       const reservation=supportsProvider ? (await c.query(
         `select e.id as "exportId", (select result from invoice_provider_attempts p where p.export_id=e.id
            order by attempted_at desc limit 1) as status,

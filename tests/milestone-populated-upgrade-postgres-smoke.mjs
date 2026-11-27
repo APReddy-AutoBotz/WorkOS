@@ -99,6 +99,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     {
       databaseUrl,
       identities: ids,
+      financeProviderFixture: true,
       onServerError: (s) => {
         for (const m of s.matchAll(/Diagnostic ([A-Z0-9]+) ([a-z_.]+) ([a-z0-9_]+)/gi))
           process.stderr.write('Sanitized diagnostic: ' + m[1] + ' ' + m[2] + ' ' + m[3] + '\n');
@@ -892,6 +893,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         );
         const beforeExport = ok(await request('/api/v1/invoice-csv/batches/' + draft.batch.id));
         assert.equal(beforeExport.batch.state, 'Under Review');
+        assert.equal(beforeExport.batch.provider, undefined);
+        assert.equal(beforeExport.batch.providerReserved, undefined);
         const rejectedEarly = await request('/api/v1/invoice-csv/exports', {
           method: 'POST',
           body: {

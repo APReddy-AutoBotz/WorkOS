@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-INV-006. The populated milestone upgrade journey starts the API with a configured finance adapter and verifies that existing invoice batches can be inspected before provider tables are installed. It checks retained artifact bytes, billing confirmation and occupancy after migration.
+
 WOS-INV-006 and WOS-NFR-REL-004. The finance provider receipt test covers declared and streamed response sizes on delivery and lookup, including retry with the same operation and acceptance at the size limit.
 
 WOS-CORE-004 and WOS-COM-007. The project cost register evaluates effective project dates for the selector and keeps project labels available for historical entries. The fixed-fee PostgreSQL journey checks the start boundary, a prior date and a future incurred date.
