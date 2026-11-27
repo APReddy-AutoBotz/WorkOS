@@ -2,15 +2,19 @@ import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {INVOICE_EXPORT_EVENT_KEYS} from '../../shared/invoice-export-notification.mjs';
 
-export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,batchId,reviewer,preparer,today,reviewerKey,registered,instance,change,grant}) {
-  const csv='/api/v1/invoice-csv',notice='/api/v1/invoice-export-notice-config',schema='workos.invoice-fixed-fee-csv/2';
-  const call=(path,body)=>apiRequest(path,body?{identity:reviewer,method:'POST',body}:{identity:reviewer});
-  const ok=(r,status=201)=>{assert.equal(r.status,status,JSON.stringify(r.body));return r.body;};
-  const configure=(path,body)=>call(notice+path,{...body,expectedOwnerKey:reviewerKey,requestId:randomUUID(),reason:'Synthetic installment notice policy'});
+export async function configureFixedFeeNotices({call,ok,reviewerKey,today,engagementId,reviewer,preparer}) {
+  const configure=(path,body)=>call('/api/v1/invoice-export-notice-config'+path,{...body,expectedOwnerKey:reviewerKey,requestId:randomUUID(),reason:'Synthetic installment notice policy'});
   const route=ok(await configure('/routes',{routeKey:randomUUID(),expectedLatestId:null,label:'Synthetic fixed-fee export',active:true})).route;
   ok(await configure('/policies',{expectedLatestId:null,effectiveFrom:today,definition:{entityType:'InvoiceExport',engagementId,
     financeOwner:{userId:reviewer.id,role:reviewer.role},integrationAdmin:{userId:preparer.id,role:preparer.role},alertRouteId:route.id,
     locale:'en-US',completionInApp:true,templates:INVOICE_EXPORT_EVENT_KEYS.map(key=>({key,subject:'Invoice {{sourceRef}}',body:'Status {{sourceRef}}'}))}}));
+}
+
+export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,batchId,reviewer,preparer,today,reviewerKey,registered,instance,change,grant}) {
+  const csv='/api/v1/invoice-csv',schema='workos.invoice-fixed-fee-csv/2';
+  const call=(path,body)=>apiRequest(path,body?{identity:reviewer,method:'POST',body}:{identity:reviewer});
+  const ok=(r,status=201)=>{assert.equal(r.status,status,JSON.stringify(r.body));return r.body;};
+  await configureFixedFeeNotices({call,ok,reviewerKey,today,engagementId,reviewer,preparer});
   const batch=ok(await call(csv+'/batches/'+batchId),200).batch;
   const command={expectedOwnerKey:reviewerKey,requestId:randomUUID(),batchId,approvalId:instance,finalTransitionId:batch.finalTransitionId,
     lineageHash:batch.lineageHash,schemaVersion:schema,expectedLineCount:1,expectedTotal:'12000',reason:'Verify installment export'};

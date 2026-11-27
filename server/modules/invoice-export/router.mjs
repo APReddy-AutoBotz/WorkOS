@@ -68,6 +68,7 @@ export const createInvoiceCsvRouter = (o) => {
     } catch (e) {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
+      else if (e.code === 'IPD01') res.status(409).json({code:'INVOICE_PROVIDER_PENDING',error:'Reconcile the pending provider delivery before cancellation.'});
       else if (e.code === 'CTM04') res.status(409).json({code:'BILLING_ELIGIBILITY_PERIOD_CLOSED',error:'The UTC eligibility date is outside an open financial period.'});
       else if (
         [
@@ -78,6 +79,7 @@ export const createInvoiceCsvRouter = (o) => {
           'INC02',
           'INC03',
           'IBA01',
+          'IBA02',
           'IBC01',
           'IBC02',
           'CCA02',
@@ -476,7 +478,12 @@ export const createInvoiceCsvRouter = (o) => {
       [exportId,...scope(r)],
     )).rows[0];
     if (!reservation) throw fail(404, 'INVOICE_PROVIDER_UNKNOWN', 'Delivery unavailable.');
-    const { row, review } = await exportBatch(c, r, reservation.batch_id, true);
+    const row=(await c.query(
+      `select b.*,invoice_batch_governed_state(b.id) state from invoice_draft_batches b
+       where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3 and invoice_reserved_batch_visible(b,$4,$5) for update`,
+      [reservation.batch_id,...scope(r),r.user.sub,r.user.activeRole],
+    )).rows[0];
+    if (!row) throw fail(404,'INVOICE_PROVIDER_UNKNOWN','Delivery unavailable.');
     const accepted = (await c.query(
       'select a.* from invoice_provider_attempts p join invoice_csv_artifacts a on a.id=p.artifact_id where p.export_id=$1',
       [exportId],
@@ -484,7 +491,15 @@ export const createInvoiceCsvRouter = (o) => {
     if (accepted) return { ...(await envelope(c,r)), artifact: artifactView(accepted), replayed: true };
     const rejected = await c.query("select 1 from invoice_provider_attempts where export_id=$1 and result='permanently_rejected'", [exportId]);
     if (rejected.rowCount) return { ...(await envelope(c,r)), exportId, deliveryStatus:'permanently_rejected', replayed:true };
-    if (row.state !== 'Approved' || !review?.current || review.id !== reservation.approval_id ||
+    const review=(await c.query(
+      `select i.id,i.lineage_hash,t.id final_transition_id,
+         (invoice_provider_approval_current(b,i) and invoice_provider_actor_valid(b,$2,$3)) current
+       from invoice_draft_batches b join invoice_batch_approval_instances i on i.batch_id=b.id
+       join invoice_batch_approval_transitions t on t.instance_id=i.id
+       where b.id=$1 order by i.sequence desc,t.sequence desc limit 1`,
+      [row.id,r.user.sub,r.user.activeRole],
+    )).rows[0];
+    if (row.state !== 'Approved' || review?.id !== reservation.approval_id ||
         review.final_transition_id !== reservation.final_transition_id || review.lineage_hash !== reservation.lineage_hash)
       throw fail(409, 'INVOICE_CSV_SOURCE', 'Current approved source or final decision changed.');
     if (o.financeProvider?.destinationHash !== reservation.destination_hash)
@@ -495,11 +510,14 @@ export const createInvoiceCsvRouter = (o) => {
     const attemptId = randomUUID();
     let deliveryStatus;
     try {
-      const receipt = await o.financeProvider.deliver({operationId: exportId, batchId: row.id, artifact: rendered});
+      const input = {operationId: exportId, batchId: row.id, artifact: rendered};
+      const receipt = review.current ? await o.financeProvider.deliver(input) : await o.financeProvider.lookup(input);
       deliveryStatus = receipt.status;
     } catch {
       deliveryStatus = 'unconfirmed';
     }
+    if (!review.current && deliveryStatus === 'unconfirmed')
+      throw fail(409,'INVOICE_PROVIDER_PENDING','The original provider has not confirmed the reserved operation.');
     const artifactId = deliveryStatus === 'accepted' ? randomUUID() : null;
     await c.query(
       'insert into invoice_provider_attempts(id,export_id,actor_id,active_role,result,artifact_id) values($1,$2,$3,$4,$5,$6)',

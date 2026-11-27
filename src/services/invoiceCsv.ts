@@ -524,7 +524,7 @@ export type ReversalCredit = {source:z.infer<typeof creditSource>;receipt:z.infe
 const issuedCredit = z.object({
   kind:z.enum(['Discount','Write-off']).optional(),
   itemId:uuid, eventId:uuid, eligibleOn:date, currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount,
-  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(), correctionState:z.enum(['Draft','Under Review','Approved','Exported','Billed/Confirmed']).nullable(),
+  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(), correctionReviewId:uuid.nullable().optional(),correctionState:z.enum(['Draft','Under Review','Approved','Exported','Billed/Confirmed']).nullable(),
 }).strict();
 export type IssuedCredit = z.infer<typeof issuedCredit>;
 const correctionEvidence=z.object({
@@ -602,9 +602,9 @@ export const invoiceCsv = {
       new Set(lines.map(x=>x.itemId)).size!==lines.length || header.total!=='-'+invoiceDraftTotal(lines.map(x=>x.amount.slice(1))).amount) return bad();
     return result.data;
   },
-  correctionDraft: async (originalId:string, requestId:string, why:string, selection:string[]|string, ctx:RateContext,expectedState:'Draft'|'Approved'='Draft') => {
+  correctionDraft: async (originalId:string, requestId:string, why:string, selection:string[]|string, ctx:RateContext,expectedState:'Draft'|'Under Review'|'Approved'='Draft',expectedReviewId?:string) => {
     const cancelling=typeof selection==='string';
-    const body=cancelling?{batchId:selection,expectedState}:{itemIds:selection};
+    const body=cancelling?{batchId:selection,expectedState,...(expectedState==='Under Review'?{expectedReviewId}:{})}:{itemIds:selection};
     const raw=await call('POST','/batches/'+originalId+'/correction-drafts'+(cancelling?'/cancel':''),ctx,'view',{requestId,reason:why,...body});
     const parsed=z.object({...envelope,originalId:uuid,replayed:z.boolean(),receipt:z.object({
       batchId:uuid,itemIds:z.array(uuid).min(1).max(50),currency:z.string().regex(/^[A-Z]{3}$/),total:creditAmount,state:z.enum(['Draft','Under Review','Approved','Exported','Billed/Confirmed','Cancelled']),

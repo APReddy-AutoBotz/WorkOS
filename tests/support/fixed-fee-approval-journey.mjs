@@ -1,6 +1,6 @@
 import {expectedMigrationsFrom} from './expected-migrations.mjs';
 import assert from 'node:assert/strict';
-import {verifyFixedFeeExport} from './fixed-fee-export-journey.mjs';
+import {configureFixedFeeNotices,verifyFixedFeeExport} from './fixed-fee-export-journey.mjs';
 import {runMigrations} from '../../server/migrate.mjs';
 import {withCommercialMigrationsThrough,migrateCommercialDatabase} from './commercial-drafting-test.mjs';
 import {randomUUID} from 'node:crypto';
@@ -10,6 +10,7 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
   const access=[...draftGrants,grant,'commercial.contracts.manage','commercial.invoice_approval.manage','commercial.invoice_approval.decide','approvals.view'];
   access.push('commercial.purchase_orders.release','commercial.invoice_batch.confirm','reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
     'commercial.invoice_export.configure','integrations.invoice_alert_routes.manage');
+  if (reversalScenario==='stale reviewer') access.push('commercial.invoice_export.deliver');
   const roles=[preparer.role,reviewer.role];
   const saved=(await pool.query('select role_name,permission_key,enabled from role_permissions where role_name=any($1) and permission_key=any($2)',[roles,access])).rows;
   const change=async(role,keys,enabled)=>pool.query(`insert into role_permissions(role_name,permission_key,enabled) select $1,k,$3 from unnest($2::text[]) k
@@ -115,6 +116,26 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
       await csv.getByRole('button',{name:'Commit invoice line'}).click();
       await csv.getByText(/Order committed 12000.0000.*Available 300.6789.*Warning threshold reached/).waitFor();
       assert.equal(ok(await postOrder({...commitment,number}),200).replayed,true);
+      await configureFixedFeeNotices({call:(path,body)=>apiRequest(path,{identity:reviewer,method:'POST',body}),
+        ok,reviewerKey,today,engagementId,reviewer,preparer});
+      const csvPath='/api/v1/invoice-csv';
+      const call=(path,body)=>apiRequest(csvPath+path,{identity:preparer,...(body?{method:'POST',body}:{})});
+      const inspected=ok(await call('/batches/'+batch.id),200);
+      const reservation=ok(await call('/provider-exports',{expectedOwnerKey:inspected.ownerKey,requestId:randomUUID(),
+        batchId:batch.id,approvalId:retry.id,finalTransitionId:inspected.batch.finalTransitionId,lineageHash:inspected.batch.lineageHash,
+        schemaVersion:'workos.invoice-fixed-fee-csv/2',expectedLineCount:1,expectedTotal:'12000',reason:'Deliver approved installment'}));
+      const deliver=()=>call('/provider-exports/'+reservation.exportId+'/deliver',{expectedOwnerKey:inspected.ownerKey});
+      assert.equal(ok(await deliver()).deliveryStatus,'unconfirmed');
+      await pool.query("update employees set status='On Leave' where id=$1",[author]);
+      try {
+        assert.equal(ok(await call('/batches/'+batch.id),200).batch.sourceCurrent,false);
+        assert.equal(ok(await deliver(),409).error.code,'INVOICE_PROVIDER_PENDING');
+        const artifact=ok(await deliver()).artifact;
+        assert.equal(artifact.total,'12000');
+        assert.equal(ok(await deliver(),200).artifact.id,artifact.id);
+      } finally {
+        await pool.query("update employees set status='Active' where id=$1",[author]);
+      }
       await change(reviewer.role,[grant],false);
       assert.equal((await apiRequest(poPath,{identity:reviewer})).status,403);
       assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1 and batch_id=$2',[registered.itemId,batch.id])).rowCount,1);

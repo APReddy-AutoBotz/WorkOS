@@ -175,7 +175,7 @@
 - T&M, milestone, fixed-fee, retainer, managed-service and adjustment eligibility.
 - Source → versioned billing-eligibility event → one-to-one approved-unbilled item → line/batch lineage.
 - Approved-unbilled item as the only batchable object; direct raw-source/snapshot bypass rejection.
-- Canonical `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed`, `Cancelled` states.
+- Canonical `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed`, `Cancelled` states. The existing commercial drafting journey covers correction review cancellation, occupancy release and identical fixed-fee retries (WOS-INV-003/004/006). The provider journeys cover current delivery retries and receipt lookup against the original reservation after approval becomes stale (WOS-INV-007).
 - Database-unique current occupancy per approved-unbilled-item ID/version, rejecting same-batch, cross-batch and concurrent duplicates with no orphan line, duplicate amount or control-total drift.
 - Same-key identical retry returns the existing membership; same-key changed-input and different-key duplicates conflict; bulk, import and compatibility routes cannot bypass occupancy.
 - Partial-billing, presentation-splitting and multiple-line reuse are prohibited; separately billable portions require distinct authorized/versioned event/item versions with reconciled source totals.
