@@ -72,3 +72,24 @@ for(const changed of [renderedCredit.text.replace('-0.0001','-0.0002'),renderedC
   renderedCredit.text.replace(creditLine.originalArtifactSha256,'a'.repeat(64)),renderedCredit.text.replace(creditLine.lineId,'invalid')]){
   assert.throws(()=>verifyCreditCsv(changed,expectedCredit));
 }
+
+const secondCredit = credits.lines[1];
+const partialCredits = {
+  ...credits,
+  lines: [creditLine, {
+    ...secondCredit,
+    originalLineId: creditLine.originalLineId,
+    originalEventId: creditLine.originalEventId,
+    amount: '-0.0002',
+  }],
+};
+const partialExport = renderCreditCsv(partialCredits);
+assert.equal(partialExport.total, '-0.0003');
+verifyCreditCsv(partialExport.text, { ...partialExport, batchId: credits.batchId });
+
+for (const field of ['originalEventId', 'originalLineId', 'lineId', 'itemId', 'eventId', 'decisionId']) {
+  const conflictingLine = { ...secondCredit, [field]: creditLine[field] };
+  assert.throws(() => renderCreditCsv({ ...credits, lines: [creditLine, conflictingLine] }), TypeError, field);
+  const conflictingCsv = renderedCredit.text.replace(secondCredit[field], creditLine[field]);
+  assert.throws(() => verifyCreditCsv(conflictingCsv, expectedCredit), TypeError, field);
+}
