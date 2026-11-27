@@ -1,3 +1,4 @@
+import {approvedProjectCost} from './project-costs.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {decimalDifference,sumHours} from '../../../shared/work-hours.mjs';
 import {calculateLaborMargin} from '../../../shared/labor-margin.mjs';
@@ -33,14 +34,24 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
     approvedEntries:risk.approvedEntries,costedEntries:risk.costedEntries,actualHours:verifiedHours,actualCost:risk.retainedCost,
     hoursComplete:unresolved===0,costComplete:risk.complete || (risk.approvedEntries===0 && risk.costedEntries===0),
     budgetHours:risk.effortBudget?.budgetHours??null,budgetCost:risk.laborCostBudget};
-  const token=createHash('sha256').update(JSON.stringify([baseline,workToken,costToken])).digest('hex');
+  const approved=includeMargin?await approvedProjectCost(client,args):null;
+  const basis=[baseline,workToken,costToken];
+  if(approved?.entries)basis.push(approved.sourceHash);
+  const token=createHash('sha256').update(JSON.stringify(basis)).digest('hex');
   const where='organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and through_date=$4';
   const {rows:[latest]}=await client.query(`select ${fields} from commercial_fixed_fee_forecasts where ${where} order by version desc limit 1`,args);
   const latestVersion=latest?.version??0;
   let saved=latest??null;
+  async function projectCostMargin(expectedRevenue,policy) {
+    const valuation=policy??await policyRevenue(client,req,scope,args,baseline.currency,expectedRevenue);
+    return valuation.earnedAmount!==null && baseline.hoursComplete && baseline.costComplete
+      ? calculateLaborMargin(valuation.earnedAmount,sumHours([baseline.actualCost,approved.amount])) : null;
+  }
   async function response(saved, latestVersion) {
     const {evidence_token,...snapshot}=saved??{};
-    const result={baseline,token,latestVersion,saved:saved?snapshot:null};
+    const {retainedProjectCosts,...publicReport}=snapshot.report??{};
+    const result={baseline,token,latestVersion,saved:saved?{...snapshot,report:publicReport}:null};
+    if(includeMargin && retainedProjectCosts)result.retainedProjectCosts=retainedProjectCosts;
     if (input.view) {
       const report=saved?.report;
       result.laborMargin=marginAllowed && report?.expectedTotalRevenue!==undefined && report.estimatedCost!=null
@@ -67,6 +78,7 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
           : calculateLaborMargin(remainingRevenue,saved.report.remainingCost);
       }
       result.marginComparison={actual,remaining,forecastCurrent:current};
+      result.projectCosts={amount:approved.amount,entries:approved.entries,grossMargin:await projectCostMargin(saved?.report.expectedTotalRevenue,usePolicy?result.revenue:null)};
     }
     return result;
   }
@@ -84,6 +96,7 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
       case when $4::boolean then trim_scale($5::numeric+$6::numeric)::text end as "estimatedCost"`,
       [baseline.hoursComplete,baseline.actualHours,input.remainingHours,baseline.costComplete,baseline.actualCost,input.remainingCost]);
     const report={...baseline,remainingHours:input.remainingHours,remainingCost:input.remainingCost,expectedTotalRevenue:input.expectedTotalRevenue,...estimate};
+    if(includeMargin)report.retainedProjectCosts={...approved,grossMargin:await projectCostMargin(input.expectedTotalRevenue)};
     const id=randomUUID(),version=latestVersion+1;
     ({rows:[saved]}=await client.query(`insert into commercial_fixed_fee_forecasts
       (organization_id,legal_entity_id,engagement_id,through_date,id,version,request_id,evidence_token,report,reason,actor_id,active_role,operation_id)

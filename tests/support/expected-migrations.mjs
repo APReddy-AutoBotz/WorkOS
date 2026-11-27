@@ -160,6 +160,7 @@ const expected = [
   '131_wos06_fixed_fee_po_commitments',
   '132_wos05_prospective_delegations',
   '133_wos04_fixed_assignment_hours',
+  '134_wos06_approved_project_costs',
 ];
 
 export function expectedMigrationsFrom(first) {

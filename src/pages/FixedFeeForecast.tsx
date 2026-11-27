@@ -1,3 +1,4 @@
+import {ProjectCosts} from './ProjectCosts';
 import {useState} from 'react';
 import {fixedFeeWriteMessage,commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
@@ -63,6 +64,9 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
             <label>Transition approval reason <input value={approvalReason} maxLength={1000} onChange={e=>setApprovalReason(e.target.value)}/></label>
             <button type="button" disabled={approvalReason.trim().length<3} onClick={()=>void approveTransition()}>Approve residual schedule</button>
           </>}</>)}
+        {data.retainedProjectCosts && <p>Forecast version {saved?.version} retained {data.baseline.currency} {data.retainedProjectCosts.amount} in approved non-labor costs. Retained gross margin: {marginText(data.retainedProjectCosts.grossMargin,data.baseline.currency)}</p>}
+        {data.projectCosts && <p>Finance-approved non-labor cost through {through}: {data.baseline.currency} {data.projectCosts.amount} ({data.projectCosts.entries} approved). Actual gross margin after labor and non-labor costs: {marginText(data.projectCosts.grossMargin,data.baseline.currency)}</p>}
+        {context.canViewFixedFeeMargin && <ProjectCosts context={context} engagement={engagement} day={through} onDecision={()=>inspect()}/>}
         {data.marginComparison && <p>Actual margin after labor cost: {marginText(data.marginComparison.actual,data.baseline.currency)}</p>}
         {saved && <div><p>Forecast version {saved.version} · {saved.reason}</p>
           <p>Budget at review: {saved.report.budgetHours??'Unset'} hours · Labor cost {saved.report.budgetCost??'Unset'} {saved.report.currency}</p>
