@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { readBoundedBody } from '../../bounded-response.mjs';
+
+const maxReceiptBytes = 64 * 1024;
 
 // A provider must deduplicate this key durably, including after a timeout.
 // The URL and credential are deployment configuration, never request inputs.
@@ -37,8 +40,17 @@ export function createFinanceExportProvider({ endpoint, token, fetchImpl = fetch
     } catch {
       throw new Error('Finance provider delivery unconfirmed');
     }
-    if (!response.ok) throw new Error('Finance provider delivery unconfirmed');
-    const receipt = await response.json().catch(() => null);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error('Finance provider delivery unconfirmed');
+    }
+    let receipt;
+    try {
+      const bytes = await readBoundedBody(response, 'Finance provider receipt', maxReceiptBytes);
+      receipt = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      throw new Error('Finance provider delivery unconfirmed');
+    }
     if (!['accepted','permanently_rejected'].includes(receipt?.status) ||
         !Object.entries(identity).every(([key, value]) => receipt[key] === value)) {
       throw new Error('Finance provider receipt does not match the export');
