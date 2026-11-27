@@ -308,13 +308,17 @@ export const createInvoiceCsvRouter = (o) => {
       const { row, source, review } = await exportBatch(c, r, parse(uuid, r.params.id)),
         stored =
           (await c.query('select id from invoice_csv_artifacts where batch_id=$1', [row.id])).rows[0] ?? null;
-      const provider = o.financeProvider?.destinationHash ? (await c.query(
+      const destination=o.financeProvider?.destinationHash ?? null;
+      // The upgrade journey also serves historical schemas from before provider delivery.
+      const supportsProvider=destination || (await c.query("select to_regclass('invoice_provider_exports') is not null supported")).rows[0].supported;
+      const reservation=supportsProvider ? (await c.query(
         `select e.id as "exportId", (select result from invoice_provider_attempts p where p.export_id=e.id
-           order by attempted_at desc limit 1) as status
-         from (select 1) enabled left join invoice_provider_exports e on e.batch_id=$1
-         where invoice_notice_actor_has($2,$3,$4,$5,'commercial.invoice_export.deliver')
-           and invoice_csv_actor_valid($2,$3,$4,$5,'create')`,
-        [row.id,...scope(r),r.user.sub,r.user.activeRole],
+           order by attempted_at desc limit 1) as status,
+           ($6::text is not null and (e.id is null or e.destination_hash=$6)) available,
+           (invoice_notice_actor_has($2,$3,$4,$5,'commercial.invoice_export.deliver')
+            and invoice_csv_actor_valid($2,$3,$4,$5,'create')) as permitted
+         from (select 1) enabled left join invoice_provider_exports e on e.batch_id=$1`,
+        [row.id,...scope(r),r.user.sub,r.user.activeRole,destination],
       )).rows[0] : null;
       let total = null;
       try {
@@ -341,7 +345,10 @@ export const createInvoiceCsvRouter = (o) => {
           finalTransitionId: review?.final_transition_id ?? null,
           lineageHash: review?.lineage_hash ?? null,
           sourceCurrent: review?.current === true,
-          ...(provider ? {provider} : {}),
+          ...(reservation?.exportId ? {providerReserved:true} : {}),
+          ...(reservation?.permitted && (reservation.available || reservation.exportId) ? {provider:{
+            exportId:reservation.exportId,status:reservation.status,available:reservation.available,
+          }} : {}),
           artifactId: stored?.id ?? null,
           lines: source.lines.map((x) =>
             x.sourceType === 'FULL_LINE_REVERSAL' ? x : ['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(x.sourceType)
@@ -456,6 +463,7 @@ export const createInvoiceCsvRouter = (o) => {
     if (row.state !== 'Approved' || !review?.current || review.id !== d.approvalId ||
         review.final_transition_id !== d.finalTransitionId || review.lineage_hash !== d.lineageHash)
       throw fail(409, 'INVOICE_CSV_SOURCE', 'Current approved source or final decision changed.');
+    await currentInvoiceNoticePolicy(c,row);
     const rendered = await renderExport(c, source);
     if (rendered.schemaVersion !== d.schemaVersion || rendered.lineCount !== d.expectedLineCount ||
         rendered.total !== d.expectedTotal)

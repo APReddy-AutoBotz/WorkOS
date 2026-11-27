@@ -296,7 +296,7 @@ const InvoiceCsvEngagement = ({
   const deliverProvider = () => source && void run(async c => {
     try {
       const result=await invoiceCsv.deliverProvider(source,c);
-      setSource({...source,provider:{exportId:source.provider!.exportId,status:result.status},
+      setSource({...source,provider:{...source.provider!,status:result.status},
         ...(result.verified ? {state:'Exported',artifactId:result.verified.artifact.id} : {})});
       if (result.verified) setVerified(result.verified);
       setNotice(result.status==='accepted' ? 'Provider accepted the export. Receipt and CSV verified.' :
@@ -333,8 +333,15 @@ const InvoiceCsvEngagement = ({
       reason: reason.trim(),
     };
     if (provider) void run(async c => {
-      const exportId=await invoiceCsv.reserveProvider(op,c);
-      setSource({...source,provider:{exportId,status:null}});
+      let exportId;
+      try {
+        exportId=await invoiceCsv.reserveProvider(op,c);
+      } catch (e) {
+        if (!(e instanceof ApiClientError) || e.code!=='INVOICE_NOTICE_POLICY') throw e;
+        setNotice('Configure the invoice notification policy before reserving provider delivery.');
+        return;
+      }
+      setSource({...source,providerReserved:true,provider:{exportId,status:null,available:true}});
       setNotice('Provider export reserved.');
     });
     else perform(op);
@@ -526,15 +533,19 @@ const InvoiceCsvEngagement = ({
                     run={run} disabled={busy || !!pending} />
                 )}
               {source.sourceType!=='FULL_LINE_REVERSAL' && source.artifactId && <ExportedCredits key={source.artifactId} original={source} run={run} disabled={busy || !!pending}/>}
+              {source.providerReserved && !source.provider && source.state==='Approved' &&
+                <p>Reserved for finance provider delivery. A finance operator can reconcile this batch.</p>}
               {canCreate && hasRatePermission('commercial.invoice_export.deliver') && source.provider?.exportId &&
                 <section aria-label="Finance provider delivery">
                   <p>Provider reservation {source.provider.exportId} · {source.provider.status ?? 'reserved'}</p>
-                  {source.state==='Approved' && source.provider.status!=='permanently_rejected' &&
+                  {source.provider.status==='permanently_rejected' && source.state==='Approved' && <p>The provider permanently rejected this export. Finance can cancel the batch.</p>}
+                  {!source.provider.available && source.provider.status!=='permanently_rejected' && source.state==='Approved' && <p>The original finance provider is unavailable. Restore its configuration to reconcile this reservation.</p>}
+                  {source.provider.available && source.state==='Approved' && source.provider.status!=='permanently_rejected' &&
                     <button type="button" disabled={busy || !!pending} onClick={deliverProvider}>
                       {source.provider.status==='unconfirmed' ? 'Retry provider delivery' : 'Deliver to finance provider'}
                     </button>}
                 </section>}
-              {canCreate && source.state === 'Approved' && !source.provider?.exportId && (
+              {canCreate && source.state === 'Approved' && !source.providerReserved && (
                 <fieldset disabled={busy || !!pending}>
                   <legend>Accept approved CSV artifact</legend>
                   <label>

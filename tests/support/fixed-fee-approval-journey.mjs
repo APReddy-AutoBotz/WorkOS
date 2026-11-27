@@ -116,8 +116,6 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
       await csv.getByRole('button',{name:'Commit invoice line'}).click();
       await csv.getByText(/Order committed 12000.0000.*Available 300.6789.*Warning threshold reached/).waitFor();
       assert.equal(ok(await postOrder({...commitment,number}),200).replayed,true);
-      await configureFixedFeeNotices({call:(path,body)=>apiRequest(path,{identity:reviewer,method:'POST',body}),
-        ok,reviewerKey,today,engagementId,reviewer,preparer});
       const finance=await createContext(preparer,access);
       try {
         const financePage=finance.page;
@@ -133,6 +131,11 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
         await desk.getByLabel('Invoice CSV schema').selectOption('workos.invoice-fixed-fee-csv/2');
         await desk.getByLabel('I inspected the final approval, retained lineage and control total').check();
         await desk.getByLabel('Invoice CSV reason').fill('Deliver approved installment');
+        await desk.getByRole('button',{name:'Reserve finance provider export'}).click();
+        await desk.getByText('Configure the invoice notification policy before reserving provider delivery.').waitFor();
+        assert.equal((await pool.query('select 1 from invoice_provider_exports where batch_id=$1',[batch.id])).rowCount,0);
+        await configureFixedFeeNotices({call:(path,body)=>apiRequest(path,{identity:reviewer,method:'POST',body}),
+        ok,reviewerKey,today,engagementId,reviewer,preparer});
         await desk.getByRole('button',{name:'Reserve finance provider export'}).click();
         const receipt=desk.getByRole('region',{name:'Finance provider delivery'});
         await receipt.getByRole('button',{name:'Deliver to finance provider'}).click();
