@@ -36,8 +36,21 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     assert.equal(refreshed.body.activeRole, 'Admin');
     const refreshClaims = JSON.parse(Buffer.from(refreshed.body.token.split('.')[0], 'base64url').toString());
     assert.deepEqual(refreshClaims.entraGroups, ['synthetic-verified-group']);
+    await pool.query("alter table audit_logs add constraint test_role_audit_unavailable check (action <> 'Switch Role') not valid");
+    try {
+      const failed = await request('/api/auth/switch-role', {...mapped, method: 'POST', body: {role: 'Employee'}});
+      assert.equal(failed.status, 500);
+      assert.equal(failed.response.headers.has('set-cookie'), false);
+      assert.equal(failed.body.token, undefined);
+    } finally {
+      await pool.query('alter table audit_logs drop constraint test_role_audit_unavailable');
+    }
     const switched = await request('/api/auth/switch-role', {...mapped, method: 'POST', body: {role: 'Employee'}});
     assert.equal(switched.status, 200);
+    assert.equal(switched.response.headers.has('set-cookie'), true);
+    const roleChanges = await pool.query(`select active_role, old_value, new_value from audit_logs
+      where module='Auth' and action='Switch Role' and entity_id=$1 and user_id=$1`, [identities.reader.id]);
+    assert.deepEqual(roleChanges.rows, [{active_role:'Admin',old_value:{activeRole:'Admin'},new_value:{activeRole:'Employee'}}]);
     const switchBack = await request('/api/auth/switch-role', {method: 'POST', body: {role: 'Admin'}, headers: {Authorization: `Bearer ${switched.body.token}`}});
     assert.equal(switchBack.status, 200, 'Role switching retains verified provider context');
     const localGroups = tokenFor(identities.reader, 'Admin', {identityProvider: 'local', entraGroups: ['synthetic-verified-group']});

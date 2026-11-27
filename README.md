@@ -6,6 +6,8 @@ Managed-service reporting supports a read-only comparison of a retained monthly 
 
 The application build and runtime share an immutable Node image. CI and buyer Compose use the same pinned PostgreSQL image. CI retains the tested production image, its checksums and runtime package inventories for seven days. [Container verification and handover](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#verifying-the-tested-container)
 
+Switching roles records the previous and selected roles before the browser receives the new session. If the audit write fails, retry the switch once the audit database is available.
+
 The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.
 
 Forecast checkpoints and roll-offs use the UTC source date returned by the report. The chart labels individual checkpoint dates and the audited CSV includes the source and horizon end dates.
