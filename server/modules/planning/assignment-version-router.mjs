@@ -1,6 +1,6 @@
 import {Router} from 'express';
 import {z} from 'zod';
-import {ASSIGNMENT_VERSION,validAssignmentDefinition,assignmentActivePercentage} from '../../../shared/assignment-version.mjs';
+import {ASSIGNMENT_VERSION,validAssignmentDefinition,assignmentActivePercentage,validFixedHours,distributeFixedHours} from '../../../shared/assignment-version.mjs';
 import {validCapabilityDate} from '../../../shared/workforce-capabilities.mjs';
 import {validCapacityRange} from '../../../shared/worker-capacity.mjs';
 import {validateAssignmentPolicy,lockWorkPolicy,workPolicyError} from '../work-capture/assignment-work-policy.mjs';
@@ -24,8 +24,15 @@ export const createAssignmentVersionRouter=({pool,requireDatabase,requireAuth,re
   return{...scope(req),assignmentId:a.id,current:view(a,v),versions,nextBefore:rows.length>10?rows[9].sequence:null};
  }));
  router.get('/assignments/:id/context',handle(false,async(c,req)=>{
-  const q=parse(z.object({startsOn:date,endsOn:date,expectedRevision:hash}).strict().refine(v=>validCapacityRange(v.startsOn,v.endsOn)),req.query),a=await current(c,req,req.params.id);if(a.revision!==q.expectedRevision)fail('ASSIGNMENT_VERSION_STALE','Assignment source changed. Reload the selected assignment.',409);const calculated=await calculateScopedCapacity(c,req,a.employee_id,q.startsOn,q.endsOn,buildEmployeeScopeWhere);
-  return{...scope(req),assignmentId:a.id,revision:a.revision,capacity:calculated.result,declaredPercentageByDate:calculated.result.days.map(d=>({date:d.date,percentageExact:assignmentActivePercentage(a.snapshot,d.date)}))};
+  const q=parse(z.object({startsOn:date,endsOn:date,expectedRevision:hash,fixedHours:z.string().refine(validFixedHours).optional()}).strict().refine(v=>validCapacityRange(v.startsOn,v.endsOn)),req.query),a=await current(c,req,req.params.id);if(a.revision!==q.expectedRevision)fail('ASSIGNMENT_VERSION_STALE','Assignment source changed. Reload the selected assignment.',409);const calculated=await calculateScopedCapacity(c,req,a.employee_id,q.startsOn,q.endsOn,buildEmployeeScopeWhere);
+  const plan = {};
+  if(q.fixedHours !== undefined){
+   if(q.startsOn !== a.snapshot.startsOn || q.endsOn !== a.snapshot.endsOn)
+    fail('ASSIGNMENT_RANGE_MISMATCH','Use the full assignment date range to distribute fixed hours.',400);
+   plan.fixedHours = q.fixedHours;
+   plan.dailyFixedHours = distributeFixedHours(q.fixedHours, calculated.result.days);
+  }
+  return{...scope(req),...plan,assignmentId:a.id,revision:a.revision,capacity:calculated.result,declaredPercentageByDate:calculated.result.days.map(d=>({date:d.date,percentageExact:assignmentActivePercentage(a.snapshot,d.date)}))};
  }));
  router.post('/assignments/:id/versions',requirePermission('allocations.manage'),handle(true,async(c,req)=>{
   const input=parse(z.object({expectedRevision:hash,expectedLatestId:z.string().uuid().nullable(),definition:z.unknown().refine(validAssignmentDefinition),reason:z.string().trim().min(1).max(1000)}).strict(),req.body),a=await current(c,req,req.params.id,true),v=await latest(c,a);view(a,v);if(a.revision!==input.expectedRevision||(v?.id??null)!==input.expectedLatestId)fail('ASSIGNMENT_VERSION_STALE','Assignment or retained source version changed. Reload before saving.',409);

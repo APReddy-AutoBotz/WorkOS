@@ -16,6 +16,8 @@ Demand records define engagement/project, role/skill, date range, required perce
 
 Assignment dates and overlap are server validated. Warning/block thresholds are configurable. Material changes may create approval records.
 
+For WOS-RES-004, distribute a fixed hours total over the full assignment range using each day's available capacity after approved leave. Zero-capacity days receive zero. If capacity is unknown, or the whole range has zero capacity for a positive total, the distribution is unavailable. Round cumulative shares half-up to six decimal hours or the submitted total's precision, whichever is finer. Daily shares sum to the submitted total.
+
 ## Utilization
 
 - Planned: effective assignment load divided by effective capacity.
