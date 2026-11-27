@@ -30,7 +30,7 @@ assert.deepEqual(await s.source(before.assignmentId, capture('assignment')), sou
 assert.equal(calls.length, 1);
 assert.equal(calls[0].headers.Authorization, 'Bearer synthetic-token');
 assert.equal(calls[0].headers['X-Legal-Entity-Id'], scope.legalEntityId);
-for (const patch of [{ assignmentId: 'redirect' }, { revision: 'invalid' }, { versionId: 'invalid' }, { snapshot: { ...before, quantityExact: 20 } }, { snapshot: { ...before, quantityUnit: 'hours' } }, { policy: { ...policy, definition: { ...definition, materialFields: [] } } }]) {
+for (const patch of [{ assignmentId: 'redirect' }, { revision: 'invalid' }, { versionId: 'invalid' }, { snapshot: { ...before, quantityExact: 20 } }, { snapshot: { ...before, quantityUnit: 'minutes' } }, { policy: { ...policy, definition: { ...definition, materialFields: [] } } }]) {
     raw = { ...envelope, source: { ...source, ...patch } };
     await assert.rejects(s.source(before.assignmentId, capture('assignment')), { status: 503 });
 }
@@ -42,7 +42,7 @@ await assert.rejects(s.choices(capture('configure')), { status: 503 });
 raw = { ...envelope, instance };
 const page = await s.instance(instanceId, capture('assignment'));
 assert.deepEqual(page.instance, instance);
-for (const patch of [{ sourceToken: randomBytes(1).toString('hex') }, { sourceVersionId: 'invalid' }, { before: { ...before, employeeId: 'redirect' } }, { proposed: { ...proposed, quantityUnit: 'hours' } }, { state: { status: 'Approved', sequence: 0, currentStage: null } }, { transitions: [receipt] }]) {
+for (const patch of [{ sourceToken: randomBytes(1).toString('hex') }, { sourceVersionId: 'invalid' }, { before: { ...before, employeeId: 'redirect' } }, { proposed: { ...proposed, quantityUnit: 'minutes' } }, { state: { status: 'Approved', sequence: 0, currentStage: null } }, { transitions: [receipt] }]) {
     raw = { ...envelope, instance: { ...instance, ...patch } };
     await assert.rejects(s.instance(instanceId, capture('assignment')), { status: 503 });
 }

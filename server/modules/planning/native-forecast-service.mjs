@@ -1,5 +1,7 @@
 import {calculateNativeForecast,nativeCheckpoint,validNativeThresholds,NATIVE_FORECAST_VERSION} from '../../../shared/native-forecast.mjs';
-import {canonicalHours} from '../../../shared/work-hours.mjs';
+import {distributeFixedHours} from '../../../shared/assignment-version.mjs';
+import {capacityDateCount,shiftCapacityDate,multiplyCapacity} from '../../../shared/worker-capacity.mjs';
+import {canonicalHours,sumHours} from '../../../shared/work-hours.mjs';
 import {calculateScopedCapacity,capacityCanonical,capacityHash} from './worker-capacity-service.mjs';
 import {resolveProjectDate} from '../work-capture/assignment-work-policy.mjs';
 const limit=1000;
@@ -22,16 +24,55 @@ export const forecastProjectState=(loaded,date)=>{
  if(loaded.binding&&loaded.entities.some(e=>!e.root||!e.lifecycle.some(l=>l.effective_on<=date)))return'unavailable';
  try{resolveProjectDate(loaded,date,{assignment:true});return'included';}catch(e){return['WORK_PROJECT_INACTIVE','WORK_PROJECT_DATES','WORK_LIFECYCLE_INACTIVE','WORK_TERMS_DATES'].includes(e.code)?'excluded':'unavailable';}
 };
+// Fixed totals use the whole assignment range, including dates between checkpoints.
+async function fixedCheckpointPlan(rows, assignments, result, readCapacity) {
+ const included = (a, point, i) => a.status==='Active' && a.startsOn<=point.date && a.endsOn>=point.date && a.states[i]==='included';
+ const fixed = rows.filter((row,i)=>row.fixed_hours!==null && result.points.some((point,j)=>included(assignments[i],point,j)));
+ const fixedTotals = rows.filter(row=>row.fixed_hours!==null).map(row=>({assignmentId:row.id,hours:row.fixed_hours}));
+ const dayMap = new Map(), capacityTokens=[];
+ if(fixed.length){
+  const first=fixed.map(row=>row.start_date).sort()[0], last=fixed.map(row=>row.end_date).sort().at(-1);
+  for(let from=first;;){
+   const end=capacityDateCount(from,last)>366?shiftCapacityDate(from,365):last;
+   const capacity=await readCapacity(from,end);
+   capacityTokens.push(capacity.result.sourceToken);
+   for(const day of capacity.result.days)dayMap.set(day.date,day);
+   if(end===last)break;
+   from=shiftCapacityDate(end,1);
+  }
+ }
+ const plans=new Map();
+ for(const row of fixed){
+  const days=Array.from({length:capacityDateCount(row.start_date,row.end_date)},(_,i)=>dayMap.get(shiftCapacityDate(row.start_date,i)));
+  plans.set(row.id,distributeFixedHours(row.fixed_hours,days));
+ }
+ const plannedHours=result.points.map((point,j)=>{
+  if(point.declaredPercentageExact===null || point.capacity.status!=='available')return null;
+  const hours=[];
+  for(const a of assignments??[]){
+   if(!included(a,point,j))continue;
+   if(plans.has(a.id)){
+    const daily=plans.get(a.id);
+    if(!daily)return null;
+    hours.push(daily[capacityDateCount(a.startsOn,point.date)-1]);
+   }else hours.push(multiplyCapacity(point.capacity.totals.availableHoursExact,a.quantityExact,true));
+  }
+  return sumHours(hours);
+ });
+ return {fixedTotals,plannedHours,capacityTokens};
+}
 export const calculateScopedNativeForecast=async(c,req,employeeId,startsOn,endsOn,months,buildEmployeeScopeWhere,buildProjectScopeWhere)=>{
  const capacities=[];let worker;const capacityInputs=[];
  for(let i=0;i<=months;i++){const date=nativeCheckpoint(startsOn,i),v=await calculateScopedCapacity(c,req,employeeId,date,date,buildEmployeeScopeWhere);worker=v.worker;capacityInputs.push(JSON.parse(v.inputCanonical));const day=v.result.days[0],profile=v.sources.profiles.find(p=>p.id===day.sourceRefs.profileId);capacities.push({status:v.result.status,eligible:day.reasonCodes.includes('WORKER_INACTIVE')?false:typeof profile?.definition.utilizationEligible==='boolean'?profile.definition.utilizationEligible:null,totals:v.result.totals,sourceToken:v.result.sourceToken,reasonCodes:v.result.reasonCodes});}
  const p=[],pw=buildProjectScopeWhere(req,p,'p');p.push(employeeId,req.organizationScope.organizationId,req.organizationScope.legalEntityId,startsOn,endsOn);const n=p.length,condition=`a.employee_id=$${n-4} and a.organization_id=$${n-3} and a.legal_entity_id=$${n-2} and a.start_date<=$${n}::date and a.end_date>=$${n-1}::date`;
  const hidden=(await c.query(`select exists(select 1 from project_allocations a where ${condition} and not exists(select 1 from projects p where p.id=a.project_id and p.organization_id=a.organization_id and p.legal_entity_id=a.legal_entity_id and ${pw})) hidden`,p)).rows[0].hidden;
- const rows=hidden?[]:(await c.query(`select a.id,a.project_id,trim_scale(a.percentage)::text percentage,a.start_date::text,a.end_date::text,a.status,resource_assignment_revision(a) revision,p.project_code,p.name,v.id version_id,coalesce(v.sequence,0) sequence,v.source_revision from project_allocations a join projects p on p.id=a.project_id and p.organization_id=a.organization_id and p.legal_entity_id=a.legal_entity_id left join lateral(select id,sequence,source_revision from assignment_versions where assignment_id=a.id and organization_id=a.organization_id and legal_entity_id=a.legal_entity_id order by sequence desc limit 1)v on true where ${pw} and ${condition} order by a.id collate "C" limit ${limit+1}`,p)).rows;
+ const rows=hidden?[]:(await c.query(`select a.id,a.project_id,trim_scale(a.percentage)::text percentage,trim_scale(a.fixed_hours)::text fixed_hours,a.start_date::text,a.end_date::text,a.status,resource_assignment_revision(a) revision,p.project_code,p.name,v.id version_id,coalesce(v.sequence,0) sequence,v.source_revision from project_allocations a join projects p on p.id=a.project_id and p.organization_id=a.organization_id and p.legal_entity_id=a.legal_entity_id left join lateral(select id,sequence,source_revision from assignment_versions where assignment_id=a.id and organization_id=a.organization_id and legal_entity_id=a.legal_entity_id order by sequence desc limit 1)v on true where ${pw} and ${condition} order by a.id collate "C" limit ${limit+1}`,p)).rows;
  const projects=await loadForecastProjects(c,req,[...new Set(rows.slice(0,limit).map(a=>a.project_id))]),settings=(await c.query("select key,value from system_settings where key=any($1::text[]) order by key",[['benchThreshold','utilizationThresholdLow','utilizationThresholdHigh']])).rows;
  let thresholds=null;try{const values=Object.fromEntries(settings.map(s=>[s.key,s.value])),t={bench:canonicalHours(values.benchThreshold),low:canonicalHours(values.utilizationThresholdLow),high:canonicalHours(values.utilizationThresholdHigh)};if(validNativeThresholds(t))thresholds=t;}catch{/* Absent/invalid buyer values never receive fallback thresholds. */}
  const sourceReason=hidden?'SCOPED_SOURCE_UNAVAILABLE':rows.length>limit||projects.limited?'FORECAST_SOURCE_LIMIT':null;
  const assignments=sourceReason?null:rows.map(a=>({id:a.id,projectId:a.project_id,projectCode:a.project_code,projectName:a.name,revision:a.revision,versionId:a.version_id,sequence:a.sequence,quantityUnit:'percentage',quantityExact:a.percentage,startsOn:a.start_date,endsOn:a.end_date,status:a.status,states:capacities.map((_,i)=>a.version_id&&a.source_revision!==a.revision?'unavailable':forecastProjectState(projects.loaded.find(v=>v.project.id===a.project_id),nativeCheckpoint(startsOn,i)))}));
- const inputCanonical=capacityCanonical({calculationVersion:NATIVE_FORECAST_VERSION,organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,employeeId,startsOn,endsOn,months,capacityInputs,rows:sourceReason?null:rows,projectAuthority:sourceReason?null:projects.source,settings,sourceReason}),observed=(await c.query("select to_char(clock_timestamp()at time zone'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')observed")).rows[0].observed;
- return{worker,inputCanonical,result:{...calculateNativeForecast({employeeId,startsOn,endsOn,months,thresholds,assignments,capacities,sourceReason}),sourceToken:capacityHash(inputCanonical),observedAt:observed}};
+ const result=calculateNativeForecast({employeeId,startsOn,endsOn,months,thresholds,assignments,capacities,sourceReason});
+ const plan=await fixedCheckpointPlan(sourceReason?[]:rows,assignments,result,(from,to)=>calculateScopedCapacity(c,req,employeeId,from,to,buildEmployeeScopeWhere));
+ const inputCanonical=capacityCanonical({calculationVersion:NATIVE_FORECAST_VERSION,organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,employeeId,startsOn,endsOn,months,capacityInputs,fixedRangeCapacityTokens:plan.capacityTokens,rows:sourceReason?null:rows,projectAuthority:sourceReason?null:projects.source,settings,sourceReason}),observed=(await c.query("select to_char(clock_timestamp()at time zone'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')observed")).rows[0].observed;
+ return{worker,inputCanonical,plannedHours:plan.plannedHours,fixedTotals:plan.fixedTotals,result:{...result,sourceToken:capacityHash(inputCanonical),observedAt:observed}};
 };

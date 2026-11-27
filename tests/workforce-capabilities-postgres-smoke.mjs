@@ -23,7 +23,8 @@ await withCommercialDatabase(async({pool})=>{
   for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-3])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));
   await runMigrations({pool,rootDir,logger:{log(){}}});await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);
   const tables=['employees','project_allocations','timesheets','timesheet_entries','work_entry_source_claims','role_permissions','work_submission_evidence','import_export_logs','commercial_contract_versions'];const before=Object.fromEntries(await Promise.all(tables.map(async t=>[t,await table(pool,t)])));for(const row of before.timesheet_entries){row.value.category_code=null;row.value.category_reference=null;}
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
+  for(const row of before.project_allocations)row.value.fixed_hours=null;
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
   await includeReleaseGrant(pool, before.role_permissions);
   for(const t of tables)assert.deepEqual(await table(pool,t),t==='import_export_logs'?before[t].map(row=>({value:{...row.value,assignment_policy_warnings:null}})):before[t],t+' is unchanged by upgrade');assert.deepEqual(await table(pool,'workforce_capability_versions'),[]);
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of tables)assert.deepEqual(await table(pool,t),t==='import_export_logs'?before[t].map(row=>({value:{...row.value,assignment_policy_warnings:null}})):before[t]);

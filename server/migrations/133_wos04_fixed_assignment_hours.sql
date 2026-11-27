@@ -1,5 +1,5 @@
 alter table project_allocations add column fixed_hours numeric
- check (fixed_hours >= 0 and length(trim_scale(fixed_hours)::text) <= 100 and fixed_hours < 'Infinity'::numeric);
+ check (fixed_hours is null or (fixed_hours >= 0 and length(trim_scale(fixed_hours)::text) <= 100 and fixed_hours < 'Infinity'::numeric and end_date - start_date between 0 and 365));
 
 -- Existing percentage sources must retain the revision recorded by historical evidence.
 create or replace function resource_assignment_revision(a project_allocations) returns text language sql stable as $$
@@ -15,7 +15,7 @@ create or replace function assignment_version_snapshot(a project_allocations) re
   'quantityExact',trim_scale(coalesce(a.fixed_hours,a.percentage))::text);
 $$;
 
-alter table assignment_versions drop constraint assignment_versions_snapshot_check,
+alter table assignment_versions drop constraint assignment_versions_check,
  add constraint assignment_versions_snapshot_check check (
   jsonb_typeof(snapshot)='object' and snapshot->>'assignmentId'=assignment_id
   and snapshot->>'quantityUnit' in ('percentage','hours')

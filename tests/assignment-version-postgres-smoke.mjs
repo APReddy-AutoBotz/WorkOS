@@ -58,7 +58,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   assert.doesNotMatch(JSON.stringify(approvals.body),/bindingObservation|contractVersionId|engagementId/);
   const auditBoundary=(await pool.query('select to_jsonb(a) value from audit_logs a where entity_id=$1',[governedAllocation.body.id])).rows;
   assert.equal(JSON.stringify(auditBoundary).includes(governed.pin),false,'ordinary allocation audit excludes private query enrichment');
-  const rows=(await pool.query("select * from assignment_versions where assignment_id=$1 and source='Web'",[id])).rows;assert(rows.every(v=>v.actor_id===identities.manager.id&&v.active_role==='Admin'));assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and reason='Synthetic guarded assignment change'",[id])).rows[0].n,2);
+  const rows=(await pool.query("select * from assignment_versions where assignment_id=$1 and source='Web'",[id])).rows;assert(rows.every(v=>v.actor_id===identities.manager.id&&v.active_role==='Admin'));assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and reason='Synthetic guarded assignment change'",[id])).rows[0].n,4);
  });
 });
 await withCommercialDatabase(async({pool,databaseUrl})=>{
