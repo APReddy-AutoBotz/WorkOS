@@ -1,3 +1,4 @@
+import {cancelInvoiceReview} from './cancel-review.mjs';
 import {
   MILESTONE_RECONCILIATION_VERSION,
   RECONCILIATION_VERSION,
@@ -643,8 +644,6 @@ export const createInvoiceDraftRouter = (o) => {
         )
       ).rows[0];
       if (old) {
-        if (source.sourceType==='FIXED_FEE_INSTALLMENT' && !source.current)
-          throw fail(409,'INVOICE_DRAFT_SOURCE','The original installment approval identities or terms changed.');
         if (old.fingerprint !== digest || old.batchId !== batchId || old.activeRole !== r.user.activeRole)
           throw fail(409, 'INVOICE_DRAFT_KEY', 'Original line request differs.');
         delete old.fingerprint;
@@ -768,43 +767,7 @@ export const createInvoiceDraftRouter = (o) => {
       }
       const cancellationId = randomUUID();
       if (observed.state === 'Under Review') {
-        const i = (
-          await c.query(
-            'select * from invoice_batch_approval_instances where batch_id=$1 order by sequence desc limit 1',
-            [batchId],
-          )
-        ).rows[0];
-        if (!i) throw fail(409, 'INVOICE_DRAFT_SOURCE', 'Active review unavailable.');
-        const invalidationId = randomUUID();
-        await c.query("select set_config('workos.invoice_batch_approval_context',$1,true)", [
-          JSON.stringify({
-            organizationId: scope(r)[0],
-            legalEntityId: scope(r)[1],
-            actorId: r.user.sub,
-            activeRole: r.user.activeRole,
-            operationId: r.operationId,
-            batchId,
-            instanceId: i.id,
-            invalidationId,
-          }),
-        ]);
-        await c.query(
-          'insert into invoice_batch_approval_invalidations(id,instance_id,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8)',
-          [invalidationId, i.id, r.user.sub, r.user.activeRole, d.requestId, digest, d.reason, r.operationId],
-        );
-        await c.query(
-          "update approval_records set status='Cancelled',updated_at=now() where entity_type='InvoiceBatchApproval' and entity_id=$1",
-          [i.id],
-        );
-        await o.audit(c, r, {
-          module: 'Invoice Batch Approval',
-          action: 'Cancel Review',
-          entityType: 'InvoiceBatchApproval',
-          entityId: invalidationId,
-          newValue: { invalidationId, instanceId: i.id, batchId },
-          reason: 'Scoped review cancellation.',
-          details: 'No financial amount in general audit.',
-        });
+        await cancelInvoiceReview(c,r,batchId,d,digest,o.audit,observed.review_id);
       }
       await context(c, r, batchId, null, cancellationId, d.expectedLineCount);
       const cancelArgs = [

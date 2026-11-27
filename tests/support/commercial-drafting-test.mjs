@@ -248,7 +248,7 @@ export const withCommercialApi = async ({databaseUrl, identities, enableLeave = 
 
 // Shared real-backend fixture for a separate hosted React/browser journey. The
 // caller owns its Vite/browser lifecycle; this wrapper owns PostgreSQL and API.
-export const withCommercialDraftingApi = async (test, {upgrade = false, through = undefined, timeZone = 'UTC', afterApi = undefined} = {}) =>
+export const withCommercialDraftingApi = async (test, {upgrade = false, through = undefined, timeZone = 'UTC', financeProviderFixture = false, afterApi = undefined} = {}) =>
   withCommercialDatabase(async ({pool, databaseUrl}) => {
     if (upgrade) {
       await withPreCommercialMigrations(async rootDir => {
@@ -263,7 +263,7 @@ export const withCommercialDraftingApi = async (test, {upgrade = false, through 
       await seedCommercialReferences(pool);
     }
     const identities = await seedCommercialIdentities(pool);
-    await withCommercialApi({databaseUrl, identities, timeZone}, async api => test({...api, pool, identities,
+    await withCommercialApi({databaseUrl, identities, timeZone, financeProviderFixture}, async api => test({...api, pool, identities,
       actorId: identities.manager.id, scope: {organizationId: commercialFixture.organizationId, legalEntityId: commercialFixture.legalEntityId},
       ownerId: commercialFixture.ownerId, clientId: commercialFixture.clientId, attributionId: commercialFixture.businessUnitId,
       businessUnitId: commercialFixture.businessUnitId, costCentreId: commercialFixture.costCentreId}));

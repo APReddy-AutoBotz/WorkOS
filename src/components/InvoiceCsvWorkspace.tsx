@@ -186,14 +186,14 @@ const InvoiceCsvEngagement = ({
     setCredits(result.credits);
     setCreditCursor(result.nextAfter);
   });
-  const changeReservation = (originalId:string,selection:string[]|string,expectedState:'Draft'|'Approved'='Draft') => void run(async c=>{
+  const changeReservation = (originalId:string,selection:string[]|string,expectedState:'Draft'|'Under Review'|'Approved'='Draft',expectedReviewId?:string) => void run(async c=>{
     const why=creditReason.trim();
     setChosen([]);
     setEvidence(null);
     setCredits(null);
     setCreditReason('');
     setCreditCursor(null);
-    const receipt=await invoiceCsv.correctionDraft(originalId,crypto.randomUUID(),why,selection,c,expectedState);
+    const receipt=await invoiceCsv.correctionDraft(originalId,crypto.randomUUID(),why,selection,c,expectedState,expectedReviewId);
     if(Array.isArray(selection) && (receipt.currency!==chosen[0]?.currency || receipt.total!== '-'+invoiceDraftTotal(chosen.map(x=>x.amount.slice(1))).amount)) {
       throw Error('Correction total changed');
     }
@@ -376,8 +376,8 @@ const InvoiceCsvEngagement = ({
                 setEvidence(null);
                 setEvidence(await invoiceCsv.correctionEvidence(row,engagementId,c));
               })}>Inspect correction draft</button>
-              {(row.correctionState==='Draft' || row.correctionState==='Approved') && hasRatePermission('commercial.invoice_drafts.cancel') && <button type="button" disabled={busy || !!pending || creditReason.trim().length<3}
-                onClick={()=>changeReservation(row.batchId,row.correctionBatchId!,row.correctionState==='Approved'?'Approved':'Draft')}>Cancel correction batch</button>}</>
+              {(row.correctionState==='Draft' || row.correctionState==='Approved' || (row.correctionState==='Under Review' && row.correctionReviewId)) && hasRatePermission('commercial.invoice_drafts.cancel') && <button type="button" disabled={busy || !!pending || creditReason.trim().length<3}
+                onClick={()=>changeReservation(row.batchId,row.correctionBatchId!,row.correctionState==='Approved'?'Approved':row.correctionState==='Under Review'?'Under Review':'Draft',row.correctionReviewId??undefined)}>Cancel correction batch</button>}</>
               : hasRatePermission('commercial.invoice_drafts.own') ? <label><input type="checkbox" checked={chosen.some(x=>x.itemId===row.itemId)}
                 disabled={busy || !!pending || (chosen.length>0 && chosen[0].batchId!==row.batchId)}
                 onChange={e=>setChosen(e.target.checked?[...chosen,row]:chosen.filter(x=>x.itemId!==row.itemId))}/>Select credit {row.itemId}</label> : 'Available'}

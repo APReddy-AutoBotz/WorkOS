@@ -332,7 +332,9 @@ const verifyCommercialDrafting = async reversalScenario => {
     const replay=await apiRequest(linePath,{method:'POST',identity:identities.reader,body:original});
     assert.equal(replay.body.replayed,true,JSON.stringify(replay.body));
     await workerStatus('On Leave');
-    assert.equal((await apiRequest(linePath,{method:'POST',identity:identities.reader,body:original})).status,409);
+    const replayedLine=await apiRequest(linePath,{method:'POST',identity:identities.reader,body:original});
+    assert.equal(replayedLine.body.replayed,true,JSON.stringify(replayedLine.body));
+    assert.equal(replayedLine.body.line.id,fixedLine.id);
     await workerStatus('Active');
     const double=await apiRequest(linePath,{method:'POST',identity:identities.reader,
       body:{...original,expectedLineCount:1,requestId:crypto.randomUUID()}});
@@ -749,7 +751,7 @@ const verifyCommercialDrafting = async reversalScenario => {
           return {currency:a.currency,boundary,expected:count,observed:count,amount:includesCredit ? '0' : amount,exceptions:0};
         });
         assert.deepEqual(details.body.controls,[...activeControls,{
-          currency:a.currency,boundary:'Released historical line',expected:1,observed:1,amount,exceptions:0,
+          currency:a.currency,boundary:'Released historical line',expected:creditCount===2?3:1,observed:creditCount===2?3:1,amount:creditCount===2?'0':amount,exceptions:0,
         }]);
       };
       await checkChargeBalance(null);
@@ -889,9 +891,31 @@ const verifyCommercialDrafting = async reversalScenario => {
           await csvDesk.getByRole('button',{name:'Reserve selected credits'}).click();
           const saved=await saving;
           assert.equal(saved.status(),201,await saved.text());
-          const correction=(await saved.json()).receipt;
+          let correction=(await saved.json()).receipt;
           assert.equal(correction.total,'-3500');
           const checked=(response,expected=201)=>{assert.equal(response.status,expected,JSON.stringify(response.body));return response.body;};
+          const pendingSource=checked(await act('/sources/'+correction.batchId,finance),200).batch;
+          const pending=checked(await act('/requests',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),
+            batchId:correction.batchId,expectedPolicyId:policyId,expectedLineCount:2,expectedLineageHash:pendingSource.lineageHash,
+            reason:'Inspect correction before cancellation'})).approval;
+          const cancelBody={expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),batchId:correction.batchId,
+            expectedState:'Under Review',expectedReviewId:pending.id,reason:'Release adjustments under review'};
+          const cancel=body=>apiRequest(reservePath+'/cancel',{method:'POST',identity:finance,body});
+          checked(await cancel({...cancelBody,expectedReviewId:crypto.randomUUID()}),409);
+          await pool.query("update role_permissions set enabled=false where role_name=$1 and permission_key='commercial.invoice_drafts.cancel'",[finance.role]);
+          checked(await cancel(cancelBody),403);
+          await pool.query("update role_permissions set enabled=true where role_name=$1 and permission_key='commercial.invoice_drafts.cancel'",[finance.role]);
+          await csvDesk.getByRole('button',{name:'View issued credits'}).click();
+          await csvDesk.getByLabel('Correction batch reason').fill(cancelBody.reason);
+          const cancelling=csvBrowser.page.waitForResponse(r=>r.url().endsWith(reservePath+'/cancel') && r.request().method()==='POST');
+          await csvDesk.getByRole('button',{name:'Cancel correction batch'}).first().click();
+          const cancelled=await cancelling;
+          assert.equal(cancelled.status(),201,await cancelled.text());
+          assert.equal((await cancelled.json()).receipt.state,'Cancelled');
+          assert.equal(checked(await cancel(cancelled.request().postDataJSON()),200).replayed,true);
+          assert.equal((await pool.query("select status from approval_records where entity_type='InvoiceBatchApproval' and entity_id=$1",[pending.id])).rows[0].status,'Cancelled');
+          correction=checked(await apiRequest(reservePath,{method:'POST',identity:finance,body:{expectedOwnerKey:ownerKey,
+            requestId:crypto.randomUUID(),reason:'Reacquire released adjustments',itemIds}})).receipt;
           const source=checked(await act('/sources/'+correction.batchId,finance),200).batch;
           assert.deepEqual(source.lines.map(l=>l.evidence.originalLineId),[lineId,lineId]);
           const approval=checked(await act('/requests',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),
@@ -1881,8 +1905,8 @@ const verifyCommercialDrafting = async reversalScenario => {
     console.log('Retainer reversal scenario passed:',reversalScenario);
     console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export and downstream billing attestation, independent retainer reversal review, completion notices, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
   } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
-}, {upgrade: true, through:reversalScenario==='approved credit'?95:undefined, afterApi: reversalScenario === 'approved credit' && process.argv.includes('--restore-credit')
+}, {upgrade: true, financeProviderFixture:reversalScenario==='stale reviewer', through:reversalScenario==='approved credit'?95:undefined, afterApi: reversalScenario === 'approved credit' && process.argv.includes('--restore-credit')
     ? source => verifyRecoveredCredit(source,recoveryEvidence) : undefined});
 };
-await verifyCommercialDrafting('approved credit');
+if (!process.argv.includes('--stale-reviewer-only')) await verifyCommercialDrafting('approved credit');
 await verifyCommercialDrafting('stale reviewer');
