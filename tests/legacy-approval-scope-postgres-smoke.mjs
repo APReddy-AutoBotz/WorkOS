@@ -189,13 +189,15 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await pool.query('drop trigger synthetic_delegation_audit_failure on audit_logs; drop function synthetic_delegation_audit_failure()');
   await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id,reporting_manager_id)
     values('synthetic-delegated-worker','SYN-DELEGATED','Synthetic delegated worker','delegated-worker@example.test','Analyst','Delivery','US','director-commercial','Active','org-default','legal-default',$1)`,[f.ownerId]);
-  await pool.query(`insert into approval_records(id,entity_type,entity_id,subject_employee_id,requester_name,status)
-    values('synthetic-delegated-approval','LeaveRequest','synthetic-delegated-source','synthetic-delegated-worker','Synthetic requester','Pending')`);
+  let approvalId='synthetic-delegated-approval';
+  const createPending=()=>pool.query(`insert into approval_records(id,entity_type,entity_id,subject_employee_id,requester_name,status)
+    values($1,'LeaveRequest',$1,'synthetic-delegated-worker','Synthetic requester','Pending')`,[approvalId]);
+  await createPending();
   await pool.query("update approval_delegations set status='Active' where id=$1",[created.body.id]);
   const assertDelegated=async (expected,role=ids.denied.role)=>{
     for(const path of ['/api/approvals','/api/reports/approval-sla']){
       const result=await request(path,{identity:{...ids.denied,role}});assert.equal(result.status,200,JSON.stringify(result.body));
-      assert.equal((Array.isArray(result.body)?result.body:result.body.rows).some(x=>x.id==='synthetic-delegated-approval'),expected,path);
+      assert.equal((Array.isArray(result.body)?result.body:result.body.rows).some(x=>x.id===approvalId),expected,path);
     }
   };
   await assertDelegated(true);
@@ -207,7 +209,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   const revokeExited=await request('/api/approval-delegations',{method:'POST',body:{...body,id:created.body.id,status:'Inactive'}});
   assert.equal(revokeExited.status,200,'Scoped administration can revoke delegation after a participant exits');
   await pool.query("update employees set status='Active' where id=$1",[employee]);
-  await pool.query("update approval_delegations set status='Active' where id=$1",[created.body.id]);await assertDelegated(true);
+  const regrant=await request('/api/approval-delegations',{method:'POST',body:{...body,id:created.body.id,status:'Active'}});
+  assert.equal(regrant.status,200,JSON.stringify(regrant.body));
+  await assertDelegated(false);
+  approvalId='synthetic-post-grant-approval';
+  await createPending();
+  await assertDelegated(true);
   await pool.query("update users set status='Disabled' where id=$1",[ids.reader.id]);await assertDelegated(false);
   await pool.query("update users set status='Active' where id=$1",[ids.reader.id]);await assertDelegated(true);
   await pool.query("delete from user_roles where user_id=$1 and role_id=(select id from roles where name='TeamLead')",[ids.reader.id]);await assertDelegated(false);
