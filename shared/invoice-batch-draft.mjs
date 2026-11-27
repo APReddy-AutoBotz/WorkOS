@@ -26,6 +26,20 @@ export const validInvoiceDraft = (x) =>
   ['WORK_DATE', 'ELIGIBLE_DATE'].includes(x.periodBasis) &&
   approvalUuid(x.ownerUserId) &&
   approvalText(x.ownerRole, 100);
+// T&M CSV v1 has one line per item, eligibility event and valuation snapshot.
+export function createTmLineageCheck() {
+  const fields = ['lineId', 'itemId', 'eventId', 'snapshotId'];
+  const seen = new Map(fields.map(field => [field, new Set()]));
+  return line => {
+    for (const field of fields) {
+      const id = line[field].toLowerCase();
+      if (seen.get(field).has(id)) return false;
+    }
+    for (const field of fields) seen.get(field).add(line[field].toLowerCase());
+    return true;
+  };
+}
+
 export const invoiceItemMatches = (draft, item) => {
   if (
     !validInvoiceDraft(draft) ||

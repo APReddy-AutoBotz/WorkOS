@@ -2,7 +2,7 @@ import { CREDIT_CSV_SCHEMA,verifyCreditCsv,renderCreditCsv } from '../../shared/
 import { verifyMilestoneInvoiceCsv,verifyRetainerInvoiceCsv,verifyServiceInvoiceCsv,verifyPeriodInvoiceCsv,verifyFixedFeeInvoiceCsv } from './milestoneInvoiceCsv';
 import { validInvoiceConfirmationCommand, validConfirmationTotal } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
-import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
+import { createTmLineageCheck, invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { canonicalHours, compareHours } from '../../shared/work-hours.mjs';
 import { api, ApiClientError } from './apiClient';
 import { captureRateContext } from './rateCandidates';
@@ -347,7 +347,7 @@ const checkArtifact = async (a: InvoiceCsvArtifact) => {
         'schema_version,batch_id,line_id,line_sequence,item_id,item_version,event_id,snapshot_id,billing_evidence_b64,client_id_b64,contract_id_b64,engagement_id_b64,work_date,eligible_date,currency,amount,period_start,period_end,period_basis';
     if (rows[0] !== head || rows.at(-1) !== '' || rows.length !== a.lineCount + 2) return bad();
     const amounts: string[] = [],
-      seen = new Set<string>();
+      acceptLineage = createTmLineageCheck();
     let sourceIdentity: string | null = null;
     for (const [n, row] of rows.slice(1, -1).entries()) {
       const c = row.split(',');
@@ -361,7 +361,7 @@ const checkArtifact = async (a: InvoiceCsvArtifact) => {
         c[5] !== '1' ||
         !uuid.safeParse(c[6]).success ||
         !uuid.safeParse(c[7]).success ||
-        seen.has(c[4]) ||
+        !acceptLineage({lineId: c[2], itemId: c[4], eventId: c[6], snapshotId: c[7]}) ||
         !date.safeParse(c[12]).success ||
         !date.safeParse(c[13]).success ||
         c[14] !== a.currency ||
@@ -374,7 +374,6 @@ const checkArtifact = async (a: InvoiceCsvArtifact) => {
         (c[18] === 'WORK_DATE' ? c[12] : c[13]) > c[17]
       )
         return bad();
-      seen.add(c[4]);
       const decoded = c.slice(8, 12).map((value) => {
         if (!value.startsWith('b64:') || !value.slice(4)) return bad();
         return new TextDecoder('utf-8', { fatal: true }).decode(decodeBase64(value.slice(4)));

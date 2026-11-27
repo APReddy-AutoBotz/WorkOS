@@ -162,20 +162,29 @@ const secondSnapshot = randomUUID(),
   two = invoiceCsvArtifact({ ...source, lines: [line, secondLine] }),
   rows = two.bytes.toString('utf8').split('\r\n'),
   columns = rows[2].split(',');
-columns[9] = 'b64:' + Buffer.from('other-client').toString('base64');
-rows[2] = columns.join(',');
-const inconsistent = Buffer.from(rows.join('\r\n'));
-raw = {
-  ...base,
-  artifact: {
-    ...artifact,
-    lineCount: 2,
-    total: '250.3',
-    payloadBase64: inconsistent.toString('base64'),
-    sha256: createHash('sha256').update(inconsistent).digest('hex'),
-  },
-};
-await assert.rejects(invoiceCsv.artifact(artifactId, capture()), { status: 503 });
+async function readTwoRows(cells) {
+  const bytes = Buffer.from([rows[0], rows[1], cells.join(','), ''].join('\r\n'));
+  raw = { ...base, artifact: { ...artifact, lineCount: 2, total: two.total,
+    payloadBase64: bytes.toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') } };
+  return invoiceCsv.artifact(artifactId, capture());
+}
+assert.deepEqual(Buffer.from((await readTwoRows(columns)).bytes), two.bytes);
+const changedClient = [...columns];
+changedClient[9] = 'b64:' + Buffer.from('other-client').toString('base64');
+await assert.rejects(readTwoRows(changedClient), { status: 503 });
+
+for (const [field, column] of [['lineId', 2], ['itemId', 4], ['eventId', 6], ['snapshotId', 7]]) {
+  const duplicate = line[field].toUpperCase();
+  const repeated = {...secondLine, [field]: duplicate};
+  const changed = [...columns];
+  changed[column] = duplicate;
+  if (field === 'snapshotId') {
+    repeated.evidenceJson = JSON.stringify({...evidence, snapshotId: duplicate});
+    changed[8] = 'b64:' + Buffer.from(repeated.evidenceJson).toString('base64');
+  }
+  assert.throws(() => invoiceCsvArtifact({...source, lines: [line, repeated]}), undefined, field);
+  await assert.rejects(readTwoRows(changed), {status: 503}, field);
+}
 raw = { ...base, artifact };
 for (const change of [
   () => store.set('workos_api_token', 'other'),
