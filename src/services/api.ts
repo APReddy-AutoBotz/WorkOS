@@ -553,7 +553,7 @@ export const allocationService = {
         employee_id: alloc.employeeId,
         project_id: alloc.projectId,
         role_on_project: alloc.roleOnProject || null,
-        percentage: alloc.percentage,
+         ...(alloc.fixedHours===undefined?{percentage:alloc.percentage}:{fixed_hours:alloc.fixedHours}),
         start_date: alloc.startDate,
         end_date: alloc.endDate,
         billable: alloc.billable,

@@ -12,5 +12,5 @@ export const validAssignmentApprovalPolicy = d => {
         return approvalText(rendered.title, 1200) && approvalText(rendered.body, 12000) && approvalText(action.title, 1200) && approvalText(action.body, 12000);
     });
 };
-export const materialAssignmentFields = (before, after, fields) => fields.filter(k => before[k] !== after[k]);
+export const materialAssignmentFields = (before, after, fields) => fields.filter(k => before[k] !== after[k] || (k === 'quantityExact' && before.quantityUnit !== after.quantityUnit));
 export const assignmentApprovalIdentity = (...args) => approvalEventIdentity(...args).replace(/^work-approval\//, 'assignment-approval/');

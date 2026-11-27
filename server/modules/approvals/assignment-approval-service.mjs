@@ -1,5 +1,6 @@
+import {assignmentPlannedPercentage} from '../planning/assignment-planned-load.mjs';
 import { randomUUID } from 'node:crypto';
-import { validAssignmentDefinition } from '../../../shared/assignment-version.mjs';
+import { validPlannedAssignment } from '../../../shared/assignment-version.mjs';
 import { validAssignmentApprovalPolicy, materialAssignmentFields, assignmentApprovalIdentity } from '../../../shared/assignment-approval.mjs';
 import { approvalState, approvalRecipients, renderApprovalTemplate, approvalText } from '../../../shared/work-approval.mjs';
 import { capacityHash, capacityCanonical } from '../planning/worker-capacity-service.mjs';
@@ -36,14 +37,16 @@ export const assignmentApprovalActor = async (c, req, stage, source, o) => {
 };
 export const assignmentApprovalPolicy = async (c, req, workerId) => (await c.query('select p.*,p.effective_from::text from assignment_material_policy($1,$2,$3)p where p.id is not null', [...scope(req), workerId])).rows[0] ?? null;
 export const assertAssignmentProposalDefinition = async (c, req, source, d, o) => {
-    if (!validAssignmentDefinition(d))
+    if (!validPlannedAssignment(d))
         fail('ASSIGNMENT_APPROVAL_INVALID', 'Supply a complete valid exact percentage definition.', 400);
-    await validateAssignmentPolicy(c, req, { employee_id: source.employee_id, project_id: source.project_id, role_on_project: d.role, percentage: d.quantityExact, start_date: d.startsOn, end_date: d.endsOn, billable: d.billable, status: d.status, comments: d.comment });
+    const percentage=await assignmentPlannedPercentage(c,req,source.employee_id,d,o.buildEmployeeScopeWhere);
+    await validateAssignmentPolicy(c, req, { employee_id: source.employee_id, project_id: source.project_id, role_on_project: d.role, percentage, start_date: d.startsOn, end_date: d.endsOn, billable: d.billable, status: d.status, comments: d.comment });
     if (await o.getSetting('blockOverAllocation', false) && d.status === 'Active') {
-        const blocked = (await c.query("select coalesce(sum(percentage),0)+$1::numeric>100 blocked from project_allocations where employee_id=$2 and organization_id=$3 and legal_entity_id=$4 and id<>$5 and status='Active'and daterange(start_date,end_date,'[]')&&daterange($6::date,$7::date,'[]')", [d.quantityExact, source.employee_id, ...scope(req), source.id, d.startsOn, d.endsOn])).rows[0].blocked;
+        const blocked = (await c.query("select coalesce(sum(percentage),0)+$1::numeric>100 blocked from project_allocations where employee_id=$2 and organization_id=$3 and legal_entity_id=$4 and id<>$5 and status='Active'and daterange(start_date,end_date,'[]')&&daterange($6::date,$7::date,'[]')", [percentage, source.employee_id, ...scope(req), source.id, d.startsOn, d.endsOn])).rows[0].blocked;
         if (blocked)
             fail('ASSIGNMENT_LEGACY_OVERLAP_BLOCKED', 'Existing legacy percentage guard rejects the proposed change.', 422);
     }
+    return percentage;
 };
 const recipients = async (c, req, v, key, stage, o) => {
     if (key === 'approval.action_required') {
@@ -192,13 +195,13 @@ export const decideAssignmentApproval = async (c, req, id, input, o) => {
     await setAssignmentApprovalContext(c, req, id);
     const t = (await c.query('insert into assignment_approval_transitions(id,instance_id,sequence,stage,decision,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,outcome)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)returning *', [randomUUID(), id, sequence, v.state.currentStage, input.decision, req.user.sub, req.user.activeRole, input.requestId, fingerprint, input.reason, req.operationId, next])).rows[0];
     if (next.status === 'Approved') {
-        await assertAssignmentProposalDefinition(c, req, v.a, v.i.proposed_definition, o);
+        const percentage=await assertAssignmentProposalDefinition(c, req, v.a, v.i.proposed_definition, o);
         const d = v.i.proposed_definition;
         await setAssignmentVersionContext(c, req, { employeeId: v.i.employee_id, projectId: v.i.project_id, reason: v.i.reason });
-        const values = [d.role, d.quantityExact, d.startsOn, d.endsOn, d.billable, d.status, d.comment, v.i.assignment_id, ...scope(req)];
+        const values = [d.role, percentage, d.startsOn, d.endsOn, d.billable, d.status, d.comment, v.i.assignment_id, ...scope(req),d.quantityUnit==='hours'?d.quantityExact:null];
         const applied = v.i.operation_kind === 'Creation'
-            ? (await c.query('insert into project_allocations(role_on_project,percentage,start_date,end_date,billable,status,comments,id,organization_id,legal_entity_id,employee_id,project_id)values($1,$2::numeric,$3::date,$4::date,$5,$6,$7,$8,$9,$10,$11,$12)returning *', [...values, v.i.employee_id, v.i.project_id])).rows[0]
-            : (await c.query('update project_allocations set role_on_project=$1,percentage=$2::numeric,start_date=$3::date,end_date=$4::date,billable=$5,status=$6,comments=$7,updated_at=clock_timestamp()where id=$8 and organization_id=$9 and legal_entity_id=$10 returning *', values)).rows[0];
+            ? (await c.query('insert into project_allocations(role_on_project,percentage,start_date,end_date,billable,status,comments,id,organization_id,legal_entity_id,fixed_hours,employee_id,project_id)values($1,$2::numeric,$3::date,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13)returning *', [...values, v.i.employee_id, v.i.project_id])).rows[0]
+            : (await c.query('update project_allocations set role_on_project=$1,percentage=$2::numeric,start_date=$3::date,end_date=$4::date,billable=$5,status=$6,comments=$7,fixed_hours=$11::numeric,updated_at=clock_timestamp()where id=$8 and organization_id=$9 and legal_entity_id=$10 returning *', values)).rows[0];
         await o.audit(c, req, { module: 'Allocations', action: v.i.operation_kind === 'Creation' ? 'Apply Approved Assignment Creation' : 'Apply Approved Material Assignment Change', entityType: 'Allocation', entityId: v.i.assignment_id, oldValue: v.i.before_snapshot, newValue: applied, reason: v.i.reason, details: 'Final named-stage decision applies exact approved source; existing dates/overlap/version guards retained; no historical work or financial rewrite.' });
     }
     if (next.status !== 'Pending')

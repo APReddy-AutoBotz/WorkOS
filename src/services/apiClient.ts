@@ -355,6 +355,7 @@ export const normalizeAllocation = (
     projectManager: project?.managerName ?? '',
     roleOnProject: r.role_on_project ? String(r.role_on_project) : undefined,
     percentage: Number(r.percentage),
+    ...(typeof r.fixed_hours==='string'?{fixedHours:r.fixed_hours}:{}),
     startDate: String(r.start_date).slice(0, 10),
     endDate: String(r.end_date).slice(0, 10),
     billable: Boolean(r.billable),

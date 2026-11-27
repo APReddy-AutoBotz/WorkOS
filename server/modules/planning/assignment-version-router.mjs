@@ -1,6 +1,7 @@
+import {assignmentPlannedPercentage} from './assignment-planned-load.mjs';
 import {Router} from 'express';
 import {z} from 'zod';
-import {ASSIGNMENT_VERSION,validAssignmentDefinition,assignmentActivePercentage,validFixedHours,distributeFixedHours} from '../../../shared/assignment-version.mjs';
+import {ASSIGNMENT_VERSION,validPlannedAssignment,assignmentActivePercentage,validFixedHours,distributeFixedHours} from '../../../shared/assignment-version.mjs';
 import {validCapabilityDate} from '../../../shared/workforce-capabilities.mjs';
 import {validCapacityRange} from '../../../shared/worker-capacity.mjs';
 import {validateAssignmentPolicy,lockWorkPolicy,workPolicyError} from '../work-capture/assignment-work-policy.mjs';
@@ -26,24 +27,27 @@ export const createAssignmentVersionRouter=({pool,requireDatabase,requireAuth,re
  router.get('/assignments/:id/context',handle(false,async(c,req)=>{
   const q=parse(z.object({startsOn:date,endsOn:date,expectedRevision:hash,fixedHours:z.string().refine(validFixedHours).optional()}).strict().refine(v=>validCapacityRange(v.startsOn,v.endsOn)),req.query),a=await current(c,req,req.params.id);if(a.revision!==q.expectedRevision)fail('ASSIGNMENT_VERSION_STALE','Assignment source changed. Reload the selected assignment.',409);const calculated=await calculateScopedCapacity(c,req,a.employee_id,q.startsOn,q.endsOn,buildEmployeeScopeWhere);
   const plan = {};
-  if(q.fixedHours !== undefined){
+  const fixedHours=q.fixedHours ?? (q.startsOn===a.snapshot.startsOn && q.endsOn===a.snapshot.endsOn && a.snapshot.quantityUnit==='hours' ? a.snapshot.quantityExact : undefined);
+  if(fixedHours !== undefined){
    if(q.startsOn !== a.snapshot.startsOn || q.endsOn !== a.snapshot.endsOn)
     fail('ASSIGNMENT_RANGE_MISMATCH','Use the full assignment date range to distribute fixed hours.',400);
-   plan.fixedHours = q.fixedHours;
-   plan.dailyFixedHours = distributeFixedHours(q.fixedHours, calculated.result.days);
+   plan.fixedHours = fixedHours;
+   plan.dailyFixedHours = distributeFixedHours(fixedHours, calculated.result.days);
   }
   return{...scope(req),...plan,assignmentId:a.id,revision:a.revision,capacity:calculated.result,declaredPercentageByDate:calculated.result.days.map(d=>({date:d.date,percentageExact:assignmentActivePercentage(a.snapshot,d.date)}))};
  }));
  router.post('/assignments/:id/versions',requirePermission('allocations.manage'),handle(true,async(c,req)=>{
-  const input=parse(z.object({expectedRevision:hash,expectedLatestId:z.string().uuid().nullable(),definition:z.unknown().refine(validAssignmentDefinition),reason:z.string().trim().min(1).max(1000)}).strict(),req.body),a=await current(c,req,req.params.id,true),v=await latest(c,a);view(a,v);if(a.revision!==input.expectedRevision||(v?.id??null)!==input.expectedLatestId)fail('ASSIGNMENT_VERSION_STALE','Assignment or retained source version changed. Reload before saving.',409);
-  const d=input.definition,values={employee_id:a.employee_id,project_id:a.project_id,role_on_project:d.role,percentage:d.quantityExact,start_date:d.startsOn,end_date:d.endsOn,billable:d.billable,status:d.status,comments:d.comment};await validateAssignmentPolicy(c,req,values);
+  const input=parse(z.object({expectedRevision:hash,expectedLatestId:z.string().uuid().nullable(),definition:z.unknown().refine(validPlannedAssignment),reason:z.string().trim().min(1).max(1000)}).strict(),req.body),a=await current(c,req,req.params.id,true),v=await latest(c,a);view(a,v);if(a.revision!==input.expectedRevision||(v?.id??null)!==input.expectedLatestId)fail('ASSIGNMENT_VERSION_STALE','Assignment or retained source version changed. Reload before saving.',409);
+  const d=input.definition;
+  const percentage=await assignmentPlannedPercentage(c,req,a.employee_id,d,buildEmployeeScopeWhere);
+  const values={employee_id:a.employee_id,project_id:a.project_id,role_on_project:d.role,percentage,start_date:d.startsOn,end_date:d.endsOn,billable:d.billable,status:d.status,comments:d.comment};await validateAssignmentPolicy(c,req,values);
   if(await getSetting('blockOverAllocation',false)&&d.status==='Active'){
-   const blocked=(await c.query(`select coalesce(sum(percentage),0)+$1::numeric>100 blocked from project_allocations where employee_id=$2 and organization_id=$3 and legal_entity_id=$4 and id<>$5 and status='Active' and daterange(start_date,end_date,'[]')&&daterange($6::date,$7::date,'[]')`,[d.quantityExact,a.employee_id,a.organization_id,a.legal_entity_id,a.id,d.startsOn,d.endsOn])).rows[0].blocked;if(blocked)fail('ASSIGNMENT_LEGACY_OVERLAP_BLOCKED','The selected legacy percentage-overlap guard rejects this change. No capacity conversion or exception is inferred.');
+   const blocked=(await c.query(`select coalesce(sum(percentage),0)+$1::numeric>100 blocked from project_allocations where employee_id=$2 and organization_id=$3 and legal_entity_id=$4 and id<>$5 and status='Active' and daterange(start_date,end_date,'[]')&&daterange($6::date,$7::date,'[]')`,[percentage,a.employee_id,a.organization_id,a.legal_entity_id,a.id,d.startsOn,d.endsOn])).rows[0].blocked;if(blocked)fail('ASSIGNMENT_LEGACY_OVERLAP_BLOCKED','The selected legacy percentage-overlap guard rejects this change. No capacity conversion or exception is inferred.');
   }
   await setAssignmentVersionContext(c,req,{employeeId:a.employee_id,projectId:a.project_id,reason:input.reason});
-  const saved=(await c.query(`update project_allocations set role_on_project=$1,percentage=$2::numeric,start_date=$3::date,end_date=$4::date,billable=$5,status=$6,comments=$7,updated_at=clock_timestamp() where id=$8 and organization_id=$9 and legal_entity_id=$10 returning *`,[d.role,d.quantityExact,d.startsOn,d.endsOn,d.billable,d.status,d.comment,a.id,a.organization_id,a.legal_entity_id])).rows[0];
+  const saved=(await c.query(`update project_allocations set role_on_project=$1,percentage=$2::numeric,start_date=$3::date,end_date=$4::date,billable=$5,status=$6,comments=$7,fixed_hours=$11::numeric,updated_at=clock_timestamp() where id=$8 and organization_id=$9 and legal_entity_id=$10 returning *`,[d.role,percentage,d.startsOn,d.endsOn,d.billable,d.status,d.comment,a.id,a.organization_id,a.legal_entity_id,d.quantityUnit==='hours'?d.quantityExact:null])).rows[0];
   const previousSource={...a};delete previousSource.revision;delete previousSource.snapshot;delete previousSource.bindingObservation;
-  await audit(c,req,{module:'Allocations',action:'Update Allocation',entityType:'Allocation',entityId:a.id,oldValue:previousSource,newValue:saved,reason:input.reason,details:'Updated the existing percentage assignment with exact source/ledger CAS; no inferred conversion or approval authority.'});
+  await audit(c,req,{module:'Allocations',action:'Update Allocation',entityType:'Allocation',entityId:a.id,oldValue:previousSource,newValue:saved,reason:input.reason,details:'Updated assignment quantity and dates against the retained source revision.'});
   const employee=(await c.query('select * from employees where id=$1',[a.employee_id])).rows[0],project=(await c.query('select * from projects where id=$1',[a.project_id])).rows[0];await recordAllocationChangeApproval(c,req,{action:'Update',allocation:saved,previous:previousSource,employee,project});
   const refreshed=await current(c,req,a.id),next=await latest(c,refreshed),retained=(await c.query('select v.*,(select e.decision from assignment_overlap_evidence e where e.assignment_version_id=v.id and e.organization_id=v.organization_id and e.legal_entity_id=v.legal_entity_id)overlap_policy_evidence from assignment_versions v where id=$1',[next.id])).rows[0];return{...scope(req),assignmentId:a.id,current:view(refreshed,next),version:versionView(retained)};
  }));

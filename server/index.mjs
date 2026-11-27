@@ -1,3 +1,6 @@
+import {compareHours} from '../shared/work-hours.mjs';
+import {validFixedHours} from '../shared/assignment-version.mjs';
+import {assignmentPlannedPercentage} from './modules/planning/assignment-planned-load.mjs';
 import {startOverdueWorkWorker} from './modules/approvals/overdue-work.mjs';
 import {processMonthEndMarginAlerts} from './modules/commercial-drafting/month-end-margin-alerts.mjs';
 import {startRetainerRiskWorker} from './modules/commercial-drafting/retainer-risk-worker.mjs';
@@ -2663,13 +2666,14 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
     employee_id: z.string().min(1),
     project_id: z.string().min(1),
     role_on_project: z.string().min(1).optional().nullable(),
-    percentage: z.number().min(0).max(200),
+    percentage: z.number().min(0).max(200).optional(),
+    fixed_hours: z.string().refine(validFixedHours).optional(),
     start_date: strictIsoDateSchema,
     end_date: strictIsoDateSchema,
     billable: z.boolean().default(true),
     status: z.enum(['Active', 'Paused', 'Completed']).default('Active'),
     comments: z.string().optional().nullable(),
-  });
+  }).refine(v=>(v.percentage===undefined)!==(v.fixed_hours===undefined),'Choose one assignment quantity.');
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
@@ -2720,6 +2724,8 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       }
     }
 
+    const percentage=parsed.data.fixed_hours===undefined ? String(parsed.data.percentage)
+      : await assignmentPlannedPercentage(client,req,employee.id,{quantityUnit:'hours',quantityExact:parsed.data.fixed_hours,startsOn:parsed.data.start_date,endsOn:parsed.data.end_date},buildEmployeeScopeWhere);
     const blockOverAllocation = await getSetting('blockOverAllocation', false);
     if (blockOverAllocation && parsed.data.status === 'Active') {
       await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [parsed.data.employee_id]);
@@ -2732,8 +2738,8 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
           and id <> coalesce($2, '')
           and daterange(start_date, end_date, '[]') && daterange($3::date, $4::date, '[]')
       `, [parsed.data.employee_id, parsed.data.id || null, parsed.data.start_date, parsed.data.end_date, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
-      const total = parsePercent(loadResult.rows[0]?.total) + parsed.data.percentage;
-      if (total > 100) {
+      const total = sumHours([loadResult.rows[0].total,percentage]);
+      if (compareHours(total,'100')>0) {
         await client.query('rollback');
         res.status(422).json({ error: `Allocation would exceed 100% for overlapping dates (${total}%)` });
         return;
@@ -2754,13 +2760,14 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
     }
     await setAssignmentVersionContext(client,req,{employeeId:employee.id,projectId:project.id});
     const result = await client.query(`
-      insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id)
-      values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id, fixed_hours)
+      values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
       on conflict (id) do update set
         employee_id = excluded.employee_id,
         project_id = excluded.project_id,
         role_on_project = excluded.role_on_project,
         percentage = excluded.percentage,
+        fixed_hours = excluded.fixed_hours,
         start_date = excluded.start_date,
         end_date = excluded.end_date,
         billable = excluded.billable,
@@ -2775,13 +2782,13 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       parsed.data.employee_id,
       parsed.data.project_id,
       parsed.data.role_on_project || null,
-      parsed.data.percentage,
+      percentage,
       parsed.data.start_date,
       parsed.data.end_date,
       parsed.data.billable,
       parsed.data.status,
       parsed.data.comments || null,
-      req.organizationScope.organizationId, req.organizationScope.legalEntityId,
+      req.organizationScope.organizationId, req.organizationScope.legalEntityId, parsed.data.fixed_hours ?? null,
     ]);
     if (result.rowCount === 0) {
       await client.query('rollback');
@@ -2810,6 +2817,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
   } catch (error) {
     await client.query('rollback');
     if (workPolicyError(res,error)) return;
+    if(error.statusCode){res.status(error.statusCode).json({error:error.message,code:error.code});return;}
     console.error(error);
     res.status(500).json({ error: 'Allocation save failed' });
   } finally {

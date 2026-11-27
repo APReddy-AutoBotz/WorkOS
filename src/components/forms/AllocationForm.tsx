@@ -1,4 +1,5 @@
 import { AssignmentCreationRequest } from '../AssignmentCreationApprovals';
+import {validFixedHours} from '../../../shared/assignment-version.mjs';
 import { canonicalHours } from '../../../shared/work-hours.mjs';
 import {captureOverlapContext,isOverlapContextCurrent} from '../../services/assignmentOverlap';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -37,6 +38,8 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
   // Form State
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(allocation?.employeeId || '');
   const [selectedProjectId, setSelectedProjectId] = useState(allocation?.projectId || '');
+  const [unit,setUnit]=useState<'percentage'|'hours'>(allocation?.fixedHours===undefined?'percentage':'hours');
+  const [fixedHours,setFixedHours]=useState<string>(allocation?.fixedHours??'');
   const [allocationPercent, setAllocationPercent] = useState(allocation?.percentage || 100);
   const [isBillable, setIsBillable] = useState((allocation?.billable ?? true).toString());
   const [status, setStatus] = useState(allocation?.status || 'Active');
@@ -120,7 +123,8 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
       setFormError('End date must be on or after start date.');
       return;
     }
-    if (settings.blockOverAllocation && isOverloading) {
+    if(unit==='hours'&&!validFixedHours(fixedHours)){setFormError('Enter a non-negative decimal total for the assignment.');return;}
+    if (unit==='percentage' && settings.blockOverAllocation && isOverloading) {
       setFormError(`Allocation blocked: peak load ${peakLoad}% exceeds the configured ${settings.utilizationThresholdHigh}% threshold.`);
       return;
     }
@@ -137,6 +141,7 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
       projectManager: selectedProject?.managerName || '',
       roleOnProject: roleOnProject || selectedEmployee?.designation || '',
       percentage: allocationPercent,
+      ...(unit==='hours'?{fixedHours}:{}),
       startDate,
       endDate,
       status,
@@ -182,7 +187,7 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
         </button>
       </div>
 
-      {!allocation?.id && <div className="px-8 pt-3"><button type="button" onClick={() => setCreationRequest(v => !v)}>Request configured creation approval</button>{creationRequest && <div key={JSON.stringify([selectedEmployeeId, selectedProjectId, roleOnProject, allocationPercent, startDate, endDate, status, isBillable, remarks])}><AssignmentCreationRequest workerId={selectedEmployeeId} projectId={selectedProjectId} definition={{ role: roleOnProject || null, quantityUnit: 'percentage', quantityExact: canonicalHours(String(allocationPercent)), startsOn: startDate, endsOn: endDate, billable: isBillable === 'true', status: status as 'Active' | 'Paused' | 'Completed', comment: remarks.trim() || null }} /></div>}</div>}
+      {!allocation?.id && <div className="px-8 pt-3"><button type="button" onClick={() => setCreationRequest(v => !v)}>Request configured creation approval</button>{creationRequest && <div key={JSON.stringify([selectedEmployeeId, selectedProjectId, roleOnProject, unit, fixedHours, allocationPercent, startDate, endDate, status, isBillable, remarks])}><AssignmentCreationRequest workerId={selectedEmployeeId} projectId={selectedProjectId} definition={{ role: roleOnProject || null, quantityUnit: unit, quantityExact: unit==='hours'?fixedHours:canonicalHours(String(allocationPercent)), startsOn: startDate, endsOn: endDate, billable: isBillable === 'true', status: status as 'Active' | 'Paused' | 'Completed', comment: remarks.trim() || null }} /></div>}</div>}
       <form onSubmit={handleSubmit} className="p-8 overflow-y-auto space-y-8">
         {formError && (
           <NoticeBanner
@@ -271,6 +276,8 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
               </h3>
               <div className="space-y-4 pt-1">
                 <div className="space-y-1.5">
+                  <label>Assignment unit<select value={unit} onChange={e=>setUnit(e.target.value as typeof unit)}><option value="percentage">Percentage</option><option value="hours">Fixed total hours</option></select></label>
+                  {unit==='hours'?<label>Fixed total hours<input inputMode="decimal" value={fixedHours} onChange={e=>setFixedHours(e.target.value)}/></label>:<>
                   <div className="flex justify-between items-end mb-1">
                     <label className="text-[10px] font-bold text-heading uppercase tracking-wider">Allocation Percentage (%)</label>
                     <span className="text-xs font-bold text-primary">{allocationPercent}%</span>
@@ -288,7 +295,7 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
                     <span>Part Time (10-40%)</span>
                     <span>Standard (50-80%)</span>
                     <span>Full Time (100%)</span>
-                  </div>
+                  </div></>}
                 </div>
               </div>
             </div>
@@ -299,7 +306,7 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
             <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 space-y-6">
               <h3 className="text-xs font-bold text-slate-dark uppercase tracking-widest">Utilisation Context</h3>
 
-              {selectedEmployee ? (
+              {unit==='hours'?<p>Hours are distributed using available capacity after approved leave.</p>:selectedEmployee ? (
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-body">Current Planned Load</span>
