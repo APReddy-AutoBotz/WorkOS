@@ -977,7 +977,7 @@ const mappedRolesFromEntraGroups = async (clientOrPool, groups = []) => {
   return result.rows.map(row => row.role_name);
 };
 
-const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null, extraRoles = [], verifiedGroups = []) => {
+const prepareEntraSession = async (clientOrPool, user, requestedRole = null, extraRoles = [], verifiedGroups = []) => {
   if (!user || user.status !== 'Active') throw new Error('User is not active');
   const roles = [...new Set([...(user.roles || []), ...extraRoles])].filter(Boolean);
   if (roles.length === 0) throw new Error('No active role is assigned to this user');
@@ -1008,23 +1008,7 @@ const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null,
     entraGroups: boundGroups,
     exp: sessionExpiresAt,
   });
-  res.cookie?.('workos_session', token, getSessionCookieOptions(sessionExpiresAt));
-  return {
-    id: user.id,
-    username: user.username,
-    employeeId: user.employee_id,
-    employeeRecordId: user.employee_record_id,
-    countryDirectorId: user.country_director_id,
-    email: user.email,
-    name: user.name,
-    roles,
-    activeRole,
-    permissions,
-    permissionRole: activeRole,
-    mustChangePassword: Boolean(user.must_change_password),
-    sessionExpiresAt: new Date(sessionExpiresAt).toISOString(),
-    token,
-  };
+  return { activeRole, token, sessionExpiresAt };
 };
 
 const recordNotificationAttempt = async (client, {
@@ -1396,7 +1380,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit.callback, as
       await client.query('update employees set entra_object_id = coalesce(entra_object_id, $2), updated_at = now() where id = $1', [user.employee_record_id, providerSubject]);
     }
     const mappedRoles = await mappedRolesFromEntraGroups(client, claims.groups || []);
-    const session = await buildLoginResponse(client, res, user, state.requestedRole, mappedRoles, claims.groups || []);
+    const session = await prepareEntraSession(client, user, state.requestedRole, mappedRoles, claims.groups || []);
     await logIntegrationEvent(client, {
       provider: 'entra',
       eventType: 'EntraLoginSucceeded',
@@ -1424,10 +1408,11 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit.callback, as
       newValue: { upn, identityLinkProvenanceReference, activeRole: session.activeRole, mappedRoles },
       source: 'System',
     });
-    await client.query('commit');
     const completionUrl = process.env.NODE_ENV === 'production'
       ? new URL('/auth/entra/complete', getGovernedAppUrls().appUrl).href
       : buildAppUrl('/auth/entra/complete');
+    await client.query('commit');
+    res.cookie('workos_session', session.token, getSessionCookieOptions(session.sessionExpiresAt));
     res.redirect(completionUrl);
   } catch (error) {
     await client.query('rollback').catch(() => {});

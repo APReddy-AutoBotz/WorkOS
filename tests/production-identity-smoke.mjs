@@ -574,6 +574,21 @@ try {
   await assertCallbackRejected({name: 'stale-session-policy', claimOverrides: {groups: ['mock-entra-group-employee']}});
   await pool.query('update deployment_session_policy set lifetime_ms=28800000');
 
+  await pool.query(`create function reject_test_login_commit() returns trigger language plpgsql as $$
+    begin raise exception 'Synthetic login commit failure'; end $$`);
+  await pool.query(`create constraint trigger reject_test_login_commit after insert on audit_logs
+    deferrable initially deferred for each row when (new.action='Entra Login')
+    execute function reject_test_login_commit()`);
+  try {
+    await assertCallbackRejected({name:'login-commit-failure',claimOverrides:{groups:['mock-entra-group-employee']}});
+    assert.equal((await pool.query("select 1 from audit_logs where action='Entra Login' and user_id=$1",[syntheticUser.rows[0].id])).rowCount,0);
+    assert.equal((await pool.query("select 1 from integration_event_logs where event_type='EntraLoginSucceeded' and entity_id=$1",[syntheticUser.rows[0].id])).rowCount,0);
+    assert.equal((await pool.query("select 1 from identity_provider_links where provider='entra' and employee_id=$1",[syntheticEmployee.rows[0].id])).rowCount,0);
+  } finally {
+    await pool.query('drop trigger reject_test_login_commit on audit_logs');
+    await pool.query('drop function reject_test_login_commit()');
+  }
+
   await pool.query("select public.revoke_account_sessions($1,0,'synthetic-provider-test')", [syntheticUser.rows[0].id]);
   const {state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = {groups:['mock-entra-group-employee','mock-entra-group-secondary']};
