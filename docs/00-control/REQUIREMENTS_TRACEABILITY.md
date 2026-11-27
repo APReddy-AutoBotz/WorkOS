@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-CORE-004 and WOS-COM-007. The project cost register evaluates effective project dates for the selector and keeps project labels available for historical entries. The fixed-fee PostgreSQL journey checks the start boundary, a prior date and a future incurred date.
+
 WOS-RPT-002. The forecast browser journey verifies dated project allocation counts at each horizon, percentage-point excess, measured zero demand and missing capacity.
 
 WOS-RPT-002 and WOS-RPT-006. The compatibility forecast reader validates the report horizon and source date. The forecast browser journey checks complete checkpoint dates, UTC roll-off boundaries and dated export rows with a different local clock.

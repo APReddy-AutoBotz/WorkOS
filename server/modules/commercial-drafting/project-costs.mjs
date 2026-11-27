@@ -27,7 +27,17 @@ export async function projectCosts(client,req,input,workerScope,audit) {
   const engagement=(await client.query("select currency from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3 and model='fixed_fee'",args)).rows[0];
   if(!engagement)fail(404,'PROJECT_COST_UNAVAILABLE','Fixed-fee engagement unavailable.');
   if(!audit){
-    const projects=(await client.query("select project_id id,code,name from commercial_project_bindings where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by code,id",args)).rows;
+    const projects=(await client.query(`select b.project_id id,b.code,b.name,
+      ($4::date <= (now() at time zone 'UTC')::date and
+       $4::date between coalesce(terms.starts_on,b.starts_on) and coalesce(terms.ends_on,b.ends_on)) as "inTerm"
+      from commercial_project_bindings b left join lateral (
+        select a.starts_on,a.ends_on from commercial_amendments a
+        where a.organization_id=b.organization_id and a.legal_entity_id=b.legal_entity_id
+          and a.entity_type='Project' and a.entity_id=b.project_id and a.effective_on<=$4::date
+        order by a.sequence desc limit 1
+      ) terms on true
+      where b.organization_id=$1 and b.legal_entity_id=$2 and b.engagement_id=$3
+      order by b.code,b.project_id`,[...args,input.day])).rows;
     const entries=(await client.query(`select e.id,b.project_id "projectId",e.reference,trim_scale(e.amount)::text amount,e.decision,
       e.decision_reason reason,e.prepared_by=$5 as "preparedByMe" from commercial_project_cost_entries e join commercial_project_bindings b on b.id=e.binding_id
       where e.organization_id=$1 and e.legal_entity_id=$2 and b.engagement_id=$3 and e.incurred_on=$4 order by e.created_at,e.id`,[...args,input.day,req.user.sub])).rows;

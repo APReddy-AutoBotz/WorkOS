@@ -7,7 +7,10 @@ export function ProjectCosts({context,engagement,day,onDecision}:{context:Commer
   const [project,setProject]=useState(''),[reference,setReference]=useState(''),[amount,setAmount]=useState(''),[reason,setReason]=useState('');
   async function load() {
     const result=await service.projectCosts(engagement,day,context);
-    if(isCommercialDraftingContextCurrent(context))setRegister(result);
+    if(isCommercialDraftingContextCurrent(context)) {
+      setRegister(result);
+      setProject(previous=>result.projects.some(candidate=>candidate.id===previous && candidate.inTerm)?previous:'');
+    }
   }
   async function run(action:()=>Promise<void>) {
     setBusy(true);setError('');
@@ -19,15 +22,17 @@ export function ProjectCosts({context,engagement,day,onDecision}:{context:Commer
     await service.recordProjectCost(engagement,context,{id,decision,reason});
     if(isCommercialDraftingContextCurrent(context)){setReason('');await load();await onDecision();}
   }
+  const eligibleProjects=register?.projects.filter(candidate=>candidate.inTerm) ?? [];
   return <fieldset disabled={busy}><legend>Non-labor project costs</legend>
     <button type="button" onClick={()=>void run(load)}>Inspect cost entries for {day}</button>
     {error && <p role="status">{error}</p>}
     {register && <>
-      {context.canPrepareProjectCost && <form onSubmit={e=>{e.preventDefault();void run(async()=>{
+      {context.canPrepareProjectCost && eligibleProjects.length===0 && <p>No project is available for a cost on this date.</p>}
+      {context.canPrepareProjectCost && eligibleProjects.length>0 && <form onSubmit={e=>{e.preventDefault();void run(async()=>{
         await service.recordProjectCost(engagement,context,{id:crypto.randomUUID(),day,projectId:project,reference,amount});
         if(isCommercialDraftingContextCurrent(context)){setAmount('');setReference('');await load();}
       });}}>
-        <label>Cost project <select required value={project} onChange={e=>setProject(e.target.value)}><option value="">Choose project</option>{register.projects.map(p=><option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
+        <label>Cost project <select required value={project} onChange={e=>setProject(e.target.value)}><option value="">Choose project</option>{eligibleProjects.map(p=><option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
         <label>Cost reference <input required maxLength={160} value={reference} onChange={e=>setReference(e.target.value)}/></label>
         <label>Incurred amount ({register.currency}) <input required inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/></label>
         <button>Submit cost for finance approval</button>
