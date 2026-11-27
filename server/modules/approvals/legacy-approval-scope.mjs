@@ -48,6 +48,7 @@ export const legacyApprovalScope = (req, params, {isGlobalRole, buildEmployeeSco
           where pa.employee_id=e.id and p.organization_id=e.organization_id and p.legal_entity_id=e.legal_entity_id
             and p.manager_id in (owner.id,owner.employee_id)))))
       and ad.status = 'Active'
+      and ar.created_at > ad.granted_at
       and current_date between ad.start_date and ad.end_date
       and (e.id = ad.delegator_id or e.reporting_manager_id = ad.delegator_id)
   )`;
