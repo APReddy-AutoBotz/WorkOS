@@ -281,7 +281,7 @@ const csvLine = {
     eligibleDate: '2026-10-29',
     evidenceJson: JSON.stringify(evidence),
   },
-  rendered = milestoneInvoiceCsvArtifact({
+  csvSource = {
     batchId: batch.id,
     clientId: 'client',
     contractId: 'contract',
@@ -293,7 +293,8 @@ const csvLine = {
     ownerUserId: batch.ownerUserId,
     ownerRole: batch.ownerRole,
     lines: [csvLine],
-  });
+  },
+  rendered = milestoneInvoiceCsvArtifact(csvSource);
 const exportSource = {
   id: batch.id,
   sourceType: line.sourceType,
@@ -352,6 +353,35 @@ const artifact = {
 };
 raw = { ...envelope, artifact };
 assert.deepEqual(Buffer.from((await invoiceCsv.artifact(artifact.id, capture())).bytes), rendered.bytes);
+// The PostgreSQL milestone key is case-sensitive. UUID lineage is not.
+const firstEvidence = {...evidence, milestoneId: 'Milestone-A'};
+const secondEvidence = {...evidence, milestoneId: 'milestone-a', decisionId: id(73)};
+const first = {...csvLine, evidenceJson: JSON.stringify(firstEvidence)};
+const second = {...csvLine, sequence: 2, lineId: id(70), itemId: id(71), eventId: id(72),
+  evidenceJson: JSON.stringify(secondEvidence)};
+const pair = milestoneInvoiceCsvArtifact({...csvSource, lines: [first,second]});
+async function readPair(bytes) {
+  raw = {...envelope, artifact: {...artifact, lineCount: 2, total: pair.total,
+    sha256: createHash('sha256').update(bytes).digest('hex'), payloadBase64: bytes.toString('base64')}};
+  return invoiceCsv.artifact(artifact.id, capture());
+}
+assert.deepEqual(Buffer.from((await readPair(pair.bytes)).bytes),pair.bytes);
+for (const [key,column] of [['milestoneId',8],['lineId',2],['itemId',4],['eventId',6]]) {
+  const duplicate = {...second};
+  const rows = pair.bytes.toString('utf8').split('\r\n');
+  const original = rows[1].split(','), changed = rows[2].split(',');
+  if (key === 'milestoneId') {
+    duplicate.evidenceJson = JSON.stringify({...secondEvidence, milestoneId:firstEvidence.milestoneId});
+    changed[8] = original[8];
+    changed[9] = 'b64:'+Buffer.from(duplicate.evidenceJson).toString('base64');
+  } else {
+    duplicate[key] = first[key].toUpperCase();
+    changed[column] = duplicate[key];
+  }
+  rows[2] = changed.join(',');
+  await assert.rejects(readPair(Buffer.from(rows.join('\r\n'))),{status:503},key);
+  assert.throws(()=>milestoneInvoiceCsvArtifact({...csvSource,lines:[first,duplicate]}),undefined,key);
+}
 raw = { ...envelope, artifact: { ...artifact, sha256: 'f'.repeat(64) } };
 await assert.rejects(invoiceCsv.artifact(artifact.id, capture()), { status: 503 });
 raw = { ...envelope, artifact: { ...artifact, total: '125.16' } };

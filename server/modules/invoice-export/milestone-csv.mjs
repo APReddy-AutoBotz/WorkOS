@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
+import { createInvoiceLineageCheck, invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
 import { milestoneInvoiceItemMatches } from '../../../shared/milestone-invoice-source.mjs';
 
 // A new source-specific schema does not change bytes of historical T&M CSVs.
@@ -33,7 +33,7 @@ const uuid = (x) =>
 export const milestoneInvoiceCsvArtifact = (source) => {
   if (!source || !uuid(source.batchId) || !Array.isArray(source.lines) || !source.lines.length)
     throw new TypeError('Current approved milestone invoice source is required.');
-  const seen = new Set(),
+  const acceptLineage = createInvoiceLineageCheck('milestoneId'),
     rows = [];
   for (const [index, line] of source.lines.entries()) {
     let evidence;
@@ -72,10 +72,9 @@ export const milestoneInvoiceCsvArtifact = (source) => {
       line.sequence !== index + 1 ||
       !milestoneInvoiceItemMatches(draft, item) ||
       invoiceDraftTotal([line.amount]).amount !== line.amount ||
-      seen.has(`${line.itemId}/${line.itemVersion}`)
+      !acceptLineage({lineId: line.lineId, itemId: line.itemId, eventId: line.eventId, milestoneId: evidence.milestoneId})
     )
       throw new TypeError('Milestone line lineage or native amount is invalid.');
-    seen.add(`${line.itemId}/${line.itemVersion}`);
     rows.push(
       [
         MILESTONE_INVOICE_CSV_SCHEMA,

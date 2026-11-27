@@ -165,9 +165,9 @@ Legacy approval and delegation checks enforce current delegator authority and re
 
 Settings show a saved confirmation only after the API acknowledges the change. Operators can retry a failed load and reconcile an uncertain save. [Settings recovery](docs/tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md)
 
-### Verify a T&M invoice export
+### Verify invoice export lineage
 
-T&M invoice CSV generation and download check that each line, register item, eligibility event and valuation snapshot occurs once in the batch.
+T&M invoice CSV generation and download check that each line, register item, eligibility event and valuation snapshot occurs once in the batch. Milestone invoices also require a distinct accepted milestone per line. Milestone identifiers preserve their original casing.
 
 ### Request a full reversal of an exported line
 

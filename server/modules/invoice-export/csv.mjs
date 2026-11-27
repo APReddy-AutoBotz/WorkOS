@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createTmLineageCheck, invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
+import { createInvoiceLineageCheck, invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
 import { validCapabilityDate } from '../../../shared/workforce-capabilities.mjs';
 // Every free-form field is UTF-8/base64 with a fixed non-formula prefix. The
 // schema preserves bytes reversibly while making spreadsheet interpretation
@@ -48,7 +48,7 @@ export const invoiceCsvArtifact = (source) => {
     source.lines.length === 0
   )
     throw new TypeError('Current approved invoice source is required.');
-  const acceptLineage = createTmLineageCheck(),
+  const acceptLineage = createInvoiceLineageCheck('snapshotId'),
     rows = [];
   for (const [index, x] of source.lines.entries()) {
     if (

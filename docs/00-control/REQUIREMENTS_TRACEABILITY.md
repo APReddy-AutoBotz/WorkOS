@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-INV-003 and WOS-INV-008. The milestone invoice client regression verifies a two-line export with distinct case-sensitive milestone IDs and independently rejects repeated milestones, lines, items and events at generation and download.
+
 WOS-INV-003 and WOS-INV-008. The invoice CSV service regression checks each T&M lineage identity independently on rendering and verified download, including repeated UUIDs with different casing, valid two-line totals and a matching checksum.
 
 WOS-INV-006. The populated milestone upgrade journey starts the API with a configured finance adapter and verifies that existing invoice batches can be inspected before provider tables are installed. It checks retained artifact bytes, billing confirmation and occupancy after migration.
