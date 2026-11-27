@@ -1684,6 +1684,36 @@ const verifyCommercialDrafting = async reversalScenario => {
         await portfolio.getByLabel('Margin threshold (%)').fill('10');
         await portfolio.getByRole('button',{name:'Inspect portfolio'}).click();
         await portfolio.getByRole('table').waitFor();
+        // Exercise pagination and permission changes against the actual report endpoint.
+        await pool.query(`insert into commercial_engagements
+          (id,organization_id,legal_entity_id,code,name,model,client_id,contract_id,contract_version_id,
+           owner_id,starts_on,ends_on,currency,budget,billable,reason,created_by)
+          select 'zzz-margin-'||n,organization_id,legal_entity_id,'SYN-MARGIN-'||n,'Synthetic portfolio '||n,
+            model,client_id,contract_id,contract_version_id,owner_id,$2::date,$2::date,currency,budget,billable,reason,created_by
+          from commercial_engagements cross join generate_series(100,150) n where id=$1`,[serviceEng.body.id,today]);
+        const setMarginAccess = enabled => pool.query(
+          "update role_permissions set enabled=$1 where role_name='Admin' and permission_key='commercial.service_margin.view'",[enabled]);
+        const inspectPortfolio = portfolio.getByRole('button',{name:'Inspect portfolio'});
+        const nextPage = portfolio.getByRole('button',{name:'Next engagements',exact:true});
+        const retryPage = portfolio.getByRole('button',{name:'Retry next engagements'});
+        await inspectPortfolio.click();
+        await nextPage.waitFor();
+        await setMarginAccess(false);
+        await nextPage.click();
+        await retryPage.waitFor();
+        assert.equal(await portfolio.getByRole('table').count(),0);
+        await setMarginAccess(true);
+        await retryPage.click();
+        await portfolio.getByRole('cell',{name:'Synthetic portfolio 150',exact:true}).waitFor();
+        assert.equal(await retryPage.count(),0);
+        await inspectPortfolio.click();
+        await nextPage.waitFor();
+        await setMarginAccess(false);
+        await nextPage.click();
+        await retryPage.waitFor();
+        await portfolio.getByLabel('Margin threshold (%)').fill('15');
+        assert.equal(await retryPage.count(),0);
+        await setMarginAccess(true);
         await operator.context.close();
         const retained=(await costReader()).body.snapshot;
         assert.deepEqual([retained.reviewId,retained.adoptionId,retained.hourlyRate,retained.hours,retained.amount],[accepted.body.id,adopted.id,'12.3457','0.625','7.7160625']);
