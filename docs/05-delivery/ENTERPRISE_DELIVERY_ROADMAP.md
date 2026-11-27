@@ -4,6 +4,8 @@ The [commercial acceptance evidence](../00-control/REQUIREMENTS_TRACEABILITY.md#
 
 The [launch acceptance checkpoint](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint) lists the weight of each open workstream and the evidence still required for release.
 
+The production Entra callback now waits for its identity and audit transaction to commit before issuing a session. Acceptance includes a database refusal at commit and a subsequent fresh sign-in.
+
 Under WOS-CORE-005, the role switch records the actor and role transition before issuing the replacement session cookie or bearer token. Database-backed acceptance covers an unavailable audit write followed by a successful retry.
 
 ## Launch work by accountable role
