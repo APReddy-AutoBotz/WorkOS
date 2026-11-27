@@ -106,6 +106,7 @@ const sourceBase = z
     finalTransitionId: uuid.nullable(),
     lineageHash: hash.nullable(),
     sourceCurrent: z.boolean(),
+    provider: z.object({exportId:uuid.nullable(),status:z.enum(['accepted','unconfirmed','permanently_rejected']).nullable()}).strict().optional(),
     artifactId: uuid.nullable(),
     lines: z.array(line),
     control: control.nullable(),
@@ -197,6 +198,15 @@ const artifact = z
     })
     .strict();
 export type InvoiceCsvSource = z.infer<typeof source>;
+export const invoiceSchemaFor = (batch: InvoiceCsvSource) => ({
+  FIXED_FEE_INSTALLMENT:'workos.invoice-fixed-fee-csv/2',
+  MANAGED_SERVICE_PERIOD:'workos.invoice-service-period-csv/1',
+  MANAGED_SERVICE_UNIT:'workos.invoice-service-unit-csv/1',
+  RETAINER_PERIOD:'workos.invoice-retainer-csv/1',
+  FULL_LINE_REVERSAL:'workos.invoice-credit-csv/1',
+  MILESTONE_ACCEPTANCE:'workos.invoice-milestone-csv/1',
+  TM_SNAPSHOT:'workos.invoice-tm-csv/1',
+} as const)[batch.sourceType ?? 'TM_SNAPSHOT'];
 export type InvoiceCsvArtifact = z.infer<typeof artifact>;
 export type InvoiceCsvOperation = {
   requestId: string;
@@ -687,6 +697,30 @@ export const invoiceCsv = {
     const adjustments = out.data.adjustments ?? [];
     if (adjustments.some(x => !x.kind || !x.amount || x.lineId !== lineId || x.artifactId !== artifactId)) return bad();
     return { request: out.data.request, chargeBalance: out.data.chargeBalance, adjustments };
+  },
+  reserveProvider: async (op: InvoiceCsvOperation, c: RateContext) => {
+    if (!hasRatePermission('commercial.invoice_export.deliver')) return bad();
+    const result=z.object({...envelope,exportId:uuid,replayed:z.boolean()}).strict().parse(
+      await call('POST','/provider-exports',c,'create',operation.parse(op)));
+    return result.exportId;
+  },
+  deliverProvider: async (batch: InvoiceCsvSource, c: RateContext) => {
+    const exportId=batch.provider?.exportId;
+    if (!exportId || !hasRatePermission('commercial.invoice_export.deliver')) return bad();
+    const raw=await call('POST','/provider-exports/'+exportId+'/deliver',c,'create',{});
+    if (raw.artifact) {
+      const a=artifact.parse(raw.artifact);
+      if (a.batchId!==batch.id || a.requestId!==exportId || a.approvalId!==batch.approvalId ||
+        a.finalTransitionId!==batch.finalTransitionId || a.lineageHash!==batch.lineageHash ||
+        a.currency!==batch.currency || a.schemaVersion!==invoiceSchemaFor(batch) || !batch.control ||
+        a.lineCount!==batch.control.lineCount || (a.schemaVersion===CREDIT_CSV_SCHEMA ? a.total!==batch.control.total :
+          canonicalHours(a.total)!==canonicalHours(batch.control.total))) return bad();
+      const bytes=await checkArtifact(a);
+      current(c,'create');
+      return {status:'accepted' as const,verified:{artifact:a,bytes}};
+    }
+    if (raw.exportId!==exportId) return bad();
+    return {status:z.enum(['unconfirmed','permanently_rejected']).parse(raw.deliveryStatus)};
   },
   source: async (batchId: string, c: RateContext | null) => {
     if (!uuid.safeParse(batchId).success) return bad();

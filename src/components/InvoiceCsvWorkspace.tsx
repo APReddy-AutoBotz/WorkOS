@@ -6,6 +6,7 @@ import { ApiClientError } from '../services/apiClient';
 import {
   captureRateContext,
   invoiceCsv,
+  invoiceSchemaFor,
   type IssuedCredit,
   type InvoiceLinePricing,
   type CreditExportLink,
@@ -292,7 +293,21 @@ const InvoiceCsvEngagement = ({
         setNotice('The retained artifact bytes and checksum were verified.');
       });
   };
-  const create = () => {
+  const deliverProvider = () => source && void run(async c => {
+    try {
+      const result=await invoiceCsv.deliverProvider(source,c);
+      setSource({...source,provider:{exportId:source.provider!.exportId,status:result.status},
+        ...(result.verified ? {state:'Exported',artifactId:result.verified.artifact.id} : {})});
+      if (result.verified) setVerified(result.verified);
+      setNotice(result.status==='accepted' ? 'Provider accepted the export. Receipt and CSV verified.' :
+        result.status==='unconfirmed' ? 'Provider delivery is unconfirmed. Retry the same reservation.' :
+        'Provider permanently rejected the export. Finance can cancel the batch.');
+    } catch (e) {
+      if (!(e instanceof ApiClientError) || e.code!=='INVOICE_PROVIDER_PENDING') throw e;
+      setNotice('Provider receipt is still pending. Retry the same reservation.');
+    }
+  });
+  const create = (provider=false) => {
     if (
       !source ||
       source.state !== 'Approved' ||
@@ -301,28 +316,28 @@ const InvoiceCsvEngagement = ({
       !source.finalTransitionId ||
       !source.lineageHash ||
       !source.control ||
-      version !==
-        (source.sourceType==='FIXED_FEE_INSTALLMENT' ? 'workos.invoice-fixed-fee-csv/2' : source.sourceType==='MANAGED_SERVICE_PERIOD' ? 'workos.invoice-service-period-csv/1' : source.sourceType==='MANAGED_SERVICE_UNIT' ? 'workos.invoice-service-unit-csv/1' : source.sourceType==='RETAINER_PERIOD' ? 'workos.invoice-retainer-csv/1' : source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
-          ? 'workos.invoice-milestone-csv/1'
-          : 'workos.invoice-tm-csv/1') ||
+      version !== invoiceSchemaFor(source) ||
       !confirmed ||
       reason.trim().length < 3
     )
       return;
-    perform({
+    const op: InvoiceCsvOperation = {
       requestId: crypto.randomUUID(),
       batchId: source.id,
       approvalId: source.approvalId,
       finalTransitionId: source.finalTransitionId,
       lineageHash: source.lineageHash,
-      schemaVersion:
-        source.sourceType==='FIXED_FEE_INSTALLMENT' ? 'workos.invoice-fixed-fee-csv/2' : source.sourceType==='MANAGED_SERVICE_PERIOD' ? 'workos.invoice-service-period-csv/1' : source.sourceType==='MANAGED_SERVICE_UNIT' ? 'workos.invoice-service-unit-csv/1' : source.sourceType==='RETAINER_PERIOD' ? 'workos.invoice-retainer-csv/1' : source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
-          ? 'workos.invoice-milestone-csv/1'
-          : 'workos.invoice-tm-csv/1',
+      schemaVersion: invoiceSchemaFor(source),
       expectedLineCount: source.control.lineCount,
       expectedTotal: source.control.total,
       reason: reason.trim(),
+    };
+    if (provider) void run(async c => {
+      const exportId=await invoiceCsv.reserveProvider(op,c);
+      setSource({...source,provider:{exportId,status:null}});
+      setNotice('Provider export reserved.');
     });
+    else perform(op);
   };
   const download = () => {
     if (!verified || !context.current || !isRateContextCurrent(context.current)) {
@@ -511,7 +526,15 @@ const InvoiceCsvEngagement = ({
                     run={run} disabled={busy || !!pending} />
                 )}
               {source.sourceType!=='FULL_LINE_REVERSAL' && source.artifactId && <ExportedCredits key={source.artifactId} original={source} run={run} disabled={busy || !!pending}/>}
-              {canCreate && source.state === 'Approved' && (
+              {canCreate && hasRatePermission('commercial.invoice_export.deliver') && source.provider?.exportId &&
+                <section aria-label="Finance provider delivery">
+                  <p>Provider reservation {source.provider.exportId} · {source.provider.status ?? 'reserved'}</p>
+                  {source.state==='Approved' && source.provider.status!=='permanently_rejected' &&
+                    <button type="button" disabled={busy || !!pending} onClick={deliverProvider}>
+                      {source.provider.status==='unconfirmed' ? 'Retry provider delivery' : 'Deliver to finance provider'}
+                    </button>}
+                </section>}
+              {canCreate && source.state === 'Approved' && !source.provider?.exportId && (
                 <fieldset disabled={busy || !!pending}>
                   <legend>Accept approved CSV artifact</legend>
                   <label>
@@ -547,9 +570,12 @@ const InvoiceCsvEngagement = ({
                       onChange={(e) => setReason(e.target.value)}
                     />
                   </label>
-                  <button type="button" onClick={create}>
+                  <button type="button" onClick={()=>create()}>
                     Accept invoice CSV artifact
                   </button>
+                  {source.provider && hasRatePermission('commercial.invoice_export.deliver') &&
+                    <button type="button" disabled={!source.sourceCurrent || !confirmed || !version || reason.trim().length<3}
+                      onClick={()=>create(true)}>Reserve finance provider export</button>}
                 </fieldset>
               )}
             </section>

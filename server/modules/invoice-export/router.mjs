@@ -308,6 +308,14 @@ export const createInvoiceCsvRouter = (o) => {
       const { row, source, review } = await exportBatch(c, r, parse(uuid, r.params.id)),
         stored =
           (await c.query('select id from invoice_csv_artifacts where batch_id=$1', [row.id])).rows[0] ?? null;
+      const provider = o.financeProvider?.destinationHash ? (await c.query(
+        `select e.id as "exportId", (select result from invoice_provider_attempts p where p.export_id=e.id
+           order by attempted_at desc limit 1) as status
+         from (select 1) enabled left join invoice_provider_exports e on e.batch_id=$1
+         where invoice_notice_actor_has($2,$3,$4,$5,'commercial.invoice_export.deliver')
+           and invoice_csv_actor_valid($2,$3,$4,$5,'create')`,
+        [row.id,...scope(r),r.user.sub,r.user.activeRole],
+      )).rows[0] : null;
       let total = null;
       try {
         const x =
@@ -333,6 +341,7 @@ export const createInvoiceCsvRouter = (o) => {
           finalTransitionId: review?.final_transition_id ?? null,
           lineageHash: review?.lineage_hash ?? null,
           sourceCurrent: review?.current === true,
+          ...(provider ? {provider} : {}),
           artifactId: stored?.id ?? null,
           lines: source.lines.map((x) =>
             x.sourceType === 'FULL_LINE_REVERSAL' ? x : ['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(x.sourceType)

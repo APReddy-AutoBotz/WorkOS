@@ -65,6 +65,16 @@ export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,ba
   const attestation={expectedOwnerKey:reviewerKey,requestId:randomUUID(),batchId,artifactId:a.id,artifactVersion:1,artifactSha256:a.sha256,
     currency:a.currency,total:a.total,reference:'Synthetic downstream installment',reason:'Matched downstream installment receipt'};
   assert.equal((await call(csv+'/confirmations',{...attestation,artifactSha256:'0'.repeat(64)})).status,409);
+  const confirmed=await attestFixedFeeInBrowser(page,engagementId,batchId,attestation.reference,attestation.reason);
+  const retained=(await confirmed.json()).confirmation;
+  assert.deepEqual([retained.sourceType,retained.artifactSha256,retained.total],['FIXED_FEE_INSTALLMENT',a.sha256,a.total]);
+  assert.equal(ok(await call(csv+'/confirmations',confirmed.request().postDataJSON()),200).confirmation.id,retained.id);
+  assert.equal(ok(await call(csv+'/batches/'+batchId),200).batch.state,'Billed/Confirmed');
+  assert.equal((await pool.query('select count(*)::int n from invoice_csv_artifacts where batch_id=$1',[batchId])).rows[0].n,1);
+  return {a,receipt:retained,attestationRequest:confirmed.request().postDataJSON(),exportCmd:saved.request().postDataJSON()};
+}
+
+export async function attestFixedFeeInBrowser(page,engagementId,batchId,reference,reason) {
   const confirmation=page.getByRole('region',{name:'Invoice billing confirmation'});
   await confirmation.getByLabel('Invoice confirmation engagement').selectOption(engagementId);
   await confirmation.getByRole('button',{name:'Load invoice confirmation batches'}).click();
@@ -72,16 +82,11 @@ export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,ba
   await confirmation.getByRole('button',{name:'Inspect exported invoice artifact'}).click();
   const inspect=confirmation.getByRole('region',{name:'Inspected confirmation source'});
   await inspect.getByText(/fixed-fee installment/).waitFor();
-  await inspect.getByLabel('Invoice confirmation reference').fill(attestation.reference);
-  await inspect.getByLabel('Invoice confirmation reason').fill(attestation.reason);
+  await inspect.getByLabel('Invoice confirmation reference').fill(reference);
+  await inspect.getByLabel('Invoice confirmation reason').fill(reason);
   await inspect.getByRole('checkbox').check();
-  const result=page.waitForResponse(r=>r.url().endsWith(csv+'/confirmations') && r.request().method()==='POST');
+  const result=page.waitForResponse(r=>r.url().endsWith('/api/v1/invoice-csv/confirmations') && r.request().method()==='POST');
   await inspect.getByRole('button',{name:'Record manual billing attestation'}).click();
   const confirmed=await result;assert.equal(confirmed.status(),201,await confirmed.text());
-  const retained=(await confirmed.json()).confirmation;
-  assert.deepEqual([retained.sourceType,retained.artifactSha256,retained.total],['FIXED_FEE_INSTALLMENT',a.sha256,a.total]);
-  assert.equal(ok(await call(csv+'/confirmations',confirmed.request().postDataJSON()),200).confirmation.id,retained.id);
-  assert.equal(ok(await call(csv+'/batches/'+batchId),200).batch.state,'Billed/Confirmed');
-  assert.equal((await pool.query('select count(*)::int n from invoice_csv_artifacts where batch_id=$1',[batchId])).rows[0].n,1);
-  return {a,receipt:retained,attestationRequest:confirmed.request().postDataJSON(),exportCmd:saved.request().postDataJSON()};
+  return confirmed;
 }

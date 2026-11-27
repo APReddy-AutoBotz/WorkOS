@@ -1,6 +1,6 @@
 import {expectedMigrationsFrom} from './expected-migrations.mjs';
 import assert from 'node:assert/strict';
-import {configureFixedFeeNotices,verifyFixedFeeExport} from './fixed-fee-export-journey.mjs';
+import {attestFixedFeeInBrowser,configureFixedFeeNotices,verifyFixedFeeExport} from './fixed-fee-export-journey.mjs';
 import {runMigrations} from '../../server/migrate.mjs';
 import {withCommercialMigrationsThrough,migrateCommercialDatabase} from './commercial-drafting-test.mjs';
 import {randomUUID} from 'node:crypto';
@@ -118,24 +118,48 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
       assert.equal(ok(await postOrder({...commitment,number}),200).replayed,true);
       await configureFixedFeeNotices({call:(path,body)=>apiRequest(path,{identity:reviewer,method:'POST',body}),
         ok,reviewerKey,today,engagementId,reviewer,preparer});
-      const csvPath='/api/v1/invoice-csv';
-      const call=(path,body)=>apiRequest(csvPath+path,{identity:preparer,...(body?{method:'POST',body}:{})});
-      const inspected=ok(await call('/batches/'+batch.id),200);
-      const reservation=ok(await call('/provider-exports',{expectedOwnerKey:inspected.ownerKey,requestId:randomUUID(),
-        batchId:batch.id,approvalId:retry.id,finalTransitionId:inspected.batch.finalTransitionId,lineageHash:inspected.batch.lineageHash,
-        schemaVersion:'workos.invoice-fixed-fee-csv/2',expectedLineCount:1,expectedTotal:'12000',reason:'Deliver approved installment'}));
-      const deliver=()=>call('/provider-exports/'+reservation.exportId+'/deliver',{expectedOwnerKey:inspected.ownerKey});
-      assert.equal(ok(await deliver()).deliveryStatus,'unconfirmed');
-      await pool.query("update employees set status='On Leave' where id=$1",[author]);
+      const finance=await createContext(preparer,access);
       try {
-        assert.equal(ok(await call('/batches/'+batch.id),200).batch.sourceCurrent,false);
-        assert.equal(ok(await deliver(),409).error.code,'INVOICE_PROVIDER_PENDING');
-        const artifact=ok(await deliver()).artifact;
-        assert.equal(artifact.total,'12000');
-        assert.equal(ok(await deliver(),200).artifact.id,artifact.id);
-      } finally {
-        await pool.query("update employees set status='Active' where id=$1",[author]);
-      }
+        const financePage=finance.page;
+        const desk=financePage.getByRole('region',{name:'Invoice CSV export'});
+        const inspect=async()=>{
+          await desk.getByLabel('Invoice export engagement').selectOption(engagementId);
+          await desk.getByRole('button',{name:'Load invoice export batches'}).click();
+          await desk.getByLabel('Invoice export batch').selectOption(batch.id);
+          await desk.getByRole('button',{name:'Inspect invoice export source'}).click();
+        };
+        await financePage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+        await inspect();
+        await desk.getByLabel('Invoice CSV schema').selectOption('workos.invoice-fixed-fee-csv/2');
+        await desk.getByLabel('I inspected the final approval, retained lineage and control total').check();
+        await desk.getByLabel('Invoice CSV reason').fill('Deliver approved installment');
+        await desk.getByRole('button',{name:'Reserve finance provider export'}).click();
+        const receipt=desk.getByRole('region',{name:'Finance provider delivery'});
+        await receipt.getByRole('button',{name:'Deliver to finance provider'}).click();
+        await desk.getByText('Provider delivery is unconfirmed. Retry the same reservation.').waitFor();
+        const reservation=(await pool.query('select id from invoice_provider_exports where batch_id=$1',[batch.id])).rows[0].id;
+        await pool.query("update employees set status='On Leave' where id=$1",[author]);
+        try {
+          await financePage.reload();
+          await inspect();
+          await receipt.getByText('Provider reservation '+reservation+' · unconfirmed').waitFor();
+          const recover=receipt.getByRole('button',{name:'Retry provider delivery'});
+          await recover.click();
+          await desk.getByText('Provider receipt is still pending. Retry the same reservation.').waitFor();
+          await recover.click();
+          await desk.getByRole('region',{name:'Verified invoice CSV'}).waitFor();
+          await receipt.getByText('Provider reservation '+reservation+' · accepted').waitFor();
+          const confirmation=await attestFixedFeeInBrowser(financePage,engagementId,batch.id,'Synthetic provider settlement','Matched recovered installment receipt');
+          const retained=(await confirmation.json()).confirmation;
+          const artifacts=(await pool.query('select id,sha256 from invoice_csv_artifacts where batch_id=$1',[batch.id])).rows;
+          assert.deepEqual(artifacts,[{id:retained.artifactId,sha256:retained.artifactSha256}]);
+          assert.equal(retained.total,'12000');
+          assert.deepEqual((await pool.query('select result from invoice_provider_attempts where export_id=$1 order by attempted_at',[reservation])).rows,
+            [{result:'unconfirmed'},{result:'accepted'}]);
+        } finally {
+          await pool.query("update employees set status='Active' where id=$1",[author]);
+        }
+      } finally { await finance.context.close(); }
       await change(reviewer.role,[grant],false);
       assert.equal((await apiRequest(poPath,{identity:reviewer})).status,403);
       assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1 and batch_id=$2',[registered.itemId,batch.id])).rowCount,1);
