@@ -15,6 +15,7 @@ export function renderCreditCsv(batch){
   });
   const rows=[header],first=batch.lines[0];
   const originalEvents = new Map();
+  const originalLines = new Map();
   for(const [index,l] of batch.lines.entries()){
     if(![l.lineId,l.itemId,l.eventId,l.decisionId,l.originalBatchId,l.originalArtifactId,l.originalLineId,l.originalEventId].every(x=>typeof x==='string'&&uuid.test(x))
       || l.sequence!==index+1 || l.itemVersion!==1 || l.eventVersion!==1 || l.originalItemVersion!==1
@@ -24,7 +25,10 @@ export function renderCreditCsv(batch){
       || l.originalArtifactSha256!==first.originalArtifactSha256 || l.originalBatchId===batch.batchId) invalid();
     const previousEvent = originalEvents.get(l.originalLineId);
     if (previousEvent && previousEvent !== l.originalEventId) invalid();
+    const previousLine = originalLines.get(l.originalEventId);
+    if (previousLine && previousLine !== l.originalLineId) invalid();
     originalEvents.set(l.originalLineId,l.originalEventId);
+    originalLines.set(l.originalEventId,l.originalLineId);
     rows.push([CREDIT_CSV_SCHEMA,batch.batchId,l.lineId,l.sequence,l.itemId,l.itemVersion,l.eventId,l.eventVersion,l.eligibleDate,l.currency,l.amount,
       l.decisionId,l.originalBatchId,l.originalArtifactId,l.originalArtifactSha256,l.originalLineId,l.originalEventId,l.originalItemVersion,batch.periodStart,batch.periodEnd,...dimensions].join(','));
   }
