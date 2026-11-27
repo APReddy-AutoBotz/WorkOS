@@ -1079,17 +1079,30 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           expectedLineCount: 0,
           reason: 'Synthetic concurrent acquisition',
         },
-        race = await Promise.all([
-          request(route + '/batches/' + batch3.batch.id + '/lines', {
-            method: 'POST',
-            body: { ...raceBody, requestId: randomUUID(), expectedOwnerKey: batch3.ownerKey },
-          }),
-          request(route + '/batches/' + batch4.batch.id + '/lines', {
-            method: 'POST',
-            body: { ...raceBody, requestId: randomUUID(), expectedOwnerKey: batch4.ownerKey },
-          }),
-        ]);
-      assert.deepEqual(race.map((x) => x.status).sort(), [201, 409]);
+        contenders = [batch3, batch4].map(({batch, ownerKey}) => ({
+          path: route + '/batches/' + batch.id,
+          body: {...raceBody, requestId: randomUUID(), expectedOwnerKey: ownerKey},
+        }));
+      const acquire = (contender, body = contender.body) =>
+        request(contender.path + '/lines', {method: 'POST', body});
+      const race = await Promise.all(contenders.map(contender => acquire(contender)));
+      assert.deepEqual(race.map(response => response.status).sort(), [201, 409]);
+      const winnerIndex = race.findIndex(response => response.status === 201);
+      const winner = contenders[winnerIndex], loser = contenders[1 - winnerIndex];
+      const originalLine = ok(race[winnerIndex], 201).line;
+      const replay = ok(await acquire(winner));
+      assert.equal(replay.replayed, true);
+      assert.equal(replay.line.id, originalLine.id);
+      const changed = await acquire(winner, {...winner.body, reason: 'Changed invoice request'});
+      assert.equal(changed.status, 409);
+      assert.equal(changed.body.error.code, 'INVOICE_DRAFT_KEY');
+      assert.equal((await acquire(loser)).status, 409);
+      const [won, lost] = await Promise.all([winner, loser].map(async contender => ok(await request(contender.path))));
+      assert.deepEqual(won.lines.map(line => line.id), [originalLine.id]);
+      assert.deepEqual(won.total, {lineCount: 1, amount: secondItem.evidence.amount});
+      assert.equal(won.batch.currency, secondItem.evidence.currency);
+      assert.deepEqual(lost.lines, []);
+      assert.deepEqual(lost.total, {lineCount: 0, amount: '0'});
       assert.equal(
         (
           await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1', [

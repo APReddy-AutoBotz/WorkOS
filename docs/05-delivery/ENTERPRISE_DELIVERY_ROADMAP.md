@@ -1,6 +1,6 @@
 # Enterprise delivery and integration roadmap
 
-Milestone export and download validate distinct accepted milestone IDs, lines, register items and eligibility events. T&M export generation and retained download validate one-to-one line, item, event and snapshot identities against the CSV rows. Invoice inspection during a populated upgrade discovers whether provider tables are installed before reading reservations. Finance provider delivery and receipt lookup enforce a 64 KiB response limit. An unreadable receipt leaves the reservation available for reconciliation with the original operation ID.
+The [commercial acceptance evidence](../00-control/REQUIREMENTS_TRACEABILITY.md#commercial-acceptance-evidence-for-independent-review) includes reconciliation of both batch totals after competing requests for one approved item. Milestone export and download validate distinct accepted milestone IDs, lines, register items and eligibility events. T&M export generation and retained download validate one-to-one line, item, event and snapshot identities against the CSV rows. Invoice inspection during a populated upgrade discovers whether provider tables are installed before reading reservations. Finance provider delivery and receipt lookup enforce a 64 KiB response limit. An unreadable receipt leaves the reservation available for reconciliation with the original operation ID.
 
 The [launch acceptance checkpoint](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint) lists the weight of each open workstream and the evidence still required for release.
 
