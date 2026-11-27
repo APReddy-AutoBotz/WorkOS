@@ -808,7 +808,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         expectedOwnerKey: availableReport.ownerKey,
         engagementId: roots.engagement.id,
         expectedReportToken: availableReport.reportToken,
-        requestId: randomUUID(),
+        requestId: randomUUID().toUpperCase(),
         reason: 'Synthetic scoped report',
       };
       const exportedReport = ok(
@@ -829,16 +829,21 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         (await request(route + '/reconciliation/exports', { method: 'POST', body: reportRequest })).status,
         409,
       );
+      const repeated = await request(route + '/reconciliation/portfolio/exports', {
+        method:'POST', body:{...originalPortfolioCommand,requestId:reportRequest.requestId.toLowerCase()},
+      });
+      assert.equal(repeated.status,409);
+      assert.equal(repeated.body.code,'BILLING_REPORT_ALREADY_RECORDED');
       const raceReport = { ...reportRequest, requestId: randomUUID() };
       const raceResults = await Promise.all([
         request(route + '/reconciliation/exports', { method: 'POST', body: raceReport }),
-        request(route + '/reconciliation/exports', { method: 'POST', body: raceReport }),
+        request(route + '/reconciliation/exports', { method: 'POST', body: {...raceReport,requestId:raceReport.requestId.toUpperCase()} }),
       ]);
       assert.deepEqual(raceResults.map((x) => x.status).sort(), [201, 409]);
       assert.equal(
         (
           await pool.query(
-            "select count(*)::int n from audit_logs where module='Reports' and action='Export T&M Billing Reconciliation' and entity_id=$1",
+            "select count(*)::int n from audit_logs where module='Reports' and action='Export T&M Billing Reconciliation' and lower(entity_id)=$1",
             [raceReport.requestId],
           )
         ).rows[0].n,

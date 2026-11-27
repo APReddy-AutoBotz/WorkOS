@@ -8,6 +8,8 @@ The production Entra callback now waits for its identity and audit transaction t
 
 Under WOS-CORE-005, the role switch records the actor and role transition before issuing the replacement session cookie or bearer token. Database-backed acceptance covers an unavailable audit write followed by a successful retry.
 
+WOS-INV-008 reconciliation exports recognize an existing request across UUID letter case in both the concurrency lock and the audit lookup. Historical audit entries retain their original spelling.
+
 ## Launch work by accountable role
 
 Reconciled on 28 November 2026 against the eight open workstream issues. Engineering verified the main-branch handover archive for `6c70d15b`, including billing fixes through #392. Independent commercial acceptance and buyer rehearsal each require a named revision. [Candidate verification](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint)
