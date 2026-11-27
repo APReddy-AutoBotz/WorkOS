@@ -6,7 +6,7 @@ The [launch acceptance checkpoint](../00-control/IMPLEMENTATION_STATUS.md#launch
 
 ## Launch work by accountable role
 
-Reconciled on 28 November 2026 against the eight open workstream issues. The engineering handover candidate recorded in #11 is `2c4306dd`. Subsequent billing fixes through #392 are on main. The release lead must identify the revision used for buyer rehearsal. [Candidate verification](https://github.com/APReddy-AutoBotz/WorkOS/issues/11)
+Reconciled on 28 November 2026 against the eight open workstream issues. Engineering verified the main-branch handover archive for `6c70d15b`, including billing fixes through #392. Independent commercial acceptance and buyer rehearsal each require a named revision. [Candidate verification](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint)
 
 | Issue | Evidence to reuse | Next action and exit condition | Accountable role |
 | --- | --- | --- | --- |
@@ -17,7 +17,7 @@ Reconciled on 28 November 2026 against the eight open workstream issues. The eng
 | [WOS-06 #8](https://github.com/APReddy-AutoBotz/WorkOS/issues/8) | The integrated candidate passed the linked rate adoption, registration, invoice reservation, approval, export and confirmation checks. | Finance selected approved WorkOS entries for actual fixed-fee non-labor costs. Verify project cost reconciliation and independent exact-head PR-012 review, then the required merges and product-owner Gate C. | Commercial engineering and finance owner |
 | [WOS-07 #9](https://github.com/APReddy-AutoBotz/WorkOS/issues/9) | Mandatory PO and retainer notices; [closed-month margin alert](https://github.com/APReddy-AutoBotz/WorkOS/pull/359) passed bounded and hosted acceptance | Review the monthly alert, contract charge controls and [signed T&M and milestone reports](https://github.com/APReddy-AutoBotz/WorkOS/pull/369) on the integrated revision. Evaluate remaining reporting and adapter criteria against the existing contracts. | Reporting and integration engineering |
 | [WOS-08 #10](https://github.com/APReddy-AutoBotz/WorkOS/issues/10) | The selected candidate passed packaged identity, performance and restore checks. The full-history scan passed after the five historical fingerprints received their recorded disposition in #378. | Operations assigns buyer-environment alert and recovery ownership. | Security and operations leads |
-| [WOS-09 #11](https://github.com/APReddy-AutoBotz/WorkOS/issues/11) | The integrated archive, all seven checksums, image identity and source revision were verified on 2c4306dd. | Assign the pilot buyer and UAT owner. Reconcile buyer data and complete the cross-role walkthrough and required operational handover before Gate D. | Release lead and buyer owner |
+| [WOS-09 #11](https://github.com/APReddy-AutoBotz/WorkOS/issues/11) | The integrated archive, all seven checksums, image identity and source revision were verified on 6c70d15b. | Assign the pilot buyer and UAT owner. Reconcile buyer data and complete the cross-role walkthrough and required operational handover before Gate D. | Release lead and buyer owner |
 
 The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.
 
