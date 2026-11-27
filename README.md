@@ -297,7 +297,7 @@ In the fixed-fee forecast, open **Non-labor project costs** for the incurred dat
 
 ### Recover a finance-provider delivery
 
-In the invoice export workspace, an authorized finance operator can reserve an approved batch for the configured provider. Provider receipt bodies must fit within 64 KiB. If delivery is unconfirmed, reopen that batch and retry the existing reservation. If the original provider is unavailable, restore its configuration before retrying. Verify the retained artifact and receipt before recording downstream billing confirmation. [Delivery and recovery evidence](https://github.com/APReddy-AutoBotz/WorkOS/pull/384)
+In the invoice export workspace, an authorized finance operator can reserve an approved batch for the configured provider. During an upgrade, existing batches remain readable before the provider delivery schema is installed. Provider receipt bodies must fit within 64 KiB. If delivery is unconfirmed, reopen that batch and retry the existing reservation. If the original provider is unavailable, restore its configuration before retrying. Verify the retained artifact and receipt before recording downstream billing confirmation. [Delivery and recovery evidence](https://github.com/APReddy-AutoBotz/WorkOS/pull/384)
 
 ### Project expense allocations
 
