@@ -45,6 +45,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercial
  const expectedHours=sumHours([afterLeave.periodLoad.plannedHours,'4']);
  assert.equal(between.periodLoad.plannedHours,expectedHours);
  assert.deepEqual(between.periodLoad.percentage,actualPercent(expectedHours,baseline.periodLoad.eligibleHours));
+ const converted=await request('/api/allocations',{method:'POST',body:{id:fixed.body.id,employee_id:f.ownerId,project_id:f.projectId,percentage:10,start_date:today,end_date:next,billable:false,status:'Active'}});
+ assert.equal(converted.status,200,JSON.stringify(converted.body));
+ assert.equal(converted.body.fixed_hours,null);
  await pool.query('delete from project_allocations where id=$1',[fixed.body.id]);
  changed=(await get()).body.result;assert.equal(changed.points[0].capacity.totals.leaveReductionHoursExact,'8');assert.equal(changed.points[0].declaredPercentageExact,'25.00000000000000001');assert.equal(changed.points[0].band,'underload');assert.equal(changed.physicalUtilization,null);assert.equal((await retain(result)).status,409);const future=await request('/api/v1/actual-work/workers/'+f.ownerId+'/period?startsOn='+today+'&endsOn='+next);assert(future.body.result.reasonCodes.includes('FUTURE_ACTUAL_PERIOD'));
  await pool.query("delete from system_settings where key='benchThreshold'");changed=(await get()).body.result;assert.equal(changed.thresholds,null);assert.equal(changed.points[0].band,null);assert(changed.points[0].reasonCodes.includes('THRESHOLDS_NOT_CONFIGURED'));await pool.query("insert into system_settings(key,value)values('benchThreshold','20')");

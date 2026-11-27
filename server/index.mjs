@@ -2746,9 +2746,13 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       }
     }
 
-    const previous = parsed.data.id
-      ? (await client.query('select * from project_allocations where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0]
+    const previousResult = parsed.data.id
+      ? await client.query('select * from project_allocations where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])
       : null;
+    const previous = previousResult?.rows[0] ?? null;
+    // A percentage-only insert also works before migration 133. An upsert on the
+    // current schema must clear a prior fixed total when switching to percentage.
+    const writeFixedHours = parsed.data.fixed_hours !== undefined || previousResult?.fields.some(field => field.name === 'fixed_hours');
     if(previous) await assertWorkActorScope(client,req,previous.employee_id,previous.project_id,{assignment:true});
     const allocationIdExistsOutsideScope = parsed.data.id && !previous
       ? (await client.query('select 1 from project_allocations where id = $1', [parsed.data.id])).rowCount > 0
@@ -2760,14 +2764,14 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
     }
     await setAssignmentVersionContext(client,req,{employeeId:employee.id,projectId:project.id});
     const result = await client.query(`
-      insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id, fixed_hours)
-      values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id${writeFixedHours ? ', fixed_hours' : ''})
+      values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12${writeFixedHours ? ',$13' : ''})
       on conflict (id) do update set
         employee_id = excluded.employee_id,
         project_id = excluded.project_id,
         role_on_project = excluded.role_on_project,
         percentage = excluded.percentage,
-        fixed_hours = excluded.fixed_hours,
+        ${writeFixedHours ? 'fixed_hours = excluded.fixed_hours,' : ''}
         start_date = excluded.start_date,
         end_date = excluded.end_date,
         billable = excluded.billable,
@@ -2788,7 +2792,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       parsed.data.billable,
       parsed.data.status,
       parsed.data.comments || null,
-      req.organizationScope.organizationId, req.organizationScope.legalEntityId, parsed.data.fixed_hours ?? null,
+      req.organizationScope.organizationId, req.organizationScope.legalEntityId, ...(writeFixedHours ? [parsed.data.fixed_hours ?? null] : []),
     ]);
     if (result.rowCount === 0) {
       await client.query('rollback');
