@@ -2,7 +2,7 @@ import { CREDIT_CSV_SCHEMA,verifyCreditCsv,renderCreditCsv } from '../../shared/
 import { verifyMilestoneInvoiceCsv,verifyRetainerInvoiceCsv,verifyServiceInvoiceCsv,verifyPeriodInvoiceCsv,verifyFixedFeeInvoiceCsv } from './milestoneInvoiceCsv';
 import { validInvoiceConfirmationCommand, validConfirmationTotal } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
-import { createTmLineageCheck, invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
+import { createInvoiceLineageCheck, invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { canonicalHours, compareHours } from '../../shared/work-hours.mjs';
 import { api, ApiClientError } from './apiClient';
 import { captureRateContext } from './rateCandidates';
@@ -347,7 +347,7 @@ const checkArtifact = async (a: InvoiceCsvArtifact) => {
         'schema_version,batch_id,line_id,line_sequence,item_id,item_version,event_id,snapshot_id,billing_evidence_b64,client_id_b64,contract_id_b64,engagement_id_b64,work_date,eligible_date,currency,amount,period_start,period_end,period_basis';
     if (rows[0] !== head || rows.at(-1) !== '' || rows.length !== a.lineCount + 2) return bad();
     const amounts: string[] = [],
-      acceptLineage = createTmLineageCheck();
+      acceptLineage = createInvoiceLineageCheck('snapshotId');
     let sourceIdentity: string | null = null;
     for (const [n, row] of rows.slice(1, -1).entries()) {
       const c = row.split(',');

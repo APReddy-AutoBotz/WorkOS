@@ -1,6 +1,6 @@
 import {fixedFeeLine,retainerInvoiceEvidence,serviceUnitInvoiceEvidence,servicePeriodInvoiceEvidence} from './invoiceDrafts';
 import { z } from 'zod';
-import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
+import { createInvoiceLineageCheck, invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { canonicalHours } from '../../shared/work-hours.mjs';
 import { milestoneInvoiceEvidence, milestoneEvidenceMatches } from './milestoneInvoiceContracts';
 
@@ -63,7 +63,7 @@ const verifyContractCsv = async (a: ArtifactMetadata, kind: keyof typeof contrac
   const rows = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\r\n');
   if (rows[0] !== format.header || rows.at(-1) !== '' || rows.length !== a.lineCount + 2)
     throw Error('Invalid invoice CSV shape');
-  const seen = new Set<string>(),
+  const acceptLineage = createInvoiceLineageCheck(kind === 'milestone' ? 'milestoneId' : null),
     amounts: string[] = [];
   let sourceIdentity: string | null = null;
   for (const [n, row] of rows.slice(1, -1).entries()) {
@@ -78,7 +78,6 @@ const verifyContractCsv = async (a: ArtifactMetadata, kind: keyof typeof contrac
       c[5] !== '1' ||
       !uuid.safeParse(c[6]).success ||
       c[7] !== format.source ||
-      seen.has(c[4]) ||
       !date.safeParse(c[13]).success ||
       c[14] !== a.currency ||
       !money.safeParse(c[15]).success ||
@@ -90,7 +89,9 @@ const verifyContractCsv = async (a: ArtifactMetadata, kind: keyof typeof contrac
       c[13] > c[17]
     )
       throw Error('Invalid invoice line');
-    seen.add(c[4]);
+    const milestone = kind === 'milestone' ? field(c[8]) : null;
+    if (!acceptLineage({lineId: c[2], itemId: c[4], eventId: c[6], milestoneId: milestone}))
+      throw Error('Repeated invoice lineage');
     const rawEvidence=JSON.parse(field(c[9])),client=field(c[10]),contract=field(c[11]),engagement=field(c[12]);
     if (![client,contract,engagement].every(value=>id.safeParse(value).success)) throw Error('Invalid contract scope');
     if (kind === 'fixed_fee') {
@@ -115,7 +116,7 @@ const verifyContractCsv = async (a: ArtifactMetadata, kind: keyof typeof contrac
         invoiceDraftTotal(components).amount!==canonicalHours(c[15]) || canonicalHours(e.periodPrice.total)!==canonicalHours(c[15]))
         throw Error('Retainer evidence mismatch');
     } else {
-      const milestone=field(c[8]),e=milestoneInvoiceEvidence.parse(rawEvidence);
+      const e=milestoneInvoiceEvidence.parse(rawEvidence);
       if (!id.safeParse(milestone).success || e.milestoneId!==milestone || !milestoneEvidenceMatches(e,engagement,c[14],c[15]))
         throw Error('Milestone evidence mismatch');
     }

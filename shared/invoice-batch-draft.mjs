@@ -26,16 +26,18 @@ export const validInvoiceDraft = (x) =>
   ['WORK_DATE', 'ELIGIBLE_DATE'].includes(x.periodBasis) &&
   approvalUuid(x.ownerUserId) &&
   approvalText(x.ownerRole, 100);
-// T&M CSV v1 has one line per item, eligibility event and valuation snapshot.
-export function createTmLineageCheck() {
-  const fields = ['lineId', 'itemId', 'eventId', 'snapshotId'];
+// UUIDs use PostgreSQL equality. The milestone business key preserves case.
+export function createInvoiceLineageCheck(sourceField = null) {
+  const fields = ['lineId', 'itemId', 'eventId'];
+  if (sourceField) fields.push(sourceField);
+  const identity = (line, field) => field === 'milestoneId' ? line[field] : line[field].toLowerCase();
   const seen = new Map(fields.map(field => [field, new Set()]));
   return line => {
     for (const field of fields) {
-      const id = line[field].toLowerCase();
+      const id = identity(line, field);
       if (seen.get(field).has(id)) return false;
     }
-    for (const field of fields) seen.get(field).add(line[field].toLowerCase());
+    for (const field of fields) seen.get(field).add(identity(line, field));
     return true;
   };
 }
