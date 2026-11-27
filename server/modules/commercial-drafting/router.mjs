@@ -4,6 +4,7 @@ import {fixedFeeProgress,progressCommand,progressGrant,progressQuery} from './fi
 import {elapsedPeriodQuery,reconcileElapsedPeriod} from './fixed-fee-elapsed-period.mjs';
 import {fixedFeeElapsed,elapsedGrant,elapsedQuery,elapsedCommand} from './fixed-fee-elapsed.mjs';
 import {approveFixedFeeTransition,transitionCommand,transitionGrant} from './fixed-fee-transition.mjs';
+import {projectCosts,costDay,costEntry,costDecision,prepareCostGrant,decideCostGrant} from './project-costs.mjs';
 import {fixedFeeForecast,forecastCommand,forecastQuery,forecastGrant} from './fixed-fee-forecast.mjs';
 import {purchaseOrderDeliveryStatus,purchaseOrderRiskPolicy,poRiskConfigureGrant} from './purchase-order-risk-policy.mjs';
 import {engagementRiskDeliveryStatus,engagementRiskPolicy,marginRiskConfigureGrant,riskConfigureGrant,riskPolicyCommand} from './fixed-fee-risk-notices.mjs';
@@ -44,7 +45,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   const handle=(schema,write,command,permission='commercial.contracts.manage',consistentWrite=false)=>async(req,res)=>{
     const parsed=schema.safeParse(write?req.body:req.query);
     if(!parsed.success){res.status(400).json({error:{code:'COMMERCIAL_INVALID_REQUEST',message:'Commercial input is invalid; check fields, decimal strings and dates.'}});return;}
-    const valuationPeriodWrite=write && [progressGrant,elapsedGrant,transitionGrant].includes(permission);
+    const valuationPeriodWrite=write && [progressGrant,elapsedGrant,transitionGrant,prepareCostGrant,decideCostGrant].includes(permission);
     const periodLocks=[];
     let client;let begun=false;let sessionKey;let discard=false;
     try{
@@ -85,6 +86,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       else if(error?.code==='MFT01')res.status(409).json({error:{code:'TRANSITION_UNAVAILABLE',message:'Inspect the current transition evidence.'}});
       else if(error?.code==='MGM01')res.status(403).json({error:{code:'MARGIN_DENIED',message:'Current reporting authority is required.'}});
       else if(error?.code==='MGM02')res.status(409).json({error:{code:'MARGIN_CHANGED',message:'Inspect the current period again.'}});
+      else if(error?.code==='PCE01')res.status(403).json({error:{code:'PROJECT_COST_DENIED',message:'Independent scoped finance authority is required.'}});
+      else if(error?.code==='PCE02')res.status(409).json({error:{code:'PROJECT_COST_INVALID',message:'Review the project dates and current cost decision.'}});
       else if(error?.code==='MEC01')res.status(403).json({error:{code:'SERVICE_COST_DENIED',message:'Current worker cost authority is required.'}});
       else if(error?.code==='MEC02' || ([effortCostGrant,fixedCostGrant].includes(permission) && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_COST_CHANGED',message:'Review accepted effort, the adopted hourly cost and the financial period.'}});
       else if(error?.code==='RBE01')res.status(403).json({error:{code:'RETAINER_REGISTER_DENIED',message:'Current retainer billing authority is required.'}});
@@ -179,6 +182,10 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   const fixedFeeStatementPath='/engagements/:id/fixed-fee-statement';
   router.get(fixedFeeStatementPath,handle(fixedFeeStatementQuery,false,(c,r,i)=>fixedFeeStatement(c,r,i,buildEmployeeScopeWhere)));
   router.post(fixedFeeStatementPath,handle(fixedFeeStatementCommand,true,(c,r,i)=>fixedFeeStatement(c,r,i,buildEmployeeScopeWhere,audit),fixedFeeStatementGrant,true));
+  const projectCostPath='/engagements/:id/project-costs';
+  router.get(projectCostPath,handle(costDay,false,(c,r,i)=>projectCosts(c,r,i,buildEmployeeScopeWhere)));
+  router.post(projectCostPath,handle(costEntry,true,(c,r,i)=>projectCosts(c,r,i,buildEmployeeScopeWhere,audit),prepareCostGrant,true));
+  router.post(projectCostPath+'/decisions',handle(costDecision,true,(c,r,i)=>projectCosts(c,r,i,buildEmployeeScopeWhere,audit),decideCostGrant,true));
   const forecastPath='/engagements/:id/fixed-fee-forecast';
   router.get(forecastPath,handle(forecastQuery,false,(c,r,i)=>fixedFeeForecast(c,r,i,buildEmployeeScopeWhere)));
   router.post(forecastPath,handle(forecastCommand,true,(c,r,i)=>fixedFeeForecast(c,r,i,buildEmployeeScopeWhere,audit),forecastGrant,true));

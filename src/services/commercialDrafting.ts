@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigureRetainerRisk?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canConfigureMarginRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canPrepareProjectCost?:boolean; canDecideProjectCost?:boolean; canApproveFixedFeeTransition?:boolean; canInspectRetainerRisks?:boolean; canConfigureRetainerRisk?:boolean; canConfigurePoRiskNotices?:boolean; canConfigureRiskNotices?:boolean; canConfigureMarginRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -113,6 +113,8 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
     canRecordFixedFeeProgress:permissions.includes('commercial.fixed_fee_progress.record'),
     canRecordFixedFeeElapsed:permissions.includes('commercial.fixed_fee_elapsed.record'),
+    canPrepareProjectCost:permissions.includes('commercial.project_costs.prepare'),
+    canDecideProjectCost:permissions.includes('commercial.project_costs.decide'),
     canViewFixedFeeMargin:permissions.includes('commercial.fixed_fee_margin.view'),
     canInspectRetainerRisks:!['Employee','TeamLead','ProjectManager','CountryDirector'].includes(user.role) &&
       ['employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
@@ -573,6 +575,22 @@ export const commercialDraftingService = {
     return request(context,'POST',serviceEngPath(eng)+'/fixed-fee-transition',command,
       value=>z.object({approvalId:z.string().uuid()}).strict().parse(value),false);
   },
+  projectCosts(eng:string,day:string,context:CommercialDraftingContext) {
+    const current=assertCommercialDraftingContext(context);
+    if(!current.canViewFixedFeeMargin)throw invalid();
+    return request(context,'GET',serviceEngPath(eng)+'/project-costs?'+new URLSearchParams({day}),undefined,value=>z.object({
+      engagementId:z.literal(eng),day:z.literal(day),currency:z.string().regex(/^[A-Z]{3}$/),
+      projects:z.array(z.object({id:z.string(),code:z.string(),name:z.string()})),
+      entries:z.array(z.object({id:z.string().uuid(),projectId:z.string(),reference:z.string(),amount:costDecimal,
+        decision:z.enum(['Approved','Rejected']).nullable(),reason:z.string().nullable(),preparedByMe:z.boolean()}))
+    }).strict().parse(value),false);
+  },
+  recordProjectCost(eng:string,context:CommercialDraftingContext,command:{id:string;projectId:string;day:string;reference:string;amount:string}|{id:string;decision:'Approved'|'Rejected';reason:string}) {
+    const current=assertCommercialDraftingContext(context),deciding='decision' in command;
+    if(!current.canViewFixedFeeMargin || !(deciding?current.canDecideProjectCost:current.canPrepareProjectCost))throw invalid();
+    return request(context,'POST',serviceEngPath(eng)+'/project-costs'+(deciding?'/decisions':''),command,
+      value=>z.object({id:z.literal(command.id)}).strict().parse(value),false);
+  },
   fixedFeeForecast(eng:string,through:string,context:CommercialDraftingContext,options:{version?:number;command?:{
     remainingHours:string;remainingCost:string;expectedTotalRevenue?:string;reason:string;expectedToken:string;expectedVersion:number;requestId:string}}={}) {
     const current=assertCommercialDraftingContext(context),cmd=options.command;
@@ -599,6 +617,8 @@ export const commercialDraftingService = {
             closingStatus:z.enum(['inactive','incomplete','missing','stale','incompatible']).optional(),
             preview:transitionPreview.optional()}).strict()]),
         budgetVariance:z.object({hours:signedDecimal.nullable(),laborCost:signedDecimal.nullable()}).strict(),
+        retainedProjectCosts:z.object({amount:costDecimal,entries:z.number().int().nonnegative(),sourceHash:z.string().regex(/^[a-f0-9]{64}$/),grossMargin:margin}).strict().optional(),
+        projectCosts:z.object({amount:costDecimal,entries:z.number().int().nonnegative(),grossMargin:margin}).strict().optional(),
         marginComparison:z.object({actual:margin,remaining:margin,forecastCurrent:z.boolean()}).strict().optional(),laborMargin:margin}).strict().parse(value);
       const saved=data.saved,r=saved?.report;
       if (!!saved!==(data.latestVersion>0) || (saved && saved.version>data.latestVersion) ||

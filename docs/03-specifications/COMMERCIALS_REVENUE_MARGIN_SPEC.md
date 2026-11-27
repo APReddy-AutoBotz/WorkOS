@@ -401,3 +401,8 @@ The entity-scoped register inspects up to ten activated or explicitly adopted co
 The buyer requires explicit engagement assignments per contract version, including unused versions. The owner of a sibling engagement gains no access through the contract alone. Current owners are resolved at delivery and receipt access. A same-contract retainer engagement can be assigned before it adopts new terms. Assignment to one version does not confer access to another. Finance sees missing assignments and unavailable owners. Mandatory recipients also include the named scoped commercial manager and finance/billing owner. One person filling multiple roles receives one receipt.
 
 An approved fixed-fee installment can reserve a released purchase order in the invoice export workspace. Coverage uses the eligibility date, pinned contract version, currency and full installment amount. The database locks the order and checks its available balance before recording the commitment.
+
+
+### Approved fixed-fee project costs
+
+WOS-COM-007, WOS-COM-011 and WOS-COM-015. Finance uses independently approved project cost entries recorded in WorkOS as actual non-labor cost. Prepare an incurred amount in project currency with its source reference. A separate authorized finance worker approves or rejects it with a reason. Only approved amounts enter gross margin through the selected day. Labor margin remains visible separately. Margin-authorized forecast versions retain the approved cost basis and resulting gross margin. Assign the project cost preparation and decision permissions to the appropriate buyer roles. Existing financial period locks apply. To suspend entry, revoke the two grants and retain previously approved records and forecasts.

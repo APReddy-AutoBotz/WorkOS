@@ -190,6 +190,8 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
       assert.deepEqual(disabledRevenue.body.revenue,{applicableDays:0,missingDays:0,staleDays:0,earnedAmount:null,remainingRevenue:null});
       const desk=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
       await desk.getByRole('button',{name:'Inspect completion forecast'}).click();
+      await desk.getByRole('button',{name:'Inspect cost entries for '+today}).click();
+      await desk.getByText('No cost entries for this date.').waitFor();
       await desk.getByText('Reconciled elapsed-time revenue through '+today+': Unavailable').waitFor();
       await desk.getByLabel('Remaining forecast hours').fill('6.25');
       await desk.getByLabel('Remaining labor cost (GBP)').fill('30.1725');
@@ -337,6 +339,38 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.deepEqual((await split(2)).remaining,{amount:'-32.4625',percent:null});
     const priorBasis=await split(1);
     assert.deepEqual(priorBasis,{actual:aligned.actual,remaining:null,forecastCurrent:false});
+    const expensePath='/engagements/'+engagement.id+'/project-costs';
+    const expense={id:randomUUID(),projectId:project.id,day:today,amount:'12.3456',reference:'SYN-FIXED-TRAVEL'};
+    const decision={id:expense.id,decision:'Approved',reason:'Synthetic finance verification'};
+    const writeCost=(suffix,body,identity)=>request(expensePath+suffix,{method:'POST',body,identity});
+    assert.equal((await writeCost('',expense,identities.requester)).status,403);
+    for(const account of [identities.requester,identities.second]){
+      const worker='cost-worker-'+account.id;
+      await pool.query("insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values($1,$1,'Synthetic cost reviewer',$2,'Analyst','Finance','US','director-commercial','Active',$3,$4)",[worker,worker+'@example.test',commercialFixture.organizationId,commercialFixture.legalEntityId]);
+      await pool.query('update users set employee_record_id=$1,employee_id=$1 where id=$2',[worker,account.id]);
+    }
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) select 'Admin',p,true from unnest($1::text[])p on conflict(role_name,permission_key)do update set enabled=true",[['commercial.project_costs.prepare','commercial.project_costs.decide']]);
+    assert.equal((await writeCost('',{...expense,id:randomUUID(),projectId:commercialFixture.foreignProjectId??'other-scoped-project'},identities.requester)).status,404);
+    const prepared=await writeCost('',expense,identities.requester);
+    assert.equal(prepared.status,201,JSON.stringify(prepared.body));
+    assert.equal((await writeCost('',{...expense,id:randomUUID()},identities.requester)).status,409);
+    assert.equal((await writeCost('',expense,identities.requester)).status,201);
+    assert.equal((await writeCost('/decisions',decision,identities.requester)).status,403);
+    assert.equal((await request(comparisonPath)).body.projectCosts.amount,'0');
+    const approved=await writeCost('/decisions',decision,identities.second);
+    assert.equal(approved.status,201,JSON.stringify(approved.body));
+    assert.equal((await writeCost('/decisions',decision,identities.second)).status,201);
+    const total=(await request(comparisonPath)).body.projectCosts;
+    assert.equal(total.entries,1);
+    assert.equal(total.amount,'12.3456');
+    assert.equal(total.grossMargin.amount,'-80.9196');
+    const currentCosts=(await request(comparisonPath)).body;
+    const retained=await record({...makeCommand(currentCosts),view:'margin_reconciliation',expectedTotalRevenue:'130.1234'});
+    assert.equal(retained.status,201,JSON.stringify(retained.body));
+    assert.deepEqual(retained.body.retainedProjectCosts.grossMargin,total.grossMargin);
+    const restricted=(await request(forecastPath+'?through='+today+'&view=budget_comparison')).body;
+    assert.equal(restricted.retainedProjectCosts,undefined);
+    assert.equal(restricted.saved.report.retainedProjectCosts,undefined);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.fixed_fee_margin.view'");
     assert.equal((await request(comparisonPath)).status,403);
     assert.equal(await marginAt(3),null);
@@ -345,6 +379,10 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.equal((await revenue(3)).remainingRevenue,'127.8334');
     const lower=await record({...makeCommand(await forecast()),view:'budget_comparison',remainingHours:'0',remainingCost:'0'});
     assert.equal(lower.status,201);
+    const financeHandoff=(await request(comparisonPath)).body;
+    assert.equal(financeHandoff.token,lower.body.token);
+    assert.equal(financeHandoff.marginComparison.forecastCurrent,true);
+    assert.equal(lower.body.projectCosts,undefined);
     assert.deepEqual(lower.body.budgetVariance,{hours:'-0.75',laborCost:'10.364'});
     assert.equal((await request(forecastPath+'?through='+today+'&view=budget_comparison',{identity:identities.reader})).status,403);
     const futureVersion=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},addUtcDays(today,1));
