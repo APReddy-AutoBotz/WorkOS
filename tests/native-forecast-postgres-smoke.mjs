@@ -1,3 +1,5 @@
+import {actualPercent} from '../shared/actual-work.mjs';
+import {shiftCapacityDate} from '../shared/worker-capacity.mjs';
 import {sumHours} from '../shared/work-hours.mjs';
 import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
@@ -24,13 +26,25 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercial
  const forged=await pool.connect();try{await forged.query('begin');await forged.query("select set_config('workos.native_forecast_context',$1,true)",[JSON.stringify({actorId:frozen.actor_id,activeRole:frozen.active_role,organizationId:frozen.organization_id,legalEntityId:frozen.legal_entity_id,employeeId:frozen.employee_id})]);await assert.rejects(forged.query("insert into native_forecast_evidence select gen_random_uuid(),organization_id,legal_entity_id,employee_id,98,gen_random_uuid(),request_fingerprint,starts_on,ends_on,months,calculation_version,input_canonical,source_token,result,artifact_csv||'changed',artifact_sha256,artifact_bytes,actor_id,active_role,source,reason,created_at from native_forecast_evidence where id=$1",[evidence.id]),{code:'WNF02'});}finally{await forged.query('rollback');forged.release();}
  const versionPath='/api/v1/assignment-versions/assignments/'+ids.primary,current=(await request(versionPath)).body.current;let edited=await request(versionPath+'/versions',{method:'POST',body:{expectedRevision:current.revision,expectedLatestId:current.versionId,definition:{...current.snapshot,quantityExact:'20.00000000000000001'},reason:'Synthetic exact native planner edit'}});assert.equal(edited.status,400,'snapshot contains immutable identity fields; command requires exact definition');const{assignmentId,employeeId,projectId,...definition}=current.snapshot;edited=await request(versionPath+'/versions',{method:'POST',body:{expectedRevision:current.revision,expectedLatestId:current.versionId,definition:{...definition,quantityExact:'20.00000000000000001'},reason:'Synthetic exact native planner edit'}});assert.equal(edited.status,201,JSON.stringify(edited.body));let changed=(await get()).body.result;assert.equal(changed.points[0].declaredPercentageExact,'25.00000000000000001');assert.equal((await retain(result)).status,409);assert.deepEqual((await retain(result,key)).body.evidence,evidence);
  const nextForecast=()=>request(base+f.ownerId+'/period?'+q(1,next));
- const beforeFixed=(await nextForecast()).body.plannedHours[0];
+ const baseline=(await nextForecast()).body,beforeFixed=baseline.plannedHours[0];
  const fixed=await request('/api/allocations',{method:'POST',body:{employee_id:f.ownerId,project_id:f.projectId,fixed_hours:'8',start_date:today,end_date:next,billable:false,status:'Active'}});
  assert.equal(fixed.status,200,JSON.stringify(fixed.body));
  const withFixed=(await nextForecast()).body;
  assert.equal(withFixed.fixedTotals.find(row=>row.assignmentId===fixed.body.id).hours,'8');
  assert.equal(withFixed.plannedHours[0],sumHours([beforeFixed,'4']));
+ assert.equal(withFixed.periodLoad.plannedHours,sumHours([baseline.periodLoad.plannedHours,'4']));
+ assert.equal(withFixed.periodLoad.eligibleHours,baseline.periodLoad.eligibleHours);
  const leave=await request('/api/leave/requests',{method:'POST',identity:identities.reader,body:{employee_id:f.ownerId,leave_type_id:'leave-type-annual',start_date:today,end_date:today,reason:'Synthetic private forecast leave'}});assert.equal(leave.status,200,JSON.stringify(leave.body));assert(leave.body.calendar_evidence_id);assert.equal((await request('/api/leave/requests/'+leave.body.id+'/status',{method:'PATCH',body:{status:'Approved'}})).status,200);assert.equal((await nextForecast()).body.plannedHours[0],sumHours([beforeFixed,'8']),'Leave on another day reallocates the fixed total to the remaining day');
+ const afterLeave=(await nextForecast()).body;
+ assert.equal(afterLeave.periodLoad.plannedHours,sumHours([baseline.periodLoad.plannedHours,'8']));
+ const middle=shiftCapacityDate(next,1);
+ const oneDay=await request('/api/allocations',{method:'POST',body:{employee_id:f.ownerId,project_id:f.projectId,percentage:50,start_date:middle,end_date:middle,billable:false,status:'Active'}});
+ assert.equal(oneDay.status,200,JSON.stringify(oneDay.body));
+ const between=(await nextForecast()).body;
+ assert.deepEqual(between.plannedHours,afterLeave.plannedHours);
+ const expectedHours=sumHours([afterLeave.periodLoad.plannedHours,'4']);
+ assert.equal(between.periodLoad.plannedHours,expectedHours);
+ assert.deepEqual(between.periodLoad.percentage,actualPercent(expectedHours,baseline.periodLoad.eligibleHours));
  await pool.query('delete from project_allocations where id=$1',[fixed.body.id]);
  changed=(await get()).body.result;assert.equal(changed.points[0].capacity.totals.leaveReductionHoursExact,'8');assert.equal(changed.points[0].declaredPercentageExact,'25.00000000000000001');assert.equal(changed.points[0].band,'underload');assert.equal(changed.physicalUtilization,null);assert.equal((await retain(result)).status,409);const future=await request('/api/v1/actual-work/workers/'+f.ownerId+'/period?startsOn='+today+'&endsOn='+next);assert(future.body.result.reasonCodes.includes('FUTURE_ACTUAL_PERIOD'));
  await pool.query("delete from system_settings where key='benchThreshold'");changed=(await get()).body.result;assert.equal(changed.thresholds,null);assert.equal(changed.points[0].band,null);assert(changed.points[0].reasonCodes.includes('THRESHOLDS_NOT_CONFIGURED'));await pool.query("insert into system_settings(key,value)values('benchThreshold','20')");

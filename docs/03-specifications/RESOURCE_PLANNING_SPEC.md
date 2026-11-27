@@ -54,3 +54,4 @@ Negative:
 ## Migration and rollback
 
 Existing workers/allocations migrate to effective capacity/assignment records with reconciled counts and utilization fixtures. Compatibility reports remain until planned/actual/forecast parity is proven.
+For WOS-RES-004 the live worker forecast sums eligible planned hours across all dates in the selected period and divides by eligible capacity after approved leave. Fixed-hour totals use available capacity across the entire assignment date range. Missing authority or a zero denominator leaves the percentage unavailable.

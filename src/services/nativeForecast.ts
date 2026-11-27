@@ -1,3 +1,4 @@
+import {actualPercent} from '../../shared/actual-work.mjs';
 import {validFixedHours} from '../../shared/assignment-version.mjs';
 import {NATIVE_FORECAST_VERSION,plannedCheckpointHours,readNativeForecast,nativeForecastCsv,validNativeWindow} from '../../shared/native-forecast.mjs';
 import {compareCapabilityIds} from '../../shared/workforce-capabilities.mjs';
@@ -9,7 +10,8 @@ export type NativeAssignment={id:string;projectId:string;projectCode:string;proj
 export type NativeResult={calculationVersion:'native-forecast/1';employeeId:string;startsOn:string;endsOn:string;months:number;quantityUnit:'percentage';inclusionRule:string;physicalUtilization:null;physicalReason:string;thresholds:null|{bench:string;low:string;high:string};assignments:NativeAssignment[]|null;sourceReason:string|null;points:Array<{date:string;status:'available'|'unavailable'|'not_applicable';declaredPercentageExact:string|null;band:string|null;reasonCodes:string[];capacity:NativeCapacity}>;status:'available'|'unavailable'|'not_applicable';peakPercentageExact:string|null;endings:Array<{assignmentId:string;endsOn:string}>|null;sourceToken:string;observedAt:string};
 export type NativeWorker={id:string;code:string;name:string;status:string};
 export type NativeEvidence={id:string;sequence:number;requestId:string;createdAt:string;activeRole:string;source:'Web';reason:string;result:NativeResult;artifact:{fileName:string;sha256:string;bytes:number}};
-export type NativePeriod={fixedTotals:Array<{assignmentId:string;hours:string}>;plannedHours:Array<string|null>;worker:NativeWorker;ownerKey:string|null;result:NativeResult};
+type PeriodLoad={plannedHours:string|null;eligibleHours:string|null;percentage:ReturnType<typeof actualPercent>};
+export type NativePeriod={periodLoad:PeriodLoad;fixedTotals:Array<{assignmentId:string;hours:string}>;plannedHours:Array<string|null>;worker:NativeWorker;ownerKey:string|null;result:NativeResult};
 export type NativeContext=ApiRequestContext&{mode:'report';identityKey:string;canExport:boolean;isCurrent:()=>boolean};
 export type NativeSelection={employeeId?:string;startsOn:string;endsOn:string;months:number};
 const identity=()=>{const u=authService.getCurrentUser();return u&&JSON.stringify([u.id,u.employeeId,u.role,u.permissionRole,[...getEffectivePermissions(u)].sort()]);};
@@ -37,7 +39,13 @@ export const nativeForecastService={
   const changed=fixedTotals.some(row=>result.assignments?.some(a=>a.id===row.assignmentId&&a.status==='Active'&&a.startsOn<=point.date&&a.endsOn>=point.date&&a.states[i]==='included'));
   return changed?plannedHours[i]!==null&&!validFixedHours(plannedHours[i]):plannedHours[i]!==plannedCheckpointHours(point);
  }))invalid();
- return{worker:w,ownerKey:r.ownerKey as string|null,result,fixedTotals,plannedHours:plannedHours as Array<string|null>};},
+ const load=r.periodLoad;
+ if(!object(load))return invalid();
+ const {plannedHours:planned,eligibleHours:capacity,percentage}=load;
+ if((planned!==null&&!validFixedHours(planned))||(capacity!==null&&!validFixedHours(capacity)))return invalid();
+ const ratio=planned===null||capacity===null?null:actualPercent(planned,capacity);
+ if(ratio===null?percentage!==null:!object(percentage)||Object.entries(ratio).some(([key,value])=>percentage[key]!==value))return invalid();
+ return{periodLoad:{plannedHours:planned as string|null,eligibleHours:capacity as string|null,percentage:ratio},worker:w,ownerKey:r.ownerKey as string|null,result,fixedTotals,plannedHours:plannedHours as Array<string|null>};},
  retain:async(s:NativeSelection,sourceToken:string,requestId:string,reason:string,c:NativeContext|null)=>{const captured=owner(c,true);selection(s,captured);if(!hash(sourceToken)||!uuid(requestId)||!reason.trim())invalid();const r=await request('POST',path(captured,s,'evidence'),captured,{startsOn:s.startsOn,endsOn:s.endsOn,months:s.months,expectedSourceToken:sourceToken,requestId,reason},true),out=await artifact(r,s,captured);if(out.evidence.requestId!==requestId||out.evidence.reason!==reason.trim()||out.evidence.result.sourceToken!==sourceToken)invalid();return out;},
  history:async(s:NativeSelection,before:number|null,c:NativeContext|null)=>{const captured=owner(c);selection(s,captured);const q=new URLSearchParams({startsOn:s.startsOn,endsOn:s.endsOn,months:String(s.months),...(before?{before:String(before)}:{})}),r=await request('GET',path(captured,s,'evidence')+'?'+q,captured);if(!text(r.employeeId)||s.employeeId&&r.employeeId!==s.employeeId||r.startsOn!==s.startsOn||r.endsOn!==s.endsOn||r.months!==s.months||!Array.isArray(r.evidence)||r.evidence.length>10)invalid();let previous=before??2147483648;const rows=(r.evidence as unknown[]).map(v=>{const e=evidence(v,{...s,employeeId:String(r.employeeId)});if(e.sequence>=previous)invalid();previous=e.sequence;return e;});if(r.nextBefore!==null&&(!Number.isSafeInteger(r.nextBefore)||rows.length!==10||r.nextBefore!==rows.at(-1)?.sequence))invalid();return{employeeId:r.employeeId as string,ownerKey:r.ownerKey as string|null,evidence:rows,nextBefore:r.nextBefore as number|null};},
  artifact:async(s:NativeSelection,e:NativeEvidence,c:NativeContext|null)=>{const captured=owner(c,true);selection(s,captured);const q=new URLSearchParams({startsOn:s.startsOn,endsOn:s.endsOn,months:String(s.months)}),r=await request('GET',path(captured,s,'evidence/'+encodeURIComponent(e.id)+'/artifact')+'?'+q,captured,undefined,true),out=await artifact(r,s,captured);if(out.evidence.id!==e.id||out.evidence.artifact.sha256!==e.artifact.sha256||out.evidence.result.sourceToken!==e.result.sourceToken)invalid();return out;}
