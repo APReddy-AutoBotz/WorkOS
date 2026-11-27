@@ -40,7 +40,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         delete nonmaterial.projectId;
         assert.equal((await proposeAssignment(request, fx, s, { definition: nonmaterial })).status, 422);
         assert.equal((await proposeAssignment(request, fx, s, { expectedLatestId: null })).status, 409);
-        assert.equal((await proposeAssignment(request, fx, s, { definition: { ...nonmaterial, quantityUnit: 'hours' } })).status, 400);
+        const fixedProposal = await proposeAssignment(request, fx, s, { definition: { ...nonmaterial, quantityUnit: 'hours' } });
+        assert.equal(fixedProposal.status, 422);
+        assert.equal(fixedProposal.body.error.code, 'ASSIGNMENT_CAPACITY_UNAVAILABLE');
         assert.equal((await proposeAssignment(request, fx, s, { recipients: [identities.requester.id] })).status, 400);
         const proposalKey = randomUUID(), proposals = await Promise.all([proposeAssignment(request, fx, s, {}, proposalKey), proposeAssignment(request, fx, s, {}, proposalKey)]);
         assert.deepEqual(proposals.map(r => r.status).sort(), [200, 201]);
