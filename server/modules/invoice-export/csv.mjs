@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
+import { createTmLineageCheck, invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
 import { validCapabilityDate } from '../../../shared/workforce-capabilities.mjs';
 // Every free-form field is UTF-8/base64 with a fixed non-formula prefix. The
 // schema preserves bytes reversibly while making spreadsheet interpretation
@@ -48,7 +48,7 @@ export const invoiceCsvArtifact = (source) => {
     source.lines.length === 0
   )
     throw new TypeError('Current approved invoice source is required.');
-  const seen = new Set(),
+  const acceptLineage = createTmLineageCheck(),
     rows = [];
   for (const [index, x] of source.lines.entries()) {
     if (
@@ -67,7 +67,7 @@ export const invoiceCsvArtifact = (source) => {
       (source.periodBasis === 'WORK_DATE' ? x.workDate : x.eligibleDate) < source.periodStart ||
       (source.periodBasis === 'WORK_DATE' ? x.workDate : x.eligibleDate) > source.periodEnd ||
       !text(x.evidenceJson) ||
-      seen.has(`${x.itemId}/${x.itemVersion}`)
+      !acceptLineage(x)
     )
       throw new TypeError('Invoice line lineage or native amount is invalid.');
     let evidence;
@@ -86,7 +86,6 @@ export const invoiceCsvArtifact = (source) => {
       invoiceDraftTotal([evidence.amount]).amount !== invoiceDraftTotal([x.amount]).amount
     )
       throw new TypeError('Retained billing evidence does not match the line.');
-    seen.add(`${x.itemId}/${x.itemVersion}`);
     rows.push(
       [
         INVOICE_CSV_SCHEMA,
