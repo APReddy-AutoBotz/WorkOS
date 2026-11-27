@@ -1576,15 +1576,16 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
       entraGroups: sessionEntraGroups(req.user),
       exp: sessionExpiresAt,
     });
-    res.cookie?.('workos_session', token, getSessionCookieOptions(sessionExpiresAt));
     await audit(pool, req, {
       module: 'Auth',
       action: 'Switch Role',
       entityType: 'User',
       entityId: user.id,
       details: `Switched active role to ${activeRole}`,
+      oldValue: { activeRole: req.user.activeRole },
       newValue: { activeRole },
     });
+    res.cookie?.('workos_session', token, getSessionCookieOptions(sessionExpiresAt));
     res.json({
       id: user.id,
       username: user.username,
