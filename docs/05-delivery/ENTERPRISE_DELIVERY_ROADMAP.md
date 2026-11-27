@@ -27,7 +27,7 @@ The compatibility utilization report distinguishes approved zero billable hours 
 
 Updated 2026-11-24. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
 
-Managed-service reporting supports a read-only comparison of a retained monthly margin percentage with a user-entered threshold (WOS-RPT-004). Finance can also page through the latest visible engagement margins for a month, including engagements with no retained version. An unavailable percentage stays unavailable. A buyer can adopt a standing managed-service margin threshold through a governed engagement amendment. Automated margin alerts remain pending.
+Managed-service reporting supports a read-only comparison of a retained monthly margin percentage with a user-entered threshold (WOS-RPT-004). Finance can also page through the latest visible engagement margins for a month, including engagements with no retained version. An unavailable percentage stays unavailable. A buyer can adopt a standing managed-service margin threshold through a governed engagement amendment. WOS-INT-002 delivers managed-service month-end breaches to the governed inbox. A continuous breach produces one event. A verified recovery followed by a new breach produces another. The comparison entered by a portfolio reader applies only to that report. [Delivery and recovery](RELEASE_AND_OPERATIONS_RUNBOOK.md#configure-managed-service-margin-notices)
 
 ## Release evidence
 
@@ -257,7 +257,7 @@ Approved service-unit batches support CSV export and manual downstream confirmat
 
 WOS-COM-010 now compares accepted service effort with approved work by reference, worker, date, engagement and contract version.
 
-WOS-COM-011 now retains managed-service calendar-month versions for approved hours, net registered billable value, supporting worker cost, gross margin and margin percentage. Missing evidence remains visible. Each version retains its source membership and exact amounts. Cross-engagement portfolio reporting, other models’ remaining policy coverage and launch acceptance remain open.
+WOS-COM-011 now retains managed-service calendar-month versions for approved hours, net registered billable value, supporting worker cost, gross margin and margin percentage. Missing evidence remains visible. Each version retains its source membership and exact amounts. The managed-service portfolio report compares retained engagement percentages for the selected month. Other models’ remaining policy coverage and launch acceptance remain open.
 
 WOS-COM-007 and WOS-INV-001/003 now require retained, distinct worker identities for fixed-fee installment registration, command retries and invoice reservations. The register exposes the identity status of historical charges.
 
@@ -305,12 +305,12 @@ Finance can inspect dated warning states for effort and labor-cost budgets. The 
 
 ### Purchase-order risk review
 
-Finance can inspect released purchase orders across the selected legal entity for expiry, exhausted availability and the configured utilization threshold. The register reads current committed and gross consumed values. Proactive purchase-order notifications remain open, including recipient resolution for contract-level orders shared across engagements.
+Finance can inspect released purchase orders across the selected legal entity for expiry, exhausted availability and the configured utilization threshold. The register reads current committed and gross consumed values. Explicit engagement assignments identify the current owners who receive notices for shared orders.
 
 ### Purchase-order alert assignments
 
-Purchase-order alerts now cover unused released orders, shared orders, verified threshold crossings and exhaustion. The delivery work includes a finance register for assignment gaps, retriable in-app delivery, a dated opening observation for at-risk upgraded orders, and receipt access checks after reassignment. Retainer capacity notices now reach the current owners of explicitly assigned engagements. Portfolio margin alerts remain open.
+Purchase-order alerts now cover unused released orders, shared orders, verified threshold crossings and exhaustion. The delivery work includes a finance register for assignment gaps, retriable in-app delivery, a dated opening observation for at-risk upgraded orders, and receipt access checks after reassignment. Retainer capacity notices now reach the current owners of explicitly assigned engagements.
 
 ### Retainer risk reporting
 
-Finance can inspect capacity findings across governed retainer contract versions. The register uses approved work, effective capacity policies and UTC service dates. Retainer overconsumption and expiry now support mandatory in-app delivery to explicitly assigned engagement owners, a named commercial manager and a finance/billing owner. Portfolio margin alerts remain outstanding.
+Finance can inspect capacity findings across governed retainer contract versions. The register uses approved work, effective capacity policies and UTC service dates. Retainer overconsumption and expiry now support mandatory in-app delivery to explicitly assigned engagement owners, a named commercial manager and a finance/billing owner.
