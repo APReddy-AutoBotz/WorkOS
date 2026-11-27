@@ -8,7 +8,7 @@ import type { AssignmentApprovalInstance, AssignmentCreationInstance } from '../
 import type { LeaveApprovalInstance } from '../services/leaveApprovals';
 
 const AssignmentReview = ({ instance: v }: { instance: AssignmentApprovalInstance | AssignmentCreationInstance }) => {
-  const rows = (d: typeof v.proposed | null) => d ? [d.role ?? 'No role', d.quantityExact + '%', d.startsOn + ' – ' + d.endsOn, d.billable ? 'Billable within source authority' : 'Non-billable', d.status, d.comment ?? 'No comment'] : Array(6).fill('No effective assignment');
+  const rows = (d: typeof v.proposed | null) => d ? [d.role ?? 'No role', d.quantityExact + (d.quantityUnit === 'hours' ? 'h total' : '%'), d.startsOn + ' – ' + d.endsOn, d.billable ? 'Billable within source authority' : 'Non-billable', d.status, d.comment ?? 'No comment'] : Array(6).fill('No effective assignment');
   const before = rows(v.before), proposed = rows(v.proposed);
   return <section aria-label="Retained assignment for bulk review"><p>Worker {v.employeeId} · Project {v.projectId}</p><table><caption>Exact retained before and proposed assignment</caption><thead><tr><th>Field</th><th>Before</th><th>Proposed</th></tr></thead><tbody>{['Role', 'Declared allocation', 'Dates', 'Billability', 'Status', 'Comment'].map((label, i) => <tr key={label}><th>{label}</th><td>{before[i]}</td><td>{proposed[i]}</td></tr>)}</tbody></table></section>;
 };

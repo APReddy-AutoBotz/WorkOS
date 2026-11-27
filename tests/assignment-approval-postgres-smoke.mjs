@@ -12,7 +12,8 @@ await withCommercialDatabase(async ({ pool }) => withPreAssignmentApprovalMigrat
     await runMigrations({ pool, rootDir, logger: { log() { } } });
     await seedAssignmentApproval(pool);
     const keep = ['project_allocations', 'assignment_versions', 'assignment_overlap_policy_versions', 'assignment_overlap_evidence', 'approval_records', 'users', 'role_permissions', 'timesheets', 'timesheet_entries', 'work_submission_evidence', 'work_submission_decisions', 'resource_demands', 'resource_demand_versions', 'work_approval_instances', 'work_approval_events', 'work_period_notice_policies', 'work_period_notice_events', 'notification_events'], before = await snapshot(pool, keep);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065_wos05_assignment_material_approvals'));
+    for(const row of before.project_allocations)row.v.fixed_hours=null;
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied, expectedMigrationsFrom('065_wos05_assignment_material_approvals'));
     await includeReleaseGrant(pool, before.role_permissions);
     assert.deepEqual(await snapshot(pool, keep), before);
     for (const t of tables)
@@ -39,7 +40,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         delete nonmaterial.projectId;
         assert.equal((await proposeAssignment(request, fx, s, { definition: nonmaterial })).status, 422);
         assert.equal((await proposeAssignment(request, fx, s, { expectedLatestId: null })).status, 409);
-        assert.equal((await proposeAssignment(request, fx, s, { definition: { ...nonmaterial, quantityUnit: 'hours' } })).status, 400);
+        const fixedProposal = await proposeAssignment(request, fx, s, { definition: { ...nonmaterial, quantityUnit: 'hours' } });
+        assert.equal(fixedProposal.status, 422);
+        assert.equal(fixedProposal.body.error.code, 'ASSIGNMENT_CAPACITY_UNAVAILABLE');
         assert.equal((await proposeAssignment(request, fx, s, { recipients: [identities.requester.id] })).status, 400);
         const proposalKey = randomUUID(), proposals = await Promise.all([proposeAssignment(request, fx, s, {}, proposalKey), proposeAssignment(request, fx, s, {}, proposalKey)]);
         assert.deepEqual(proposals.map(r => r.status).sort(), [200, 201]);

@@ -1,5 +1,5 @@
 import { validAssignmentApprovalPolicy, assignmentApprovalIdentity, materialAssignmentFields } from '../../shared/assignment-approval.mjs';
-import { validAssignmentDefinition } from '../../shared/assignment-version.mjs';
+import { validPlannedAssignment } from '../../shared/assignment-version.mjs';
 import { approvalKeys, approvalUuid, approvalHash, approvalText, approvalState, APPROVAL_EVENT_KEYS } from '../../shared/work-approval.mjs';
 import { validCapabilityDate, compareCapabilityIds } from '../../shared/workforce-capabilities.mjs';
 import { ApiClientError } from './apiClient';
@@ -99,7 +99,7 @@ const snapshot = (v: unknown, id?: string): v is AssignmentSnapshot => {
     if (!obj(v) || !keys(v, ['assignmentId', 'employeeId', 'projectId', 'role', 'quantityUnit', 'quantityExact', 'startsOn', 'endsOn', 'billable', 'status', 'comment']) || !text(v.assignmentId, 239) || id !== undefined && v.assignmentId !== id || !text(v.employeeId) || !text(v.projectId))
         return false;
     const { assignmentId: _id, employeeId: _worker, projectId: _project, ...d } = v;
-    return validAssignmentDefinition(d);
+    return validPlannedAssignment(d);
 };
 export const decodeAssignmentApprovalPolicy = (v: unknown): AssignmentApprovalPolicy => {
     if (!obj(v) || !keys(v, ['id', 'sequence', 'effectiveFrom', 'definition', 'actorId', 'activeRole', 'reason', 'createdAt']) || !uuid(v.id) || !integer(v.sequence, 1) || !validCapabilityDate(v.effectiveFrom) || !validAssignmentApprovalPolicy(v.definition) || !uuid(v.actorId) || !text(v.activeRole, 100) || !text(v.reason, 1000) || !instant(v.createdAt))
@@ -114,7 +114,7 @@ const receipt = (v: unknown, id: string): WorkDecisionReceipt => {
 export type AssignmentCreationInstance = Omit<AssignmentApprovalInstance, 'before'> & { operationKind: 'Creation'; before: null };
 export type AssignmentCreationPage = { instance: AssignmentCreationInstance; actorUserId: string; ownerKey: string };
 const decodeInstance = (v: unknown, id?: string, creation = false): AssignmentApprovalInstance | AssignmentCreationInstance => {
-    if (!obj(v) || !keys(v, ['id', 'assignmentId', 'employeeId', 'projectId', 'sourceRevision', 'sourceVersionId', 'sourceToken', 'requesterUserId', 'requestId', 'reason', 'createdAt', 'worker', 'policy', 'before', 'proposed', 'currentRevision', 'currentVersionId', 'state', 'transitions', 'notificationFailures', ...(creation ? ['operationKind'] : [])]) || (creation && v.operationKind !== 'Creation') || !uuid(v.id) || id !== undefined && v.id !== id || !text(v.assignmentId, 239) || creation && (!v.assignmentId.startsWith('a-') || !uuid(v.assignmentId.slice(2))) || !text(v.employeeId) || !text(v.projectId) || !hash(v.sourceRevision) || !nullableUuid(v.sourceVersionId) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !uuid(v.requestId) || !text(v.reason, 1000) || !instant(v.createdAt) || !obj(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || v.worker.id !== v.employeeId || !text(v.worker.code) || !text(v.worker.name, 2000) || (creation ? v.before !== null || v.sourceVersionId !== null : !snapshot(v.before, v.assignmentId) || v.before.employeeId !== v.employeeId || v.before.projectId !== v.projectId) || !validAssignmentDefinition(v.proposed) || !hash(v.currentRevision) || !nullableUuid(v.currentVersionId) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !Array.isArray(v.notificationFailures))
+    if (!obj(v) || !keys(v, ['id', 'assignmentId', 'employeeId', 'projectId', 'sourceRevision', 'sourceVersionId', 'sourceToken', 'requesterUserId', 'requestId', 'reason', 'createdAt', 'worker', 'policy', 'before', 'proposed', 'currentRevision', 'currentVersionId', 'state', 'transitions', 'notificationFailures', ...(creation ? ['operationKind'] : [])]) || (creation && v.operationKind !== 'Creation') || !uuid(v.id) || id !== undefined && v.id !== id || !text(v.assignmentId, 239) || creation && (!v.assignmentId.startsWith('a-') || !uuid(v.assignmentId.slice(2))) || !text(v.employeeId) || !text(v.projectId) || !hash(v.sourceRevision) || !nullableUuid(v.sourceVersionId) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !uuid(v.requestId) || !text(v.reason, 1000) || !instant(v.createdAt) || !obj(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || v.worker.id !== v.employeeId || !text(v.worker.code) || !text(v.worker.name, 2000) || (creation ? v.before !== null || v.sourceVersionId !== null : !snapshot(v.before, v.assignmentId) || v.before.employeeId !== v.employeeId || v.before.projectId !== v.projectId) || !validPlannedAssignment(v.proposed) || !hash(v.currentRevision) || !nullableUuid(v.currentVersionId) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !Array.isArray(v.notificationFailures))
         return fail();
     const p = decodeAssignmentApprovalPolicy(v.policy), r = v as unknown as AssignmentApprovalInstance;
     if (!p.definition.workerIds.includes(r.employeeId) || (creation ? p.definition.creationRequired !== true : !materialAssignmentFields(r.before, r.proposed, p.definition.materialFields).length))
@@ -228,7 +228,7 @@ export const createAssignmentApprovalClient = (request: Transport) => {
             return s as AssignmentApprovalSource;
         },
         propose: async (source: AssignmentApprovalSource, definition: AssignmentDefinition, reason: string, requestId: string, c: WorkApprovalContext | null) => {
-            if (c?.mode !== 'assignment' || !uuid(requestId) || !validAssignmentDefinition(definition) || !text(reason.trim(), 1000) || !source.policy)
+            if (c?.mode !== 'assignment' || !uuid(requestId) || !validPlannedAssignment(definition) || !text(reason.trim(), 1000) || !source.policy)
                 return fail();
             const r = await call('POST', '/sources/' + encodeURIComponent(source.assignmentId) + '/proposals', c, { expectedRevision: source.revision, expectedLatestId: source.versionId, definition, reason: reason.trim(), requestId }), p = page(r);
             if (typeof r.replayed !== 'boolean' || p.instance.assignmentId !== source.assignmentId || p.instance.requestId !== requestId || p.instance.requesterUserId !== r.actorUserId || p.instance.sourceRevision !== source.revision || p.instance.sourceVersionId !== source.versionId || p.instance.reason !== reason.trim() || canon(p.instance.before) !== canon(source.snapshot) || canon(p.instance.proposed) !== canon(definition) || p.instance.policy.id !== source.policy.id)
@@ -267,7 +267,7 @@ export const createAssignmentApprovalClient = (request: Transport) => {
             return p;
         },
         requestCreation: async (employeeId: string, projectId: string, policy: AssignmentApprovalPolicy, definition: AssignmentDefinition, reason: string, requestId: string, c: WorkApprovalContext | null) => {
-            if (c?.mode !== 'assignment' || !text(employeeId) || !text(projectId) || !uuid(requestId) || policy.definition.creationRequired !== true || !validAssignmentDefinition(definition) || !text(reason.trim(), 1000)) return fail();
+            if (c?.mode !== 'assignment' || !text(employeeId) || !text(projectId) || !uuid(requestId) || policy.definition.creationRequired !== true || !validPlannedAssignment(definition) || !text(reason.trim(), 1000)) return fail();
             const r = await call('POST', '/creations', c, { employeeId, projectId, expectedPolicyId: policy.id, definition, reason: reason.trim(), requestId });
             const i = decodeAssignmentCreationInstance(r.instance);
             if (typeof r.replayed !== 'boolean' || i.employeeId !== employeeId || i.projectId !== projectId || i.policy.id !== policy.id || i.requestId !== requestId || i.requesterUserId !== r.actorUserId || i.reason !== reason.trim() || canon(i.proposed) !== canon(definition)) return fail();

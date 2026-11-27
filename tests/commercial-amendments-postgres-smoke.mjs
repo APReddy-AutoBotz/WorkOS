@@ -90,6 +90,7 @@ await withCommercialDatabase(async({pool})=>{
       await createEngagement(client,req,amendmentEngagementInput('SYN-AMENDMENT-UPGRADE-E',contract),async()=>{});await client.query('commit');
     }catch(error){await client.query('rollback');throw error;}finally{client.release();}
     const preserved=await amendmentSnapshot(pool);const projects=await amendmentSnapshot(pool,['projects']);
+    for (const row of preserved.project_allocations) row.value.fixed_hours = null;
     for (const row of preserved.commercial_contract_versions) Object.assign(row.value, {installments: [], retainer_periods: [], service_dimensions: [], service_period_charges: [], retainer_capacity_policy: null, retainer_overage_policy: null, retainer_rounding: null});
     for(const row of preserved.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;row.value.source_identity=null;row.value.category_code=null;row.value.category_reference=null;} // additive 047/048 column; existing fields remain exact
     const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,expectedMigrationsFrom(migration043));assert.equal(upgraded.status.isCurrent,true);

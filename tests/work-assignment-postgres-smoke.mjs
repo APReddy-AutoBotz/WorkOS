@@ -16,6 +16,7 @@ await withCommercialDatabase(async({pool})=>{
     for(const file of ['040_wos04_commercial_drafting_foundation.sql','041_wos04_governed_lifecycle.sql','042_wos04_scoped_client_profiles.sql','043_wos04_governed_amendments.sql'])await copyFile(join(commercialServerDir,'migrations',file),join(rootDir,'migrations',file));
     await runMigrations({pool,rootDir,logger:quiet});await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);
     const before=await workSnapshotBefore044(pool),grants=await permissionSnapshot(pool);
+    for(const row of before.project_allocations)row.value.fixed_hours=null;
     for(const row of before.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;row.value.source_identity=null;row.value.category_code=null;row.value.category_reference=null;} // additive 047/048 column
     const installed=await migrateCommercialDatabase(pool);assert.deepEqual(installed.applied,expectedMigrationsFrom(migration));assert.equal(installed.status.isCurrent,true);
     assert.deepEqual(await workSnapshotBefore044(pool),before,'043 upgrade preserves every legacy ID and byte of accepted work');

@@ -401,6 +401,7 @@ export const createOperationalImportRouter = ({
             project_id = excluded.project_id,
             role_on_project = excluded.role_on_project,
             percentage = excluded.percentage,
+            fixed_hours = null,
             start_date = excluded.start_date,
             end_date = excluded.end_date,
             billable = excluded.billable,

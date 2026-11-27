@@ -10,7 +10,12 @@ export const seedWorkPeriods=async(pool,today)=>{
 export const workAllocation=(projectId,today,overrides={})=>({employee_id:f.ownerId,project_id:projectId,percentage:20,start_date:today,end_date:today,billable:true,status:'Active',...overrides});
 export const workInput=(projectId,today,overrides={})=>({employee_id:f.ownerId,week_ending:today,status:'Submitted',entries:[{project_id:projectId,work_type:'Project Work',work_date:today,hours:2,remark:'Synthetic submitted work note',category:'Synthetic ordinary work',billable:true}],...overrides});
 export const workSnapshot=async pool=>{
-  const result={};for(const table of ['timesheets','timesheet_entries','work_submission_evidence','work_submission_decisions','project_allocations','approval_records'])result[table]=(await pool.query(`select to_jsonb(t) value from ${table} t order by to_jsonb(t)::text`)).rows;return result;
+  const result={};for(const table of ['timesheets','timesheet_entries','work_submission_evidence','work_submission_decisions','project_allocations','approval_records'])result[table]=(await pool.query(`select to_jsonb(t) value from ${table} t order by to_jsonb(t)::text`)).rows;
+  // Pre-133 allocation rows represent percentage assignments, with no fixed total.
+  for (const {value} of result.project_allocations) {
+    if (!Object.hasOwn(value, 'fixed_hours')) value.fixed_hours = null;
+  }
+  return result;
 };
 export const workPost=async(request,path,body,status=200)=>{
   const result=await request(path,{method:'POST',body});assert.equal(result.status,status,`${path}: ${JSON.stringify(result.body)}`);return result.body;

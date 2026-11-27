@@ -147,6 +147,7 @@ await withClientProfileDatabase(async ({pool, databaseUrl}) => {
     const governed = await seedGovernedHistory(pool, identities, today);
     const before = await snapshot(pool, [...preservedClientTables, 'audit_logs']);
     for (const row of before.commercial_contract_versions) Object.assign(row.value, {installments: [], retainer_periods: [], service_dimensions: [], service_period_charges: [], retainer_capacity_policy: null, retainer_overage_policy: null, retainer_rounding: null});
+    for(const row of before.project_allocations)row.value.fixed_hours=null;
     for(const row of before.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;row.value.source_identity=null;row.value.category_code=null;row.value.category_reference=null;} // additive 047/048 column
     assert.equal(before.project_engagement_mappings.length, 1);assert.ok(before.commercial_draft_events.length >= 3);assert.equal(before.commercial_lifecycle_events.length, 3);
     const upgraded = await migrateClientProfiles(pool);assert.deepEqual(upgraded.applied, expectedMigrationsFrom(clientProfileMigration));assert.equal(upgraded.status.isCurrent, true);

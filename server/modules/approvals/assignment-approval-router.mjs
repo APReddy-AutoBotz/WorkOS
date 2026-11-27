@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { validAssignmentApprovalPolicy } from '../../../shared/assignment-approval.mjs';
-import { validAssignmentDefinition } from '../../../shared/assignment-version.mjs';
+import { validPlannedAssignment } from '../../../shared/assignment-version.mjs';
 import { workApprovalScope as scope, workApprovalFail as fail } from './work-approval-service.mjs';
 import { assignmentDecisionPermissions, assignmentApprovalSource, assignmentApprovalPolicy, assignmentApprovalActor, assignmentApprovalPolicyView, setAssignmentApprovalContext, scopedAssignmentApproval, assignmentApprovalView, proposeAssignmentApproval, decideAssignmentApproval, assignmentCreationSource, proposeAssignmentCreation } from './assignment-approval-service.mjs';
 export const registerAssignmentApprovalRoutes = (router, o, { config, handle, parse, uuid, hash, date, reason }) => {
@@ -50,7 +50,7 @@ export const registerAssignmentApprovalRoutes = (router, o, { config, handle, pa
         return { employeeId: q.employeeId, projectId: q.projectId, policy: p?.definition.creationRequired === true ? assignmentApprovalPolicyView(p) : null };
     }));
     router.post('/assignments/creations', ...read, manage, handle(true, async (c, req) => {
-        const d = parse(z.object({ expectedOwnerKey: hash, expectedPolicyId: uuid, employeeId: z.string().min(1).max(200), projectId: z.string().min(1).max(200), definition: z.unknown().refine(validAssignmentDefinition), requestId: uuid, reason }).strict(), req.body), { expectedOwnerKey, ...input } = d;
+        const d = parse(z.object({ expectedOwnerKey: hash, expectedPolicyId: uuid, employeeId: z.string().min(1).max(200), projectId: z.string().min(1).max(200), definition: z.unknown().refine(validPlannedAssignment), requestId: uuid, reason }).strict(), req.body), { expectedOwnerKey, ...input } = d;
         const out = await proposeAssignmentCreation(c, req, input, o);
         return { status: out.replayed ? 200 : 201, body: out };
     }, { sourceLock: true }));
@@ -66,7 +66,7 @@ export const registerAssignmentApprovalRoutes = (router, o, { config, handle, pa
         return { instance: assignmentApprovalView(v) };
     }));
     router.get('/assignments/sources/:id', ...read, handle(false, async (c, req) => { parse(z.object({}).strict(), req.query); const { a, latestId } = await assignmentApprovalSource(c, req, req.params.id, o), p = await assignmentApprovalPolicy(c, req, a.employee_id); return { source: { assignmentId: a.id, revision: a.revision, versionId: latestId, snapshot: a.snapshot, policy: p ? assignmentApprovalPolicyView(p) : null } }; }));
-    router.post('/assignments/sources/:id/proposals', ...read, manage, handle(true, async (c, req) => { const d = parse(z.object({ expectedOwnerKey: hash, expectedRevision: hash, expectedLatestId: uuid.nullable(), definition: z.unknown().refine(validAssignmentDefinition), requestId: uuid, reason }).strict(), req.body), { expectedOwnerKey, ...input } = d, out = await proposeAssignmentApproval(c, req, req.params.id, input, o); return { status: out.replayed ? 200 : 201, body: out }; }, { sourceLock: true }));
+    router.post('/assignments/sources/:id/proposals', ...read, manage, handle(true, async (c, req) => { const d = parse(z.object({ expectedOwnerKey: hash, expectedRevision: hash, expectedLatestId: uuid.nullable(), definition: z.unknown().refine(validPlannedAssignment), requestId: uuid, reason }).strict(), req.body), { expectedOwnerKey, ...input } = d, out = await proposeAssignmentApproval(c, req, req.params.id, input, o); return { status: out.replayed ? 200 : 201, body: out }; }, { sourceLock: true }));
     router.get('/assignments/instances', ...read, handle(false, async (c, req) => {
         const q = parse(z.object({ after: uuid.optional(), assignmentId: z.string().min(1).max(239).optional() }).strict(), req.query), p = [], ew = o.buildEmployeeScopeWhere(req, p, 'e'), pw = o.buildProjectScopeWhere(req, p, 'p');
         p.push(q.after ?? null, q.assignmentId ?? null);

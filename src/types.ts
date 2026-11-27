@@ -665,6 +665,7 @@ export interface Project {
 }
 
 export interface Allocation {
+  fixedHours?: string;
   id: string;
   employeeId: string;
   projectId: string;

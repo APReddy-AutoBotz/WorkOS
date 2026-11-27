@@ -18,6 +18,8 @@ WOS-RES-004 uses available capacity after approved leave for converting percenta
 
 Assignment dates and overlap are server validated. Warning/block thresholds are configurable. Material changes may create approval records.
 
+For WOS-RES-004, distribute a fixed hours total over the full assignment range using each day's available capacity after approved leave. Zero-capacity days receive zero. If capacity is unknown, or the whole range has zero capacity for a positive total, the distribution is unavailable. Round cumulative shares half-up to six decimal hours or the submitted total's precision, whichever is finer. Daily shares sum to the submitted total. Live forecast checkpoints recalculate those shares over the original assignment dates when capacity changes. Save the original unit and exact total in the assignment version. At save or approval, use the full range’s available hours to calculate the percentage used by existing overlap rules. Round this compatibility value upward to twelve decimal places.
+
 ## Utilization
 
 - Planned: effective assignment load divided by effective capacity.
@@ -52,3 +54,4 @@ Negative:
 ## Migration and rollback
 
 Existing workers/allocations migrate to effective capacity/assignment records with reconciled counts and utilization fixtures. Compatibility reports remain until planned/actual/forecast parity is proven.
+For WOS-RES-004 the live worker forecast sums eligible planned hours across all dates in the selected period and divides by eligible capacity after approved leave. Fixed-hour totals use available capacity across the entire assignment date range. Missing authority or a zero denominator leaves the percentage unavailable.

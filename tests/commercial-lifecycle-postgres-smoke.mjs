@@ -106,7 +106,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);
     const proposalInput=projectInput(dates,'SYN-UPGRADE-PROMOTION',{id:'pending',billable:true},{budgetAllocation:'0.0000'});
     const proposedId=await seedProposal(pool,proposalInput);
-    const oldLegacy=await snapshot(pool,legacyTables);
+    const oldLegacy=await snapshot(pool,legacyTables);for(const row of oldLegacy.project_allocations)row.snapshot.fixed_hours=null;
     for(const row of oldLegacy.timesheet_entries){row.snapshot.evidence_url=null;row.snapshot.work_reference=null;row.snapshot.source_identity=null;row.snapshot.category_code=null;row.snapshot.category_reference=null;} // additive 047/048 column
     await copyFile(join(commercialServerDir,'migrations',`${migration040}.sql`),join(rootDir,'migrations',`${migration040}.sql`));
     const before041=await runMigrations({pool,rootDir,logger:quiet});assert.deepEqual(before041.applied,[migration040]);

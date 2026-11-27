@@ -129,6 +129,7 @@ await withCommercialDatabase(async ({pool}) => {
     await seedCommercialReferences(pool);
     await seedCommercialLegacyWork(pool);
     const before = await legacySnapshot(pool);
+    for(const row of before.project_allocations)row.fixed_hours=null;
     for(const row of before.timesheet_entries){row.evidence_url=null;row.work_reference=null;row.source_identity=null;row.category_code=null;row.category_reference=null;} // additive 047/048 column; all pre-existing fields still compare exactly
     const upgraded = await migrateCommercialDatabase(pool);
     assert.deepEqual(upgraded.applied, expectedMigrationsFrom(versionId), 'upgrade must apply all ordered append-only commercial migrations');

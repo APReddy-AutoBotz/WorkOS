@@ -98,6 +98,7 @@ export const withClientProfilesJourney = async test => withCommercialDatabase(as
     const result = await runMigrations({pool, rootDir, logger: {log() {}}});assert.equal(result.status.currentVersion, '041_wos04_governed_lifecycle');
     const before = await clientProfileSnapshot(pool, preservedClientTables);
     for (const row of before.commercial_contract_versions) Object.assign(row.value, {installments: [], retainer_periods: [], service_dimensions: [], service_period_charges: [], retainer_capacity_policy: null, retainer_overage_policy: null, retainer_rounding: null});
+    for(const row of before.project_allocations)row.value.fixed_hours=null;
     for(const row of before.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;row.value.source_identity=null;row.value.category_code=null;row.value.category_reference=null;} // additive 047/048 column
     const upgraded = await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied, expectedMigrationsFrom(clientProfileMigration));
     assert.deepEqual(await clientProfileSnapshot(pool, preservedClientTables), before);
