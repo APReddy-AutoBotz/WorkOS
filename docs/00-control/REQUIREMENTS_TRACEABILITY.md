@@ -247,6 +247,17 @@ Every implementation PR includes requirement IDs, evidence IDs, exact head, requ
 - Provider and immutable CSV-artifact acceptance; failed-operation and final-state retrieval semantics.
 - Reversals/supersessions and source → event → register → line → batch/export reconciliation.
 
+#### Commercial acceptance evidence for independent review
+
+| Control under review | Executable evidence | Result to inspect |
+|---|---|---|
+| Approved-unbilled is the entry point (WOS-INV-001/003) | [T&M eligibility](../../tests/tm-billing-eligibility-postgres-smoke.mjs) and [draft acquisition](../../tests/invoice-draft-postgres-smoke.mjs) | Approval produces registered evidence. Passing a valuation snapshot as the register item or passing a partial amount is rejected. |
+| One active reservation and reconciled batch totals (WOS-INV-002/008) | [Concurrent acquisition and cancellation](../../tests/invoice-draft-postgres-smoke.mjs) | Two batches compete for the same item. Identical retry returns the winning line, changed input conflicts, and retrying the losing request leaves its batch empty. Read both batch totals and compare the winning amount and currency with approved evidence. After cancellation, re-batching retains the original membership history. |
+| Traceable export and confirmation (WOS-INV-003/006/007) | [Milestone artifact](../../tests/milestone-invoice-client-smoke.mjs), [T&M artifact](../../tests/invoice-csv-service-smoke.mjs) and [fixed-fee provider recovery](../../tests/support/fixed-fee-approval-journey.mjs) | Inspect duplicate source rejection and signed-off totals. For a lost provider response, match the confirmed artifact ID and checksum to the original reservation. |
+| Corrections after export (WOS-INV-004/006) | [Billing reconciliation journey](../../tests/billing-reconciliation-journey-browser-smoke.mjs) | Follow the approved credit through reservation, approval, export and signed reconciliation. Review released history separately from active occupancy. |
+
+For Gate C, the independent reviewer still needs to record findings against the selected release revision, including model-specific eligibility, applicable import and compatibility entry points, authorized portions, locked periods and source-to-export reconciliation. The product owner records the commercial acceptance decision after the required work-package merges and independent review. [Release criteria](../04-quality/RELEASE_ACCEPTANCE_CRITERIA.md)
+
 ### PR-013 evidence minimum
 
 - One positive and one negative deterministic vector for each of the thirteen canonical WOS-INT-002 event/template keys.

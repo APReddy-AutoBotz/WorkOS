@@ -165,6 +165,8 @@ Legacy approval and delegation checks enforce current delegator authority and re
 
 Settings show a saved confirmation only after the API acknowledges the change. Operators can retry a failed load and reconcile an uncertain save. [Settings recovery](docs/tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md)
 
+The [commercial acceptance evidence](docs/00-control/REQUIREMENTS_TRACEABILITY.md#commercial-acceptance-evidence-for-independent-review) links the PostgreSQL and browser checks for invoice reservations, export and corrections.
+
 ### Verify invoice export lineage
 
 T&M invoice CSV generation and download check that each line, register item, eligibility event and valuation snapshot occurs once in the batch. Milestone invoices also require a distinct accepted milestone per line. Milestone identifiers preserve their original casing.
