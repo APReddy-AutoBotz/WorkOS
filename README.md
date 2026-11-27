@@ -293,7 +293,7 @@ In Commercial amendments, enter the expense budget in the engagement currency. P
 
 ### Record an actual fixed-fee project cost
 
-In the fixed-fee forecast, open **Non-labor project costs** for the incurred date. Select the project, enter the cost reference and amount in the engagement currency, and submit it. A second finance user with decision permission can approve or reject the entry with a reason. Approved costs through the forecast date reduce actual gross margin. Buyers grant preparation and decision permissions separately. [Project cost acceptance](https://github.com/APReddy-AutoBotz/WorkOS/pull/382)
+In the fixed-fee forecast, open **Non-labor project costs** for the incurred date. Select the project, enter the cost reference and amount in the engagement currency, and submit it. The selector lists projects whose approved terms cover the incurred date. A second finance user with decision permission can approve or reject the entry with a reason. Approved costs through the forecast date reduce actual gross margin. Buyers grant preparation and decision permissions separately. [Project cost acceptance](https://github.com/APReddy-AutoBotz/WorkOS/pull/382)
 
 ### Recover a finance-provider delivery
 

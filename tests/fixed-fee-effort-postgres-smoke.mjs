@@ -340,6 +340,14 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     const priorBasis=await split(1);
     assert.deepEqual(priorBasis,{actual:aligned.actual,remaining:null,forecastCurrent:false});
     const expensePath='/engagements/'+engagement.id+'/project-costs';
+    const projectOn=async day=>{
+      const response=await request(expensePath+'?day='+day);
+      assert.equal(response.status,200,JSON.stringify(response.body));
+      return response.body.projects.find(candidate=>candidate.id===project.id);
+    };
+    assert.equal((await projectOn(today)).inTerm,true,'project is selectable on its start date');
+    assert.equal((await projectOn(addUtcDays(today,-1))).inTerm,false,'before the approved project starts');
+    assert.equal((await projectOn(addUtcDays(today,1))).inTerm,false,'actual costs cannot be entered in the future');
     const expense={id:randomUUID(),projectId:project.id,day:today,amount:'12.3456',reference:'SYN-FIXED-TRAVEL'};
     const decision={id:expense.id,decision:'Approved',reason:'Synthetic finance verification'};
     const writeCost=(suffix,body,identity)=>request(expensePath+suffix,{method:'POST',body,identity});

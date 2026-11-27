@@ -295,7 +295,7 @@ Commercial managers can adopt an expense budget with the engagement amendment. F
 
 ### Fixed-fee project expense allocation
 
-Approved project expense allocations now reconcile to the dated engagement budget. The fixed-fee forecast retains approved actual expense evidence with the gross margin when the user has margin access.
+Approved project expense allocations now reconcile to the dated engagement budget. The cost-entry selector follows the approved project dates effective on the incurred day. The fixed-fee forecast retains approved actual expense evidence with the gross margin when the user has margin access.
 
 ### Buyer-configured fixed-fee budget warnings
 

@@ -580,7 +580,7 @@ export const commercialDraftingService = {
     if(!current.canViewFixedFeeMargin)throw invalid();
     return request(context,'GET',serviceEngPath(eng)+'/project-costs?'+new URLSearchParams({day}),undefined,value=>z.object({
       engagementId:z.literal(eng),day:z.literal(day),currency:z.string().regex(/^[A-Z]{3}$/),
-      projects:z.array(z.object({id:z.string(),code:z.string(),name:z.string()})),
+      projects:z.array(z.object({id:z.string(),code:z.string(),name:z.string(),inTerm:z.boolean()})),
       entries:z.array(z.object({id:z.string().uuid(),projectId:z.string(),reference:z.string(),amount:costDecimal,
         decision:z.enum(['Approved','Rejected']).nullable(),reason:z.string().nullable(),preparedByMe:z.boolean()}))
     }).strict().parse(value),false);
