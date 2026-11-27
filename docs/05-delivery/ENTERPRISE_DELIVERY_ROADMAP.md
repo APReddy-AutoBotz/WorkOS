@@ -283,7 +283,7 @@ Approved effort and labor-cost warning percentages are supported. Delivery to na
 
 ### Fixed-fee transition review
 
-Finance can inspect and approve the residual schedule. The forecast reconciles the approved closing evidence and allocation into earned value and labor margin. Non-labor cost coverage remains open.
+Finance can inspect and approve the residual schedule. The forecast reconciles the approved closing evidence and allocation into earned value and labor margin. Finance can also inspect dated gross margin including independently approved non-labor project costs.
 
 ### Period integrity for fixed-fee valuation
 
@@ -291,11 +291,11 @@ Database-enforced period controls now cover elapsed values, effort values and re
 
 ### Fixed-fee expense budgets
 
-Commercial managers can adopt an expense budget with the engagement amendment. Finance can inspect its effective amount separately from the labor budget. Actual non-labor cost evidence, reconciliation into margins and buyer-configured alerts remain open.
+Commercial managers can adopt an expense budget with the engagement amendment. Finance can inspect its effective amount separately from the labor budget. Authorized finance users can record and independently approve actual project costs. The forecast includes those approved costs through the review date. Buyer reconciliation and commercial acceptance remain open.
 
 ### Fixed-fee project expense allocation
 
-Approved project expense allocations now reconcile to the dated engagement budget. Actual expense evidence and inclusion in margin remain open.
+Approved project expense allocations now reconcile to the dated engagement budget. The fixed-fee forecast retains approved actual expense evidence with the gross margin when the user has margin access.
 
 ### Buyer-configured fixed-fee budget warnings
 

@@ -291,6 +291,14 @@ Choose the end date of a weekly, monthly or fiscal reporting period in the fixed
 
 In Commercial amendments, enter the expense budget in the engagement currency. Preview and apply the amendment with its approval reference. Check allocation risk on the applicable date to see the approved amount and effective date. An explicit zero is supported.
 
+### Record an actual fixed-fee project cost
+
+In the fixed-fee forecast, open **Non-labor project costs** for the incurred date. Select the project, enter the cost reference and amount in the engagement currency, and submit it. A second finance user with decision permission can approve or reject the entry with a reason. Approved costs through the forecast date reduce actual gross margin. Buyers grant preparation and decision permissions separately. [Project cost acceptance](https://github.com/APReddy-AutoBotz/WorkOS/pull/382)
+
+### Recover a finance-provider delivery
+
+In the invoice export workspace, an authorized finance operator can reserve an approved batch for the configured provider. If delivery is unconfirmed, reopen that batch and retry the existing reservation. If the original provider is unavailable, restore its configuration before retrying. Verify the retained artifact and receipt before recording downstream billing confirmation. [Delivery and recovery evidence](https://github.com/APReddy-AutoBotz/WorkOS/pull/384)
+
 ### Project expense allocations
 
 After the engagement has adopted an expense budget, select a fixed-fee project in Commercial amendments and allocate part of that budget. Check allocation risk shows how many in-term projects have budgets, the total allocated and the amount still available.
