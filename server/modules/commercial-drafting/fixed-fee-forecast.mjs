@@ -34,9 +34,9 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
     approvedEntries:risk.approvedEntries,costedEntries:risk.costedEntries,actualHours:verifiedHours,actualCost:risk.retainedCost,
     hoursComplete:unresolved===0,costComplete:risk.complete || (risk.approvedEntries===0 && risk.costedEntries===0),
     budgetHours:risk.effortBudget?.budgetHours??null,budgetCost:risk.laborCostBudget};
-  const approved=includeMargin?await approvedProjectCost(client,args):null;
+  const approved=await approvedProjectCost(client,args);
   const basis=[baseline,workToken,costToken];
-  if(approved?.entries)basis.push(approved.sourceHash);
+  if(approved.entries)basis.push(approved.sourceHash);
   const token=createHash('sha256').update(JSON.stringify(basis)).digest('hex');
   const where='organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and through_date=$4';
   const {rows:[latest]}=await client.query(`select ${fields} from commercial_fixed_fee_forecasts where ${where} order by version desc limit 1`,args);

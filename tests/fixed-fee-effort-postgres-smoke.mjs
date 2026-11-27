@@ -379,6 +379,10 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.equal((await revenue(3)).remainingRevenue,'127.8334');
     const lower=await record({...makeCommand(await forecast()),view:'budget_comparison',remainingHours:'0',remainingCost:'0'});
     assert.equal(lower.status,201);
+    const financeHandoff=(await request(comparisonPath)).body;
+    assert.equal(financeHandoff.token,lower.body.token);
+    assert.equal(financeHandoff.marginComparison.forecastCurrent,true);
+    assert.equal(lower.body.projectCosts,undefined);
     assert.deepEqual(lower.body.budgetVariance,{hours:'-0.75',laborCost:'10.364'});
     assert.equal((await request(forecastPath+'?through='+today+'&view=budget_comparison',{identity:identities.reader})).status,403);
     const futureVersion=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},addUtcDays(today,1));
