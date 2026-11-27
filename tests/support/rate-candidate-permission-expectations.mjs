@@ -3,6 +3,8 @@ const expected=[
  {permission_key:'releases.manage',module:'Admin',label:'Manage module releases',description:'Record activation decisions for optional modules in the current organization and environment.',protected:true},
  {permission_key:'commercial.fixed_fee_risk.configure',module:'Commercial',label:'Configure fixed-fee risk notices',description:'Set scoped mandatory recipients and the engagement notice template.',protected:false},
  {permission_key:'commercial.po_risk.configure',module:'Commercial',label:'Configure purchase-order risk notices',description:'Set scoped mandatory recipients and the purchase-order notice template.',protected:false},
+ {permission_key:'commercial.project_costs.prepare',module:'Commercial',label:'Prepare project costs',description:'Record a non-labor project cost for independent finance review.',protected:false},
+ {permission_key:'commercial.project_costs.decide',module:'Commercial',label:'Approve project costs',description:'Approve or reject independently prepared non-labor project costs.',protected:false},
  {permission_key:'commercial.service_margin_risk.configure',module:'Commercial',label:'Configure managed-service margin notices',description:'Set mandatory margin breach recipients and the engagement notice template.',protected:false},
  {permission_key:'commercial.retainer_risk.configure',module:'Commercial',label:'Configure retainer risk notices',description:'Set explicit version assignments and scoped mandatory retainer recipients.',protected:false},
  {permission_key:'commercial.fixed_fee_cost.view',module:'Commercial',label:'View fixed-fee worker costs',description:'Inspect scoped approved fixed-fee work and adopted hourly costs.',protected:false},

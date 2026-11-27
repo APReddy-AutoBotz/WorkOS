@@ -50,6 +50,8 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.service_margin.view', module: 'Commercial', label: 'View managed-service margins', description: 'Read financial period versions for managed-service engagements.', optIn: true },
   { key: 'commercial.service_margin.record', module: 'Commercial', label: 'Retain managed-service margins', description: 'Retain a new managed-service period version from current evidence.', optIn: true },
   { key: 'commercial.fixed_fee_forecast.record', module: 'Commercial', label: 'Record fixed-fee forecasts', description: 'Retain remaining effort and labor cost estimates against inspected actuals.', optIn: true },
+  { key: 'commercial.project_costs.prepare', module: 'Commercial', label: 'Prepare project costs', description: 'Record a non-labor project cost for independent finance review.', optIn: true },
+  { key: 'commercial.project_costs.decide', module: 'Commercial', label: 'Approve project costs', description: 'Approve or reject independently prepared non-labor project costs.', optIn: true },
   { key: 'commercial.service_margin_risk.configure', module: 'Commercial', label: 'Configure managed-service margin notices', description: 'Set mandatory margin breach recipients and the engagement notice template.', optIn: true },
   { key: 'commercial.fixed_fee_risk.configure', module: 'Commercial', label: 'Configure fixed-fee risk notices', description: 'Set scoped mandatory recipients and the engagement notice template.', optIn: true },
   { key: 'commercial.po_risk.configure', module: 'Commercial', label: 'Configure purchase-order risk notices', description: 'Set scoped mandatory recipients and the purchase-order notice template.', optIn: true },
