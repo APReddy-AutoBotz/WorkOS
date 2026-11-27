@@ -4,18 +4,18 @@
 
 Two of ten programme workstreams are formally accepted (WOS-00 and WOS-02). They account for 18% of the charter weight. Eight workstreams remain open and have different amounts of implementation and acceptance work outstanding. The previous engineering percentage was an estimate. [Programme weights](PROGRAM_CHARTER.md#10-weighted-programme-plan) and [open work by owner](../05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md#launch-work-by-accountable-role).
 
-**Verified engineering candidate.** On 25 November the release branch at `c9176e9` included commercial main and the reviewed revisions of drafts #357 through #373. The application, 181-entry migration, container readiness, performance and restore checks passed. The downloaded image matched its source revision and all seven handover checksums. [Hosted application evidence](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45661002850/job/139370759896) and [verified archive](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45661002850/artifacts/15047118650).
+**Verified engineering candidate.** The release record for main revision `2c4306dd` includes four successful CI jobs and all 124 application and deployment steps. The downloaded handover archive matched its digest, all seven manifest checksums and the image source revision. Later billing fixes through #392 need a selected release revision for buyer rehearsal. [Candidate and artifact verification](https://github.com/APReddy-AutoBotz/WorkOS/issues/11)
 
 **Commercial engineering on 27 November.** The fixed-fee forecast includes approved project costs in gross margin under WOS-COM-007/011/015. The invoice workspace supports provider reservations, retry after a lost response and retained receipt verification under WOS-INV-006/007. The hosted journeys exercise synthetic finance workflows. Buyer reconciliation, independent PR-012 review and Gate C sign-off remain open. [Project cost validation](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45930838148) and [invoice provider validation](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45962139014).
 
-**Release decisions.** Finance selected independently approved WorkOS cost entries as the source of actual non-labor project costs. Security must confirm any external use of the historical fixture credential and dispose of the five matched findings. Gate C requires independent PR-012 review, the required merges and product-owner acceptance. Gate D requires buyer assignment, role UAT and sign-off. [Commercial acceptance](https://github.com/APReddy-AutoBotz/WorkOS/issues/8), [security disposition](https://github.com/APReddy-AutoBotz/WorkOS/issues/10) and [buyer handover](https://github.com/APReddy-AutoBotz/WorkOS/issues/11).
+**Release decisions.** Finance selected independently approved WorkOS cost entries as the source of actual non-labor project costs. Security recorded the disposition of the five historical fingerprints in #378 and the integrated full-history scan passed. Gate C requires independent PR-012 review, the required merges and product-owner acceptance. Gate D requires buyer assignment, role UAT and sign-off. [Commercial acceptance](https://github.com/APReddy-AutoBotz/WorkOS/issues/8), [security disposition](https://github.com/APReddy-AutoBotz/WorkOS/issues/10) and [buyer handover](https://github.com/APReddy-AutoBotz/WorkOS/issues/11).
 
 | Open workstreams | Weight | What remains to verify for launch |
 |---|---:|---|
 | Source and branding, platform | 20% | Reconcile source, branding and platform acceptance records with the merged implementation. |
 | Work capture, approvals | 24% | Close the outstanding capture, approval and period-policy criteria across roles. |
 | Commercial, reporting and integrations | 26% | Reconcile commercial controls and totals, complete outstanding risk reporting and delivery, and obtain Gate C acceptance. |
-| Security and operations, buyer handover | 12% | Dispose of outstanding findings, verify the selected release and recovery on buyer infrastructure, complete role UAT and record Gate D. |
+| Security and operations, buyer handover | 12% | Verify the selected release and recovery on buyer infrastructure, complete role UAT and record Gate D. |
 
 The product owner confirmed on 24 November 2026 that the pilot buyer is awaiting assignment. The first delivery milestone is an engineering release candidate with a named revision, artifact digest and completed product-owned evidence. Buyer-specific configuration, UAT and Gate D sign-off follow assignment.
 
@@ -23,7 +23,7 @@ The buyer handover template contains 44 unchecked items across eight areas. Reco
 
 ## Delivery acceleration
 
-The [finance draft](https://github.com/APReddy-AutoBotz/WorkOS/pull/368) carries named-charge discounts and write-offs through independent approval, credit registration, correction-batch export and confirmation. Independent Gate C acceptance remains open.
+The [merged finance workflow](https://github.com/APReddy-AutoBotz/WorkOS/pull/368) carries named-charge discounts and write-offs through independent approval, credit registration, correction-batch export and confirmation. Independent Gate C acceptance remains open.
 
 The WOS-OPS-007 candidate scopes application validation for progress-only PRs. The previous Gitleaks action scanned a PR commit range on pull requests. Its green PR checks establish evidence for that range only. The candidate explicitly scans all fetched refs, including merge changes. Buyer acceptance and release evidence still use the full release path.
 
