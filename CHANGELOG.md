@@ -4,6 +4,9 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+- Named-stage approvers can delegate work, assignment creation, assignment changes and leave within a selected UTC window. Decisions retain their actual actor. Work-stage reminders and overdue notices include eligible delegates. [PR #413](https://github.com/APReddy-AutoBotz/WorkOS/pull/413)
+- Concurrent first-time edits to a role permission retain the committed predecessor. Confirming an existing individual grant preserves its original grantor and records the confirming administrator. [PR #414](https://github.com/APReddy-AutoBotz/WorkOS/pull/414) and [PR #415](https://github.com/APReddy-AutoBotz/WorkOS/pull/415)
+
 - Buyers can route leave requests through ordered named approvers before balances and availability change.
 
 - Buyers can require named-stage approval before a worker assignment is created.
