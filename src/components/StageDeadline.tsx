@@ -24,3 +24,10 @@ export function StageDurationInput({value,onChange,reminderLead,onReminderChange
     </label>
   </>;
 }
+
+export function OverdueDeliveryHistory({rows}:{rows?:{stage:number;dueAt:string;attempts:number;status:string}[]}) {
+  if (!rows?.length) return null;
+  return <section aria-label="Overdue delivery history"><h4>Overdue delivery history</h4>{rows.map(r=>
+    <p key={r.stage}>Stage {r.stage+1} due <time dateTime={r.dueAt}>{r.dueAt}</time> · {r.status==='RecipientUnavailable' ? 'Recipient unavailable. Delivery will retry.' : r.status} · Attempts {r.attempts}</p>
+  )}</section>;
+}

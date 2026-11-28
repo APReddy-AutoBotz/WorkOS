@@ -1,6 +1,8 @@
 # WorkOS Requirements Traceability
 
-WOS-APR-005 overdue reporting uses migration 139 and the current assignment and leave approval queues. [The PostgreSQL/API suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises each queue before expiry, after expiry, after advancing and after closing the instance.
+WOS-APR-005 assignment and leave escalation uses migration 140, the scheduled approval worker and scoped delivery history. The [stage deadline suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises a late decision, competing collectors, overlapping recipients, unavailable escalation accounts, retry backoff and separate acknowledgements.
+
+WOS-APR-005 overdue reporting merged in [PR #419](https://github.com/APReddy-AutoBotz/WorkOS/pull/419) at `7a0f3cac` with all four checks passing. It uses migration 139 and the current assignment and leave approval queues. [The PostgreSQL/API suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises each queue before expiry, after expiry, after advancing and after closing the instance.
 
 WOS-APR-005 assignment and leave advance reminders merged in [PR #418](https://github.com/APReddy-AutoBotz/WorkOS/pull/418) at `b33dac43` after all four hosted checks passed. Migration 138 links each delivery to its pinned action recipient and retains acknowledgement separately. See the real-clock, concurrent collector and API checks in [the stage timing suite](../../tests/assignment-leave-stage-deadlines.mjs).
 

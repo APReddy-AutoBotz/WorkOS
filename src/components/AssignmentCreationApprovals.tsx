@@ -1,4 +1,4 @@
-import {StageDeadline} from './StageDeadline';
+import {OverdueDeliveryHistory,StageDeadline} from './StageDeadline';
 import {canActAtStage} from '../services/canonicalDelegations';
 import {CanonicalDelegationEvidence} from './CanonicalDelegationEvidence';
 import { useState } from 'react';
@@ -39,7 +39,7 @@ export const AssignmentCreationApprovals = () => {
     {rows.map(i => <article key={i.id}><p>{i.worker.name} · {i.proposed.quantityExact}{i.proposed.quantityUnit==='hours'?'h':'%'} · {i.state.status}</p><StageDeadline deadline={i.stageDeadline}/><button disabled={lease.waiting} onClick={() => void inspect(i.id)}>Inspect creation request {i.id}</button></article>)}
     {lease.notice && <p role="status">{lease.notice}</p>}
     {v && <article aria-label="Current assignment creation approval"><p>Request {v.id} · {v.state.status} · Worker {v.worker.name} · Project {v.projectId}</p><p>{v.proposed.role ?? 'No role'} · {v.proposed.quantityExact}{v.proposed.quantityUnit==='hours'?'h':'%'} · {v.proposed.startsOn}–{v.proposed.endsOn} · {v.proposed.status} · {v.proposed.billable ? 'Billable within source authority' : 'Non-billable'}</p><p>{v.proposed.comment}</p><p>{v.currentVersionId ? 'Effective assignment version exists; inspect the source for current planning.' : 'No effective assignment version exists for this request.'} Reserved identity {v.assignmentId}</p><p>Request reason: {v.reason}</p>
-      <StageDeadline deadline={v.stageDeadline}/><CanonicalDelegationEvidence bindings={v.delegations} transitions={v.transitions}/>
+      <StageDeadline deadline={v.stageDeadline}/><OverdueDeliveryHistory rows={v.overdueDeliveries}/><CanonicalDelegationEvidence bindings={v.delegations} transitions={v.transitions}/>
       {canDecide && <fieldset disabled={lease.waiting || lease.phase === 'uncertain'}><legend>Named current creation stage</legend><label>Creation decision reason<input aria-label="Creation decision reason" value={reason} maxLength={1000} onChange={e => setReason(e.target.value)} /></label><button disabled={!reason.trim()} onClick={() => decide('Approved')}>Approve assignment creation stage</button><button disabled={!reason.trim()} onClick={() => decide('Rejected')}>Reject assignment creation stage</button></fieldset>}
       <section aria-label="Immutable assignment creation stage history">{v.transitions.map(t => <p key={t.id}>Stage {t.stage + 1} · {t.decision} · {t.reason} · Outcome {t.outcome.status}</p>)}</section>{v.notificationFailures.map(f => <p key={f.sequence}>Informational completion unavailable for decision {f.sequence}; retained source outcome is unchanged.</p>)}
     </article>}

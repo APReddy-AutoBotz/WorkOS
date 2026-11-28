@@ -1,3 +1,4 @@
+import {collectAssignmentLeaveBreaches,dispatchAssignmentLeaveOverdue} from '../server/modules/approvals/assignment-leave-escalation.mjs';
 import {collectAssignmentLeaveReminders} from '../server/modules/approvals/overdue-work.mjs';
 import {adoptActualInputs} from './support/actual-work-test.mjs';
 import assert from 'node:assert/strict';
@@ -26,6 +27,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   for(const [domain,definition] of Object.entries(definitions)){
     assert(await check(domain,definition));
     assert(await check(domain,{...definition,stageDueMinutes:2,reminderLeadMinutes:1}));
+    assert(await check(domain,{...definition,stageDueMinutes:1,escalationUserId:ids.manager.id}));
+    assert.equal(await check(domain,{...definition,escalationUserId:ids.manager.id}),false);
+    for(const value of [null,{},'unknown',12])assert.equal(await check(domain,{...definition,stageDueMinutes:1,escalationUserId:value}),false);
     assert.equal(await check(domain,{...definition,reminderLeadMinutes:1}),false);
     for(const invalid of [0,-1,0.5,2,3,'1',null]){
       assert.equal(await check(domain,{...definition,stageDueMinutes:2,reminderLeadMinutes:invalid}),false);
@@ -39,10 +43,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     await adoptActualInputs(request,fx.today);
     await adoptStagedPolicy(request,ids,fx.today);
     const assignment=await createApprovalAssignment(request,fx);
-    const assignmentPolicy=await adoptAssignmentApproval(request,fx,{...definitions.assignment,stageDueMinutes:2,reminderLeadMinutes:1});
-    await adoptLeavePolicy(request,fx,{...definitions.leave,stageDueMinutes:2,reminderLeadMinutes:1});
-    const grant=delegationOk(await adoptDelegation(request,ids.manager,delegationDefinition(fx)),201).delegation;
-    await waitForDelegationStart(grant.definition);
+    const assignmentPolicy=await adoptAssignmentApproval(request,fx,{...definitions.assignment,stageDueMinutes:2,reminderLeadMinutes:1,escalationUserId:ids.delegate.id});
+    await adoptLeavePolicy(request,fx,{...definitions.leave,stageDueMinutes:2,reminderLeadMinutes:1,escalationUserId:ids.manager.id});
+    const grant=delegationOk(await adoptDelegation(request,ids.manager,delegationDefinition(fx,{sourceKinds:['Creation','Material']})),201).delegation;
+    const leaveGrant=delegationOk(await adoptDelegation(request,ids.manager,delegationDefinition(fx,{
+      sourceKinds:['Leave'],delegateUserId:ids.requester.id})),201).delegation;
+    await waitForDelegationStart(leaveGrant.definition);
     const sources=(await createDelegationSources(request,fx,{assignment,assignmentPolicy})).filter(([kind])=>kind!=='Work');
     assert.deepEqual(sources.map(([kind])=>kind),['Material','Creation','Leave']);
     for(const [,instance] of sources){
@@ -54,17 +60,20 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const overdueRows=async(kind,after=null)=>delegationOk(await request(WORK_APPROVAL_BASE+paths[kind]+
       '?timing=overdue'+(after?'&after='+after:''),{identity:ids.manager}),200).instances;
     for(const [kind] of sources) assert.deepEqual(await overdueRows(kind),[]);
+    const breaches=async()=>(await pool.query('select assignment_event_id,leave_event_id,due_at,observed_at from assignment_leave_deadline_breaches order by id')).rows;
+    await collectAssignmentLeaveBreaches(pool);
+    assert.deepEqual(await breaches(),[]);
     const due=Math.max(...sources.map(([,i])=>Date.parse(i.stageDeadline.dueAt)));
     const eligibleCount=async()=>Number((await pool.query('select count(*) from assignment_leave_reminder_candidates')).rows[0].count);
     assert.equal(await eligibleCount(),6);
     delegationOk(await revokeDelegation(request,ids.manager,grant.id),201);
-    assert.equal(await eligibleCount(),3);
+    assert.equal(await eligibleCount(),4);
     const countReminders=async()=>Number((await pool.query('select count(*) from assignment_leave_stage_reminders')).rows[0].count);
     await collectAssignmentLeaveReminders(pool);
     assert.equal(await countReminders(),0);
     await delay(Math.max(0,due-60000-Date.now()+30));
     await Promise.all([collectAssignmentLeaveReminders(pool),collectAssignmentLeaveReminders(pool)]);
-    assert.equal(await countReminders(),3);
+    assert.equal(await countReminders(),4);
     const inbox=async identity=>delegationOk(await request(WORK_APPROVAL_BASE+'/inbox',{identity}),200);
     const managerInbox=await inbox(ids.manager);
     const notices=managerInbox.notifications.filter(n=>n.reminder && sources.some(([,i])=>i.id===n.instanceId));
@@ -104,6 +113,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       const decision=delegationOk(await decideDelegationInstance(request,ids.manager,kind,late),201);
       const next=await readDelegationInstance(request,kind,instance.id);
       assert.equal(next.stageDeadline.stage,1);
+      if(kind==='Material'){
+        const recorded=await breaches();
+        assert.ok(recorded.some(row=>new Date(row.due_at).toISOString()===late.stageDeadline.dueAt && row.assignment_event_id));
+        await Promise.all([collectAssignmentLeaveBreaches(pool),collectAssignmentLeaveBreaches(pool)]);
+        assert.equal((await breaches()).length,3);
+      }
       assert.deepEqual(await overdueRows(kind),[]);
       assert.equal(next.stageDeadline.dueAt,new Date(Date.parse(decision.receipt.createdAt)+120000).toISOString());
       assert(validStageDeadline(next.stageDeadline,2,1,next.createdAt,next.transitions));
@@ -111,9 +126,66 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       delegationOk(await decideDelegationInstance(request,ids.second,kind,next,'Rejected'),201);
       const closed=await readDelegationInstance(request,kind,instance.id);
       assert.equal(closed.state.status,'Rejected');
+      assert.equal((await breaches()).length,3);
       assert.equal(closed.stageDeadline,undefined);
       assert.deepEqual(await overdueRows(kind),[]);
     }
+    const setTargetActive=active=>pool.query('update user_organization_scopes set active=$1 where user_id=$2 and organization_id=$3 and legal_entity_id=$4',
+      [active,ids.delegate.id,commercialFixture.organizationId,commercialFixture.legalEntityId]);
+    await setTargetActive(false);
+    await dispatchAssignmentLeaveOverdue(pool);
+    const attempts=async()=>(await pool.query('select a.* from assignment_leave_overdue_attempts a order by a.created_at')).rows;
+    const firstAttempts=await attempts();
+    assert.equal(firstAttempts.length,3);
+    assert.equal(firstAttempts.filter(a=>a.failure==='RECIPIENT_UNAVAILABLE').length,2);
+    assert.equal((await pool.query('select * from assignment_leave_overdue_receipts')).rowCount,2);
+    for(const [kind,instance] of sources){
+      const retained=await readDelegationInstance(request,kind,instance.id);
+      assert.deepEqual(retained.overdueDeliveries,[{stage:0,dueAt:instance.stageDeadline.dueAt,attempts:1,
+        status:kind==='Leave'?'Delivered':'RecipientUnavailable'}]);
+    }
+    await setTargetActive(true);
+    await dispatchAssignmentLeaveOverdue(pool);
+    assert.equal((await attempts()).length,3);
+    await delay(Math.max(0,Math.max(...firstAttempts.map(a=>new Date(a.created_at).getTime()))+60050-Date.now()));
+    await Promise.all([dispatchAssignmentLeaveOverdue(pool),dispatchAssignmentLeaveOverdue(pool)]);
+    assert.equal((await attempts()).length,5);
+    const visible=async identity=>{
+      let cursor='',result=[];
+      do {
+        const page=delegationOk(await request(WORK_APPROVAL_BASE+'/inbox'+(cursor?'?after='+cursor:''),{identity}),200);
+        result.push(...page.notifications.filter(n=>n.eventKey==='approval.overdue_or_escalated' && sources.some(([,i])=>i.id===n.instanceId)));
+        cursor=page.nextAfter;
+      } while(cursor);
+      return result;
+    };
+    for(const [kind,instance] of sources){
+      const retained=await readDelegationInstance(request,kind,instance.id);
+      assert.equal(retained.overdueDeliveries[0].status,'Delivered');
+      assert.equal(retained.overdueDeliveries[0].attempts,kind==='Leave'?1:2);
+    }
+    const named=await visible(ids.manager),target=await visible(ids.delegate);
+    const eligibleDelegate=await visible(ids.requester);
+    assert.equal(eligibleDelegate.length,1);
+    assert.equal(eligibleDelegate[0].kind,'leave-approval');
+    assert.deepEqual(eligibleDelegate[0].reasons,['current_stage_approver']);
+    assert.equal(named.length,3);
+    assert.equal(target.length,2);
+    for(const notice of target)assert.deepEqual(notice.reasons,['escalation_target']);
+    assert.deepEqual(named.find(n=>n.kind==='leave-approval').reasons,['current_stage_approver','escalation_target']);
+    for(const notice of named){
+      assert.equal(notice.policyClass,'CONTROL_MANDATORY');
+      const origin=notice.kind==='leave-approval'?'leave-approval':'assignment-approval';
+      assert.equal(notice.eventId,origin+'/'+notice.instanceId+'/0/approval.overdue_or_escalated/deadline');
+      const foreignRead=await request(WORK_APPROVAL_BASE+'/inbox/'+notice.id+'/read',{method:'POST',identity:ids.second,
+        body:{expectedOwnerKey:otherInbox.ownerKey}});
+      assert.equal(foreignRead.status,404);
+      const read=()=>request(WORK_APPROVAL_BASE+'/inbox/'+notice.id+'/read',{method:'POST',identity:ids.manager,body:{expectedOwnerKey:managerInbox.ownerKey}});
+      const first=delegationOk(await read(),200).notification;
+      assert.ok(first.readAt);
+      assert.equal(delegationOk(await read(),200).notification.readAt,first.readAt);
+    }
+    assert.ok((await visible(ids.delegate)).every(n=>n.readAt===null));
   });
 });
 console.log('Pinned assignment change, creation and leave stage clocks, real UTC expiry, next-stage reset, terminal suppression and migration replay passed.');
@@ -158,7 +230,14 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       assert.deepEqual(migrated.applied,['138_wos05_assignment_leave_reminders']);
     });
     assert.deepEqual(await canonicalSnapshot(pool,tables),before);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('139_wos05_open_stage_clocks'));
+    await withCommercialMigrationsThrough(139,async rootDir=>{
+      assert.deepEqual((await runMigrations({pool,rootDir,logger:{log(){}}})).applied,['139_wos05_open_stage_clocks']);
+    });
+    const clocksBefore=await canonicalSnapshot(pool,['assignment_leave_open_stage_clocks']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('140_wos05_assignment_leave_escalation'));
+    assert.deepEqual(await canonicalSnapshot(pool,['assignment_leave_open_stage_clocks']),clocksBefore);
+    await collectAssignmentLeaveBreaches(pool);
+    assert.equal((await pool.query('select * from assignment_leave_deadline_breaches')).rowCount,0);
     assert.deepEqual(await canonicalSnapshot(pool,tables),before);
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
     for(const [kind,instance] of sources){

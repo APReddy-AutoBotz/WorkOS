@@ -1,3 +1,4 @@
+import {stageDeliveryHistory} from './assignment-leave-escalation.mjs';
 import {sourceReminderInboxRows} from './source-reminder-inbox.mjs';
 import {currentStageDeadline} from '../../../shared/approval-stage-deadline.mjs';
 import {assertIndependentLeaveDecision} from '../leave/decision-independence.mjs';
@@ -34,14 +35,14 @@ export const scopedLeaveApproval=async(c,req,id,o)=>{
  const transitions=(await c.query('select * from leave_approval_transitions where instance_id=$1 order by sequence',[id])).rows,state=approvalState(p.definition.stages,transitions),current=(await c.query('select leave_approval_current($1)current',[id])).rows[0].current;
  const cancelled=(await c.query('select id,actor_id "actorId",active_role "activeRole",reason,previous_status "previousStatus",operation_id "operationId",created_at "createdAt" from leave_approval_cancellations where instance_id=$1',[id])).rows[0]??null;
  const notificationFailures=(await c.query('select transition_sequence sequence,code,created_at "createdAt" from leave_approval_notification_failures where instance_id=$1 order by transition_sequence',[id])).rows;
- await delegationReceiptProof(c,'Leave',transitions);const delegations=await delegationBindings(c,req,'Leave',id);return{i,a,p,transitions,delegations,state,current,cancelled,notificationFailures};
+ await delegationReceiptProof(c,'Leave',transitions);const delegations=await delegationBindings(c,req,'Leave',id);const deliveries=await stageDeliveryHistory(c,'Leave',id);return{i,a,p,transitions,delegations,deliveries,state,current,cancelled,notificationFailures};
 };
 export const leaveApprovalReceipt=t=>({id:t.id,instanceId:t.instance_id,sequence:t.sequence,stage:t.stage,decision:t.decision,actorId:t.actor_id,activeRole:t.active_role,requestId:t.request_id,operationId:t.operation_id,reason:t.reason,outcome:t.outcome,createdAt:t.created_at,...(t.delegation_binding_id?{delegationBindingId:t.delegation_binding_id}:{})});
 export const leaveApprovalView=v=> {
  const transitions=v.transitions.map(leaveApprovalReceipt);
  const stage=v.state.status==='Pending' && v.current ? v.state.currentStage : null;
  const deadline=currentStageDeadline(v.p.definition.stageDueMinutes,stage,v.i.created_at,transitions,v.i.observed_at);
- return {...(deadline ? {stageDeadline:deadline} : {}),...(v.delegations?.length?{delegations:v.delegations}:{}),id:v.i.id,requestId:v.i.request_id,revision:v.i.sequence,employeeId:v.i.employee_id,requesterUserId:v.i.requester_user_id,sourceToken:v.i.source_token,source:v.i.source_snapshot,currentSource:v.a.snapshot,currentStatus:v.a.status,current:v.current,createdAt:v.i.created_at,worker:{id:v.i.employee_id,code:v.a.worker_code,name:v.a.worker_name},policy:leavePolicyView(v.p),state:v.state,transitions,cancelled:v.cancelled,notificationFailures:v.notificationFailures};
+ return {...(v.deliveries?.length ? {overdueDeliveries:v.deliveries} : {}),...(deadline ? {stageDeadline:deadline} : {}),...(v.delegations?.length?{delegations:v.delegations}:{}),id:v.i.id,requestId:v.i.request_id,revision:v.i.sequence,employeeId:v.i.employee_id,requesterUserId:v.i.requester_user_id,sourceToken:v.i.source_token,source:v.i.source_snapshot,currentSource:v.a.snapshot,currentStatus:v.a.status,current:v.current,createdAt:v.i.created_at,worker:{id:v.i.employee_id,code:v.a.worker_code,name:v.a.worker_name},policy:leavePolicyView(v.p),state:v.state,transitions,cancelled:v.cancelled,notificationFailures:v.notificationFailures};
 };
 const recipientScope=async(c,req,id,employeeId,o)=>{
  const u=await workApprovalUser(c,req,id,o);for(const role of u.roles){const permissions=await o.getEffectivePermissionsForUser(c,id,role);if(!['employees.view','notifications.view','leave.self_service'].every(k=>permissions.includes(k)))continue;const actor={...req,user:{sub:id,activeRole:role,employeeRecordId:u.employee_record_id,employeeId:u.employee_id,countryDirectorId:u.country_director_id,permissions}},p=[employeeId],where=o.buildEmployeeScopeWhere(actor,p,'e');if((await c.query(`select 1 from employees e where e.id=$1 and ${where}`,p)).rowCount)return;}fail('LEAVE_APPROVAL_RECIPIENT_UNAVAILABLE','Every mandatory recipient must retain its current scoped source and inbox relationship.');

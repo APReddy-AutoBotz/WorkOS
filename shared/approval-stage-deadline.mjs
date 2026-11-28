@@ -18,3 +18,16 @@ export function validStageDeadline(value, minutes, stage, createdAt, transitions
   return value.stage === stage && value.dueAt === expected.dueAt
     && value.observedAt === expected.observedAt && value.overdue === expected.overdue;
 }
+
+export function validStageDeliveries(rows,minutes,stages,createdAt,transitions){
+  if (rows === undefined) return true;
+  if (!Number.isInteger(minutes) || !Array.isArray(rows) || !rows.length || rows.length>stages.length) return false;
+  return rows.every((row,i)=>{
+    if (!approvalKeys(row,['stage','dueAt','attempts','status']) || !Number.isInteger(row.stage)
+        || row.stage<0 || row.stage>=stages.length || (i>0 && row.stage<=rows[i-1].stage)
+        || !Number.isInteger(row.attempts) || row.attempts<0) return false;
+    const start=row.stage===0?createdAt:transitions[row.stage-1]?.createdAt;
+    return start && new Date(Date.parse(start)+minutes*60000).toISOString()===row.dueAt
+      && (row.attempts===0 ? row.status==='Pending' : ['Delivered','RecipientUnavailable'].includes(row.status));
+  });
+}

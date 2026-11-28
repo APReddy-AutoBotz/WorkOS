@@ -1,3 +1,4 @@
+import {collectAssignmentLeaveBreaches,dispatchAssignmentLeaveOverdue} from './assignment-leave-escalation.mjs';
 import {randomUUID} from 'node:crypto';
 import {OVERDUE_KEY, renderApprovalTemplate} from '../../../shared/work-approval.mjs';
 import {workApprovalActor,workApprovalRecipientScope,workApprovalScope} from './work-approval-service.mjs';
@@ -107,6 +108,10 @@ export async function processOverdueWork(pool,o) {
     await collectWorkStageReminders(pool);
   if ((await pool.query("select to_regclass('assignment_leave_stage_reminders') is not null as ready")).rows[0].ready)
     await collectAssignmentLeaveReminders(pool);
+  if ((await pool.query("select to_regclass('assignment_leave_overdue_pending') is not null as ready")).rows[0].ready) {
+    await collectAssignmentLeaveBreaches(pool);
+    await dispatchAssignmentLeaveOverdue(pool);
+  }
 }
 
 export async function timedWorkInboxRows(c,req,o,{after=null,id=null}={}) {
