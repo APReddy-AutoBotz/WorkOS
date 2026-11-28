@@ -1,5 +1,7 @@
 # Organization and Setup Specification
 
+Deployment settings saves record the values in effect immediately before the change. A successful save returns its own committed values, including when another authorized request updates the settings concurrently.
+
 **Governing requirements:** WOS-CORE-001, WOS-CORE-002, WOS-CORE-005 through WOS-CORE-007; WOS-ORG-001 through WOS-ORG-010; WOS-IAM-004 through WOS-IAM-007; WOS-GOV-005.
 
 ## Outcome

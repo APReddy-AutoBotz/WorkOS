@@ -1,5 +1,7 @@
 # Enterprise delivery and integration roadmap
 
+WOS-03 deployment settings saves now serialize the audit before-image, update and response. Regression coverage includes competing administrators’ saves and rollback when audit persistence fails.
+
 WOS-04 employee self-service now connects selected-period draft and rejection actions to the worker’s saved timesheet. The governed period calculation supplies employee utilization, and the employee browser journey verifies the correction path across approval states.
 
 WOS-04 utilization coverage is visible in the overview. Current exceptions and the current average use workers with a qualifying approved week and positive configured weekly hours.

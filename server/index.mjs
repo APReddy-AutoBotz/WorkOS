@@ -4599,6 +4599,8 @@ app.post('/api/settings', requireDatabase, requireAuth, requirePermission('setti
   const client = await pool.connect();
   try {
     await client.query('begin');
+    // Serialize deployment settings writers, including inserts of previously absent keys.
+    await client.query('lock table system_settings in share row exclusive mode');
     const previous = (await client.query('select key, value from system_settings order by key')).rows;
     for (const [key, value] of Object.entries(parsed.data)) {
       await client.query(`
@@ -4618,8 +4620,8 @@ app.post('/api/settings', requireDatabase, requireAuth, requirePermission('setti
       // These settings govern the whole deployment and have no organization owner.
       organizationScope: null,
     });
+    const result = await client.query('select key, value from system_settings order by key');
     await client.query('commit');
-    const result = await pool.query('select key, value from system_settings order by key');
     res.json(result.rows);
   } catch (error) {
     await client.query('rollback');

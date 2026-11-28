@@ -1,5 +1,7 @@
 # WorkOS
 
+When two administrators save deployment settings at the same time, each receives the values committed by their save. The audit history records the settings in effect immediately before each change.
+
 In the employee workspace, load a period to continue a saved draft or correct a rejected timesheet. Each action opens that worker’s saved week in work capture.
 
 The utilization overview shows how many workers contribute to average current utilization. A worker with approved zero billable hours contributes zero. A worker without a qualifying approved week stays in the population and is excluded from the average and current exceptions.
