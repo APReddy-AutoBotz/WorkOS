@@ -60,6 +60,22 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const unresolved=await report(2032);
     assert.equal(unresolved.rows[0].availability_hours,null);
     assert.equal(unresolved.summary.averageAvailabilityAdjustedCapacity,null);
+    await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,status,primary_country_director_id,organization_id,legal_entity_id)
+      select 'annual-worker-'||n,'SYN-Y-'||n,'Synthetic worker '||n,'worker-'||n||'@example.test','Consultant','Planning','US','Active','director-commercial',$1,$2
+      from generate_series(1,250)n`,[f.organizationId,f.legalEntityId]);
+    await pool.query(`insert into worker_capacity_versions(id,organization_id,legal_entity_id,employee_id,sequence,effective_from,contract_version,definition,
+      weekly_hours,worker_group_id,calendar_override_id,actor_id,active_role,source,reason)
+      select gen_random_uuid(),v.organization_id,v.legal_entity_id,'annual-worker-'||n,1,v.effective_from,v.contract_version,v.definition,
+        v.weekly_hours,v.worker_group_id,v.calendar_override_id,v.actor_id,v.active_role,v.source,v.reason
+      from worker_capacity_versions v cross join generate_series(1,250)n where v.id=$1`,[profile.body.version.id]);
+    const start=performance.now();
+    const fullReport=await report(2032,identities.manager);
+    const elapsed=Math.round(performance.now()-start);
+    const scheduledWorkers=fullReport.rows.filter(row=>row.employee_id.startsWith('annual-worker-'));
+    assert.equal(scheduledWorkers.length,250);
+    assert(scheduledWorkers.every(row=>row.availability_hours===2920));
+    console.log('Annual availability for 250 configured workers took '+elapsed+' ms.');
+    assert(elapsed<=5000,'The scoped annual planning report must meet the five-second report target');
   });
 });
 console.log('Annual planning capacity passed scoped worker, leap year, year crossing, holiday overlap and unavailable evidence checks.');
