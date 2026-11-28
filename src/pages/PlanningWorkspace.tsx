@@ -15,6 +15,9 @@ import type { ResourcePlanningReport, ResourcePlanningRow } from '../types';
 import { cn } from '../lib/utils';
 
 import { productConfig } from '../config/productConfig';
+import { rollsOffSoon } from '../../shared/planning-roll-off.mjs';
+const byRollOffDate = (a: ResourcePlanningRow, b: ResourcePlanningRow) =>
+  (a.rollOffDate ?? '').localeCompare(b.rollOffDate ?? '') || a.employeeCode.localeCompare(b.employeeCode);
 const bandForRow = (row: ResourcePlanningRow) => {
   if (row.overloaded) return { label: 'Overload', variant: 'danger' as const };
   if (row.bench) return { label: 'Bench', variant: 'warning' as const };
@@ -47,6 +50,7 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
   const [loading, setLoading] = useState(true);
   const [band, setBand] = useState('All');
   const [search, setSearch] = useState('');
+  const [visibleRows, setVisibleRows] = useState(10);
   const canFocusAllocationControl = canManageAllocations(authService.getCurrentUser()) && Boolean(onFocusAllocation);
 
   const refresh = async () => {
@@ -61,20 +65,24 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
 
   const filteredRows = useMemo(() => {
     const rows = report?.rows || [];
-    return rows.filter(row => {
+    const filtered = rows.filter(row => {
       const matchesSearch = row.employeeName.toLowerCase().includes(search.toLowerCase()) || row.employeeCode.toLowerCase().includes(search.toLowerCase());
       const matchesBand =
         band === 'All' ||
         (band === 'Overload' && row.overloaded) ||
         (band === 'Bench' && row.bench) ||
         (band === 'Underload' && row.underloaded) ||
-        (band === 'Roll-off' && row.rollOffDate);
+        (band === 'Roll-off' && rollsOffSoon(report.asOfDate, row.rollOffDate));
       return matchesSearch && matchesBand;
     });
+    return band === 'Roll-off' ? filtered.sort(byRollOffDate) : filtered;
   }, [report, search, band]);
 
   const maxLoad = Math.max(...(report?.rows || []).map(row => row.plannedUtilization), 100);
-  const rollOffRows = (report?.rows || []).filter(row => row.rollOffDate).slice(0, 8);
+  const rollOffRows = (report?.rows || [])
+    .filter(row => rollsOffSoon(report.asOfDate, row.rollOffDate))
+    .sort(byRollOffDate)
+    .slice(0, 8);
   const clientFootprint = useMemo(() => {
     const clients = new Map<string, { people: Set<string>; fte: number; projects: Set<string> }>();
     (report?.rows || []).forEach(row => {
@@ -119,26 +127,23 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
         <Card title="Planning Actions" className="xl:sticky xl:top-24">
           <div className="space-y-3">
             {[
-              { label: 'Overloaded resources', count: report.summary.overloadedCount, band: 'Overload', utilFilter: 'Over 100%' as const, tone: 'danger' as const },
-              { label: 'Bench resources', count: report.summary.benchCount, band: 'Bench', utilFilter: 'Under 80%' as const, tone: 'warning' as const },
-              { label: 'Underloaded resources', count: report.summary.underloadedCount, band: 'Underload', utilFilter: 'Under 80%' as const, tone: 'info' as const },
-              { label: 'Roll-offs in 45 days', count: report.summary.rollOffSoonCount, band: 'Roll-off', utilFilter: 'Any' as const, tone: 'neutral' as const },
+              { label: 'Overloaded resources', count: report.summary.overloadedCount, band: 'Overload', tone: 'danger' as const },
+              { label: 'Bench resources', count: report.summary.benchCount, band: 'Bench', tone: 'warning' as const },
+              { label: 'Underloaded resources', count: report.summary.underloadedCount, band: 'Underload', tone: 'info' as const },
+              { label: 'Roll-offs in 45 days', count: report.summary.rollOffSoonCount, band: 'Roll-off', tone: 'neutral' as const },
             ].map(action => (
               <button
                 key={action.label}
                 onClick={() => {
                   setBand(action.band);
-                  onFocusAllocation?.({
-                    label: action.label,
-                    utilFilter: action.utilFilter,
-                    view: 'employee',
-                  });
+                  setSearch('');
+                  setVisibleRows(10);
                 }}
                 className="flex w-full items-center justify-between gap-4 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-left transition-colors hover:border-primary/30 hover:bg-orange-50"
               >
                 <span>
                   <span className="block text-sm font-black text-heading">{action.label}</span>
-                  <span className="mt-1 block text-[10px] font-bold uppercase tracking-widest text-slate-400">Focus Allocation Control</span>
+                  <span className="mt-1 block text-[10px] font-bold uppercase tracking-widest text-slate-400">Show matching resources</span>
                 </span>
                 <Badge variant={action.tone}>{action.count}</Badge>
               </button>
@@ -158,7 +163,7 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
           }
         >
           <div className="divide-y divide-slate-100">
-            {filteredRows.slice(0, 10).map(row => {
+            {filteredRows.slice(0, visibleRows).map(row => {
               const bandInfo = bandForRow(row);
               return (
                 <div key={row.employeeId} className="grid grid-cols-1 gap-4 py-4 lg:grid-cols-[minmax(180px,1fr)_180px_120px_90px] lg:items-center">
@@ -199,21 +204,20 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
               );
             })}
             {filteredRows.length === 0 && <p className="py-8 text-center text-sm font-bold text-slate-400">No capacity signals match the current filters.</p>}
+            {filteredRows.length > visibleRows && <button type="button" className="btn-secondary" onClick={() => setVisibleRows(limit => limit + 10)}>Show more resources</button>}
           </div>
         </Card>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Card title="Roll-Off and Bench Highlights">
+        <Card title="Upcoming roll-offs">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {rollOffRows.length === 0 && <p>No assignments end within 45 days of the report date.</p>}
             {rollOffRows.map(row => (
               <button
                 key={row.employeeId}
-                onClick={() => onFocusAllocation?.({
-                  label: `${row.employeeName} roll-off / bench review`,
-                  search: row.employeeName,
-                  view: 'employee',
-                })}
+                disabled={!canFocusAllocationControl}
+                onClick={() => onFocusAllocation?.({label:`${row.employeeName} roll-off review`,search:row.employeeName,view:'employee'})}
                 className="rounded-lg border border-slate-100 bg-slate-50 p-4 text-left transition-colors hover:border-primary/30 hover:bg-orange-50"
               >
                 <div className="flex items-center justify-between gap-3">

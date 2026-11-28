@@ -89,6 +89,7 @@
     "test:utilization-overview-browser": "node tests/utilization-reports-browser-smoke.mjs",
     "test:planned-utilization-read": "node --import tsx tests/planned-utilization-read-smoke.mjs",
     "test:planned-utilization-browser": "node tests/planned-utilization-browser-smoke.mjs",
+    "test:planning-signals-browser": "node tests/planning-signals-browser-smoke.mjs",
     "test:actual-utilization-read": "node --import tsx tests/actual-utilization-read-smoke.mjs",
     "test:actual-utilization-browser": "node tests/actual-utilization-browser-smoke.mjs",
     "test:forecast-utilization-read": "node --import tsx tests/forecast-utilization-read-smoke.mjs",

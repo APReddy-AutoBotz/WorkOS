@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {withCommercialDatabase,migrateCommercialDatabase,withCommercialApi,commercialFixture as f} from './support/commercial-drafting-test.mjs';
 import {seedCapacity} from './support/worker-capacity-test.mjs';
+import {shiftCapacityDate} from '../shared/worker-capacity.mjs';
 await withCommercialDatabase(async ({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);const fx=await seedCapacity(pool),ids=fx.identities;
  const employee='synthetic-delegation-recipient';
@@ -57,6 +58,26 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   }});
   assert.equal((await planningRelease(true,0)).status,201);
   assert.equal((await request(report)).status,200);
+  const ending = shiftCapacityDate(fx.today,46);
+  const planningProject = 'synthetic-roll-off-project';
+  await pool.query(`insert into projects(id,project_code,name,client,manager_id,manager_name,start_date,end_date,status,country,organization_id,legal_entity_id)
+    values($1,'SYN-END','Synthetic staffing project','Synthetic client',$2,'Synthetic manager',$3,$4,'Active','US',$5,$6)`,
+    [planningProject,f.ownerId,fx.today,ending,f.organizationId,f.legalEntityId]);
+  const allocation = await request('/api/allocations',{method:'POST',body:{
+    employee_id:employee,project_id:planningProject,percentage:10,start_date:fx.today,end_date:ending,billable:false,status:'Active'
+  }});
+  assert.equal(allocation.status,200,JSON.stringify(allocation.body));
+  for (const offset of [0,1,46,47]) {
+    const date = shiftCapacityDate(fx.today,offset);
+    const response = await request(report+'?date='+date);
+    assert.equal(response.status,200,JSON.stringify(response.body));
+    const {rows,summary} = response.body;
+    const worker = rows.find(row=>row.employee_id===employee);
+    assert.equal(worker.roll_off_date,offset>46 ? null : ending);
+    const withinWindow = rows.filter(row=>row.roll_off_date && row.roll_off_date>=date && row.roll_off_date<=shiftCapacityDate(date,45));
+    assert.equal(withinWindow.includes(worker),offset===1 || offset===46);
+    assert.equal(summary.rollOffSoonCount,withinWindow.length);
+  }
   assert.equal((await planningRelease(false,1)).status,201);
   assert.equal((await request(report)).body.code,'MODULE_DISABLED');
   assert.equal((await request('/api/allocations')).status,200);
