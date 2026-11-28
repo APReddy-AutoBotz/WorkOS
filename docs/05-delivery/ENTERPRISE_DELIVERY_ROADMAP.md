@@ -119,6 +119,8 @@ The frontend toolchain migration replaces Vite in the production build, preview 
 
 This order preserves the existing backlog's work-package dependencies. It is not a promise of calendar dates or a substitute for the existing milestone definitions. Shared SaaS tenancy, statutory accounting, payroll and autonomous AI decisions remain outside v1.
 
+Individual permission grants retain their original actor and role when a second administrator confirms them. Revocation followed by a new grant records a new grant identity.
+
 ## Integration procedure
 
 1. Read live GitHub metadata, including all pages of open PRs, exact heads, base branches, review threads and checks. Separate obsolete controller branches from the active implementation dependency chain; do not merge every open PR merely because it exists.

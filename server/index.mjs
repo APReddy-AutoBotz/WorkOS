@@ -4510,28 +4510,38 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
       res.status(422).json({ error: 'Protected permissions can be granted only to Admin users.' });
       return;
     }
-    const result = await client.query(`
+    const {rows:[created]} = await client.query(`
       insert into user_permission_grants (user_id, permission_key, granted_by, active_role)
       values ($1,$2,$3,$4)
-      on conflict (user_id, permission_key) do update set granted_by = excluded.granted_by
+      on conflict (user_id, permission_key) do nothing
       returning *
     `, [target.id, parsed.data.permissionKey, req.user.sub, req.user.activeRole]);
-    await client.query(`
-      insert into permission_change_history (change_type, user_id, permission_key, new_value, changed_by, active_role)
-      values ('UserGrant', $1, $2, $3::jsonb, $4, $5)
-    `, [target.id, parsed.data.permissionKey, JSON.stringify(result.rows[0]), req.user.sub, req.user.activeRole]);
+    const grant = created ?? (await client.query(`
+      select * from user_permission_grants where user_id=$1 and permission_key=$2 for share
+    `, [target.id, parsed.data.permissionKey])).rows[0];
+    if (!grant) {
+      await client.query('rollback');
+      return res.status(409).json({error:'The grant changed during this request. Review current permissions.'});
+    }
+    if (created) {
+      await client.query(`
+        insert into permission_change_history (change_type, user_id, permission_key, new_value, changed_by, active_role)
+        values ('UserGrant', $1, $2, $3::jsonb, $4, $5)
+      `, [target.id, parsed.data.permissionKey, JSON.stringify(grant), req.user.sub, req.user.activeRole]);
+    }
     await audit(client, req, {
       module: 'Permissions',
-      action: 'Grant User Permission',
+      action: created ? 'Grant User Permission' : 'Confirm Existing User Permission',
       entityType: 'UserPermissionGrant',
-      entityId: result.rows[0].id,
-      newValue: result.rows[0],
-      details: `Granted ${parsed.data.permissionKey} to ${target.username}`,
+      entityId: grant.id,
+      oldValue: created ? null : grant,
+      newValue: grant,
+      details: `${created ? 'Granted' : 'Confirmed'} ${parsed.data.permissionKey} to ${target.username}`,
       // User-specific grants are effective for the account across this deployment.
       organizationScope: null,
     });
     await client.query('commit');
-    res.json(result.rows[0]);
+    res.json(grant);
   } catch (error) {
     await client.query('rollback');
     console.error(error);
