@@ -1,3 +1,4 @@
+import {assertFinalInvoiceReview} from './support/invoice-approval-finality.mjs';
 import { INVOICE_EXPORT_EVENT_KEYS } from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -910,6 +911,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const final = ok(await decision(ids.second, 1), 201);
         assert.equal(final.approval.state.status, 'Approved');
         assert.equal(ok(await request(route + '/batches/' + draft.batch.id)).batch.state, 'Approved');
+        await assertFinalInvoiceReview({pool, request, batchId: draft.batch.id, instanceId: submitted.id,
+          requester: ids.requester, ownerKey: invoiceRequesterKey, state: 'Approved'});
         const config = '/api/v1/invoice-export-notice-config',
           configOwner = await readApprovalOwner(request, ids.manager),
           routeConfig = ok(
@@ -1056,6 +1059,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           inspection = ok(await request(csv + '/confirmation-sources/' + draft.batch.id)),
           confirmationSource = inspection.source;
         assert.equal(confirmationSource.state, 'Exported');
+        await assertFinalInvoiceReview({pool, request, batchId: draft.batch.id, instanceId: submitted.id,
+          requester: ids.requester, ownerKey: invoiceRequesterKey, state: 'Exported'});
         assert.equal(confirmationSource.artifactSha256, result.artifact.sha256);
         assert.equal(
           (await request(csv + '/confirmation-sources/' + draft.batch.id, { identity: ids.reader })).status,
@@ -1164,6 +1169,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           ok(await request(csv + '/confirmation-sources/' + draft.batch.id)).source.state,
           'Billed/Confirmed',
         );
+        await assertFinalInvoiceReview({pool, request, batchId: draft.batch.id, instanceId: submitted.id,
+          requester: ids.requester, ownerKey: invoiceRequesterKey, state: 'Billed/Confirmed'});
         assert.equal(
           ok(await request(csv + '/confirmation-receipts/' + confirmationCmd.requestId)).confirmation.id,
           confirmed.id,

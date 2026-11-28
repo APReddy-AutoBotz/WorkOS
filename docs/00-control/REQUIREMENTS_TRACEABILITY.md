@@ -8,6 +8,8 @@ WOS-APR-005 overdue reporting merged in [PR #419](https://github.com/APReddy-Aut
 
 WOS-APR-005 assignment and leave advance reminders merged in [PR #418](https://github.com/APReddy-AutoBotz/WorkOS/pull/418) at `b33dac43` after all four hosted checks passed. Migration 138 links each delivery to its pinned action recipient and retains acknowledgement separately. See the real-clock, concurrent collector and API checks in [the stage timing suite](../../tests/assignment-leave-stage-deadlines.mjs).
 
+WOS-00F invoice approval finality, WOS-APR-006 and WOS-INV-002. The [approval suite](../../tests/invoice-batch-approval-postgres-smoke.mjs) covers cancellation. The [billing confirmation suite](../../tests/invoice-billing-confirmation-postgres-smoke.mjs) covers approved, exported and confirmed batches. Both exercise the retained requester withdrawing the same review concurrently and repeating the request. They compare approval, membership, occupancy, export and confirmation evidence across the refusal.
+
 WOS-COM-007/012/015. The [project cost browser journey](../../tests/support/project-cost-journey.mjs) checks separate preparer and reviewer sessions, pending and approved costs, live gross margin, the prior forecast and the newly retained forecast.
 
 WOS-IAM-003/005/006. Permission management requires the active Admin role. The [PostgreSQL regression](../../tests/settings-audit-postgres-smoke.mjs) checks a retained grant while another role is active and loss of administrator authority while a write is queued. The [permission settings test](../../tests/dynamic-permissions-smoke.mjs) checks the navigation decision.
