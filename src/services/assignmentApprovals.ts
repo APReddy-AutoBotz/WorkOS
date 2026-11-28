@@ -244,16 +244,16 @@ export const createAssignmentApprovalClient = (request: Transport) => {
                 return fail();
             return { ...p, replayed: r.replayed };
         },
-        list: async (c: WorkApprovalContext | null, after: string | null = null, assignmentId?: string) => {
+        list: async (c: WorkApprovalContext | null, after: string | null = null, assignmentId?: string, overdue = false) => {
             if (after !== null && !uuid(after) || assignmentId !== undefined && !text(assignmentId, 239))
                 return fail();
-            const r = await call('GET', '/instances?' + new URLSearchParams({ ...after ? { after } : {}, ...assignmentId ? { assignmentId } : {} }), c);
+            const r = await call('GET', '/instances?' + new URLSearchParams({ ...after ? { after } : {}, ...assignmentId ? { assignmentId } : {}, ...overdue ? {timing:'overdue'} : {} }), c);
             if (!Array.isArray(r.instances) || r.instances.length > 20)
                 return fail();
             let previous = after ?? '';
             const instances = r.instances.map(v => {
                 const i = decodeAssignmentApprovalInstance(v);
-                if (i.id <= previous || assignmentId && i.assignmentId !== assignmentId)
+                if (i.id <= previous || overdue && !i.stageDeadline?.overdue || assignmentId && i.assignmentId !== assignmentId)
                     return fail();
                 previous = i.id;
                 return i;
@@ -287,12 +287,13 @@ export const createAssignmentApprovalClient = (request: Transport) => {
             const r = await call('GET', '/creation-instances/' + id, c);
             return { instance: decodeAssignmentCreationInstance(r.instance, id), actorUserId: r.actorUserId as string, ownerKey: r.ownerKey as string };
         },
-        creations: async (c: WorkApprovalContext | null, after: string | null = null) => {
+        creations: async (c: WorkApprovalContext | null, after: string | null = null, overdue = false) => {
             if (after !== null && !uuid(after)) return fail();
-            const r = await call('GET', '/creation-instances' + (after ? '?after=' + after : ''), c);
+            const query = new URLSearchParams({...after ? {after} : {}, ...overdue ? {timing:'overdue'} : {}}).toString();
+            const r = await call('GET', '/creation-instances' + (query ? '?' + query : ''), c);
             if (!Array.isArray(r.instances) || r.instances.length > 20) return fail();
             let previous = after ?? '';
-            const instances = r.instances.map(v => { const i = decodeAssignmentCreationInstance(v); if (i.id <= previous) return fail(); previous = i.id; return i; });
+            const instances = r.instances.map(v => { const i = decodeAssignmentCreationInstance(v); if (i.id <= previous || overdue && !i.stageDeadline?.overdue) return fail(); previous = i.id; return i; });
             if (r.nextAfter !== null && (instances.length !== 20 || r.nextAfter !== previous)) return fail();
             return { instances, nextAfter: r.nextAfter as string | null };
         },
