@@ -163,6 +163,7 @@ const expected = [
   '134_wos06_approved_project_costs',
   '135_wos06_invoice_receipt_and_cancellation',
   '136_wos05_named_stage_delegation',
+  '137_wos05_assignment_leave_stage_deadlines',
 ];
 
 export function expectedMigrationsFrom(first) {

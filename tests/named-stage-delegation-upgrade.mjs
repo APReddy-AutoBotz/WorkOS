@@ -1,3 +1,4 @@
+import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
 import assert from 'node:assert/strict';
 import {runMigrations} from '../server/migrate.mjs';
 import {withCommercialDatabase,withCommercialMigrationsThrough,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork} from './support/commercial-drafting-test.mjs';
@@ -17,7 +18,7 @@ await withCommercialDatabase(async ({pool}) => {
   await seedCommercialReferences(pool);
   await seedCommercialLegacyWork(pool);
   const before = await snapshot(pool);
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration]);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom(migration));
   assert.deepEqual(await snapshot(pool),before);
   for (const table of ['canonical_delegations','canonical_delegation_bindings','canonical_delegation_decisions','canonical_delegation_revocations']) {
     assert.equal((await pool.query('select count(*)::int as n from '+table)).rows[0].n,0);

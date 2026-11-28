@@ -118,6 +118,7 @@ jobs:
           npm run test:calendar-leave-postgres
           npm run test:named-delegation
           npm run test:named-delegation-postgres
+          npm run test:assignment-leave-deadlines
           npm run test:leave-approval-postgres
 
       - name: Native percentage forecast PostgreSQL acceptance
