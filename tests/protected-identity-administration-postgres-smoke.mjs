@@ -8,7 +8,7 @@ import {withCommercialDatabase, migrateCommercialDatabase, seedCommercialIdentit
 async function verifyMappingSaveHistory(pool,request,identities,mappingPath) {
   // Both requests initially target a new group. Their audit records must form one chain.
   const secondAdmin={...identities.denied,role:'Admin'};
-  await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin'",[secondAdmin.id]);
+  const addedRole=(await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin' returning role_id",[secondAdmin.id])).rows[0];
   const groupId='synthetic-concurrent-mapping';
   const writers=[identities.manager,secondAdmin];
   const mappings=['TeamLead','ProjectManager'].map(role=>({group_id:groupId,group_name:'Synthetic '+role,role_name:role,active:true}));
@@ -76,6 +76,7 @@ async function verifyMappingSaveHistory(pool,request,identities,mappingPath) {
   assert.deepEqual(retained,{active:true,role_name:live.role_name});
   assert.equal((await history()).length,2);
   assert.equal((await pool.query("select 1 from audit_logs where entity_type='EntraRoleMapping' and entity_id=$1",[entityId])).rowCount,2);
+  await pool.query('delete from user_roles where user_id=$1 and role_id=$2',[secondAdmin.id,addedRole.role_id]);
 }
 
 await withCommercialDatabase(async ({pool, databaseUrl}) => {
