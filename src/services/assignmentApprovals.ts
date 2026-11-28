@@ -22,6 +22,7 @@ export type AssignmentApprovalDefinition = {
     stageDueMinutes?: number;
     reminderLeadMinutes?: number;
     escalationUserId?: string;
+    overdueTemplate?: {key:string;subject:string;body:string};
     creationRequired?: boolean;
 };
 export type AssignmentApprovalPolicy = {
@@ -42,7 +43,7 @@ export type AssignmentApprovalSource = {
     policy: AssignmentApprovalPolicy | null;
 };
 export type AssignmentApprovalInstance = {
-    overdueDeliveries?: {stage:number;dueAt:string;attempts:number;status:'Pending'|'Delivered'|'RecipientUnavailable'}[]; stageDeadline?: {stage:number;dueAt:string;observedAt:string;overdue:boolean}; delegations?: DelegationBinding[];
+    overdueDeliveries?: {stage:number;dueAt:string;attempts:number;status:'Pending'|'Delivered'|'RecipientUnavailable'|'TemplateUnavailable'}[]; stageDeadline?: {stage:number;dueAt:string;observedAt:string;overdue:boolean}; delegations?: DelegationBinding[];
     id: string;
     assignmentId: string;
     employeeId: string;

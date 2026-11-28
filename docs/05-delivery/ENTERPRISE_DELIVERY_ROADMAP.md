@@ -1,6 +1,8 @@
 # Enterprise delivery and integration roadmap
 
-WOS-APR-005 assignment and leave escalation is in verification. The scheduled worker records elapsed deadlines and delivers to eligible stage approvers and the pinned escalation recipient. A late decision records the breach even when the worker has not yet polled. Delivery history exposes failed attempts and recovery.
+Localized overdue notifications for assignment and leave are in verification. Administrators can configure both message fields in the policy locale and inspect a failed rendering attempt. Migration 141 preserves prior receipts. Retain the migration and use a compatible worker for existing custom policies during rollback.
+
+WOS-APR-005 assignment and leave escalation merged in [PR #420](https://github.com/APReddy-AutoBotz/WorkOS/pull/420) at `32615235` after [all four checks passed](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/46147557727). The scheduled worker records elapsed deadlines and delivers to eligible stage approvers and the pinned escalation recipient. A late decision records the breach even when the worker has not yet polled. Delivery history exposes failed attempts and recovery.
 
 WOS-APR-005 overdue reporting for assignment changes, assignment creation and leave merged in [PR #419](https://github.com/APReddy-AutoBotz/WorkOS/pull/419) at `7a0f3cac`. All four [hosted checks](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/46144743837) passed. The queues apply the deadline filter before pagination. A closed stage, a replaced source or an untimed policy has no current overdue item.
 

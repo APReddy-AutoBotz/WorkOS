@@ -42,9 +42,10 @@ export async function dispatchAssignmentLeaveOverdue(pool) {
         try {
           await c.query('insert into assignment_leave_overdue_attempts(breach_id) values($1)',[row.breach_id]);
         } catch (error) {
-          if (error.code!=='WGA05') throw error;
+          const failure={WGA05:'RECIPIENT_UNAVAILABLE',WGA06:'TEMPLATE_UNAVAILABLE'}[error.code];
+          if (!failure) throw error;
           await c.query('rollback to savepoint overdue_delivery');
-          await c.query("insert into assignment_leave_overdue_attempts(breach_id,failure) values($1,'RECIPIENT_UNAVAILABLE')",[row.breach_id]);
+          await c.query('insert into assignment_leave_overdue_attempts(breach_id,failure) values($1,$2)',[row.breach_id,failure]);
         }
         await c.query('release savepoint overdue_delivery');
       }
@@ -60,7 +61,7 @@ export async function dispatchAssignmentLeaveOverdue(pool) {
 export async function stageDeliveryHistory(c,kind,id){
   if (!(await c.query("select to_regclass('assignment_leave_overdue_attempts') is not null as ready")).rows[0].ready) return [];
   return (await c.query(`select s.stage,s.due_at as "dueAt",coalesce(a.attempt,0) as attempts,
-    case when a.attempt is null then 'Pending' when a.failure is null then 'Delivered' else 'RecipientUnavailable' end as status
+    case when a.attempt is null then 'Pending' when a.failure is null then 'Delivered' when a.failure='TEMPLATE_UNAVAILABLE' then 'TemplateUnavailable' else 'RecipientUnavailable' end as status
     from assignment_leave_overdue_sources s left join lateral (
       select attempt,failure from assignment_leave_overdue_attempts where breach_id=s.breach_id order by attempt desc limit 1
     ) a on true where s.kind=$1 and s.instance_id=$2 order by s.stage`,[kind,id])).rows;

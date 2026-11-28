@@ -1,7 +1,7 @@
 import {validWorkApprovalPolicy,approvalKeys,approvalText,renderApprovalTemplate,approvalEventIdentity} from './work-approval.mjs';
 export const LEAVE_APPROVAL_VERSION='leave-approval/1';
 export const validLeaveApprovalPolicy=d=>{
- if(!approvalKeys(d,['entityType','workerIds','stages','locale','templates','completionInApp', ...['stageDueMinutes', 'reminderLeadMinutes', 'escalationUserId'].filter(key => d && Object.hasOwn(d, key))])||d.entityType!=='LeaveRequest'||!validWorkApprovalPolicy({...d,entityType:'Timesheet'}))return false;
- return d.templates.every(t=>{const r=renderApprovalTemplate(t,{workerCode:'w'.repeat(200),sourceRef:'s'.repeat(239),stageNumber:'10',decisionReason:'r'.repeat(1000)});return approvalText(r.title,1200)&&approvalText(r.body,12000);});
+ if(!approvalKeys(d,['entityType','workerIds','stages','locale','templates','completionInApp', ...['stageDueMinutes', 'reminderLeadMinutes', 'escalationUserId', 'overdueTemplate'].filter(key => d && Object.hasOwn(d, key))])||d.entityType!=='LeaveRequest'||!validWorkApprovalPolicy({...d,entityType:'Timesheet'}))return false;
+ return [...d.templates,...(d.overdueTemplate ? [d.overdueTemplate] : [])].every(t=>{const r=renderApprovalTemplate(t,{workerCode:'w'.repeat(200),sourceRef:'s'.repeat(239),stageNumber:'10',decisionReason:t.key==='approval.overdue_or_escalated'?'':'r'.repeat(1000)});return approvalText(r.title,1200)&&approvalText(r.body,12000);});
 };
 export const leaveApprovalIdentity=(...args)=>approvalEventIdentity(...args).replace(/^work-approval\//,'leave-approval/');

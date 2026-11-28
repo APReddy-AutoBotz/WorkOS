@@ -39,6 +39,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       await config.getByLabel('Time allowed per stage (minutes, optional)',{exact:true}).fill('2');
       await config.getByLabel('Remind approvers before the deadline (minutes, optional)',{exact:true}).fill('1');
       await config.getByLabel('Escalation recipient (optional)',{exact:true}).selectOption(ids.manager.id);
+      await config.getByLabel('Overdue notification title',{exact:true}).fill('Stage {{stageNumber}} requires attention');
+      await config.getByLabel('Overdue notification body',{exact:true}).fill('Check {{sourceRef}} for {{workerCode}}.');
       for (const t of assignmentApprovalDefinition(ids).templates) { await config.getByLabel('Assignment ' + t.key + ' title', { exact: true }).fill(t.subject); await config.getByLabel('Assignment ' + t.key + ' body', { exact: true }).fill(t.body); }
       await config.getByLabel('Assignment informational completion', { exact: true }).selectOption('enabled'); await config.getByLabel('Material policy reason', { exact: true }).fill('Synthetic explicit creation approval adoption'); let pending = reply(a, base + '/policies', 'POST'); await config.getByRole('button', { name: 'Record material assignment policy', exact: true }).click(); const adopted = await result(pending, 201); assert.equal(adopted.policy.definition.creationRequired, true);
 
@@ -59,7 +61,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       const lateInbox=region(a,'Canonical work approval notifications');
       await lateInbox.getByRole('button',{name:'Load my governed notifications',exact:true}).click();
       const lateNotice=lateInbox.getByRole('article').filter({hasText:'approval.overdue_or_escalated'});
-      await lateNotice.getByRole('heading',{name:'Approval stage overdue',exact:true}).waitFor();
+      await lateNotice.getByRole('heading',{name:'Stage 1 requires attention',exact:true}).waitFor();
+      await lateNotice.getByText('Check assignment/'+instance.assignmentId+' for '+instance.worker.code+'.',{exact:true}).waitFor();
       await lateNotice.getByRole('button',{name:/Mark governed notification read/}).click();
       await lateNotice.getByText(/In-app Required · Read /).waitFor();
       const decide = async page => { await nav(page, 'Creation approvals'); const q = region(page, 'Governed assignment creation approvals'); await q.getByLabel('Creation approval reference', { exact: true }).fill(instance.id); const loaded = reply(page, base + '/creation-instances/' + instance.id); await q.getByRole('button', { name: 'Load current creation approval', exact: true }).click(); const inspected = await result(loaded); await q.getByRole('region',{name:'Overdue delivery history'}).getByText(/Delivered · Attempts 1/).waitFor(); await q.getByText(inspected.instance.stageDeadline.dueAt,{exact:true}).first().waitFor(); await q.getByLabel('Creation decision reason', { exact: true }).fill('Synthetic named creation stage'); const pending = reply(page, base + '/instances/' + instance.id + '/decisions', 'POST'); await q.getByRole('button', { name: 'Approve assignment creation stage', exact: true }).click(); const out = await result(pending, 201); await q.getByRole('article', { name: 'Assignment creation decision receipt', exact: true }).waitFor(); return out; };

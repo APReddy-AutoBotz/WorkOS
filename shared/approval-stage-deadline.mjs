@@ -28,6 +28,6 @@ export function validStageDeliveries(rows,minutes,stages,createdAt,transitions){
         || !Number.isInteger(row.attempts) || row.attempts<0) return false;
     const start=row.stage===0?createdAt:transitions[row.stage-1]?.createdAt;
     return start && new Date(Date.parse(start)+minutes*60000).toISOString()===row.dueAt
-      && (row.attempts===0 ? row.status==='Pending' : ['Delivered','RecipientUnavailable'].includes(row.status));
+      && (row.attempts===0 ? row.status==='Pending' : ['Delivered','RecipientUnavailable','TemplateUnavailable'].includes(row.status));
   });
 }
