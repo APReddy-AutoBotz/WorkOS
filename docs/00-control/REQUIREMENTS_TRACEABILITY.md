@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-APR-005 and WOS-INT-002 localized overdue notifications are in verification. Migration 141 uses the pinned assignment or leave policy as the custom template version and retains the rendered receipt. The [deadline suite](../../tests/assignment-leave-stage-deadlines.mjs) checks literal substitution and preservation of populated delivery evidence.
+
 WOS-APR-005 assignment and leave escalation uses migration 140, the scheduled approval worker and scoped delivery history. The [stage deadline suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises a late decision, competing collectors, overlapping recipients, unavailable escalation accounts, retry backoff and separate acknowledgements.
 
 WOS-APR-005 overdue reporting merged in [PR #419](https://github.com/APReddy-AutoBotz/WorkOS/pull/419) at `7a0f3cac` with all four checks passing. It uses migration 139 and the current assignment and leave approval queues. [The PostgreSQL/API suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises each queue before expiry, after expiry, after advancing and after closing the instance.

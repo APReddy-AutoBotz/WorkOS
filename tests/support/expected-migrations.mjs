@@ -167,6 +167,7 @@ const expected = [
   '138_wos05_assignment_leave_reminders',
   '139_wos05_open_stage_clocks',
   '140_wos05_assignment_leave_escalation',
+  '141_wos05_localized_stage_escalation',
 ];
 
 export function expectedMigrationsFrom(first) {

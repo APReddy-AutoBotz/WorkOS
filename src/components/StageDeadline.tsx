@@ -28,6 +28,17 @@ export function StageDurationInput({value,onChange,reminderLead,onReminderChange
 export function OverdueDeliveryHistory({rows}:{rows?:{stage:number;dueAt:string;attempts:number;status:string}[]}) {
   if (!rows?.length) return null;
   return <section aria-label="Overdue delivery history"><h4>Overdue delivery history</h4>{rows.map(r=>
-    <p key={r.stage}>Stage {r.stage+1} due <time dateTime={r.dueAt}>{r.dueAt}</time> · {r.status==='RecipientUnavailable' ? 'Recipient unavailable. Delivery will retry.' : r.status} · Attempts {r.attempts}</p>
+    <p key={r.stage}>Stage {r.stage+1} due <time dateTime={r.dueAt}>{r.dueAt}</time> · {r.status==='RecipientUnavailable' ? 'Recipient unavailable. Delivery will retry.' : r.status==='TemplateUnavailable' ? 'Overdue message unavailable. Delivery will retry.' : r.status} · Attempts {r.attempts}</p>
   )}</section>;
+}
+
+export function OverdueMessageFields({enabled,subject,body,setSubject,setBody}:{
+  enabled:boolean; subject:string; body:string; setSubject:(s:string)=>void; setBody:(s:string)=>void
+}) {
+  if (!enabled) return null;
+  return <fieldset><legend>Overdue notification</legend>
+    <p>Enter a title and body to use the policy locale, or leave both empty to use the standard English message.</p>
+    <label>Overdue notification title<input maxLength={200} value={subject} onChange={e=>setSubject(e.target.value)}/></label>
+    <label>Overdue notification body<textarea maxLength={8000} value={body} onChange={e=>setBody(e.target.value)}/></label>
+  </fieldset>;
 }

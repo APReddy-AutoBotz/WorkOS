@@ -28,6 +28,15 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert(await check(domain,definition));
     assert(await check(domain,{...definition,stageDueMinutes:2,reminderLeadMinutes:1}));
     assert(await check(domain,{...definition,stageDueMinutes:1,escalationUserId:ids.manager.id}));
+    const template={key:'approval.overdue_or_escalated',subject:'Stage {{stageNumber}} overdue',body:'Review {{sourceRef}}'};
+    assert(await check(domain,{...definition,stageDueMinutes:1,overdueTemplate:template}));
+    assert.equal(await check(domain,{...definition,overdueTemplate:template}),false);
+    for (const invalid of [null,{...template,key:'approval.completed'},{...template,body:'{{amount}}'},
+      {...template,subject:'{{decisionReason}}'},{...template,extra:'unbound'},{...template,body:'{{workerCode}}'.repeat(61)}]){
+      assert.equal(await check(domain,{...definition,stageDueMinutes:1,overdueTemplate:invalid}),false);
+    }
+    const literal=(await pool.query("select render_stage_overdue_text('{{workerCode}} / {{sourceRef}}','{{sourceRef}}','{{stageNumber}}',1) as value")).rows[0];
+    assert.equal(literal.value,'{{sourceRef}} / {{stageNumber}}');
     assert.equal(await check(domain,{...definition,escalationUserId:ids.manager.id}),false);
     for(const value of [null,{},'unknown',12])assert.equal(await check(domain,{...definition,stageDueMinutes:1,escalationUserId:value}),false);
     assert.equal(await check(domain,{...definition,reminderLeadMinutes:1}),false);
@@ -44,7 +53,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     await adoptStagedPolicy(request,ids,fx.today);
     const assignment=await createApprovalAssignment(request,fx);
     const assignmentPolicy=await adoptAssignmentApproval(request,fx,{...definitions.assignment,stageDueMinutes:2,reminderLeadMinutes:1,escalationUserId:ids.delegate.id});
-    await adoptLeavePolicy(request,fx,{...definitions.leave,stageDueMinutes:2,reminderLeadMinutes:1,escalationUserId:ids.manager.id});
+    await adoptLeavePolicy(request,fx,{...definitions.leave,stageDueMinutes:2,reminderLeadMinutes:1,escalationUserId:ids.manager.id,locale:'fr',overdueTemplate:{key:'approval.overdue_or_escalated',subject:'Retard - {{stageNumber}}',body:'Demande {{sourceRef}}.'}});
     const grant=delegationOk(await adoptDelegation(request,ids.manager,delegationDefinition(fx,{sourceKinds:['Creation','Material']})),201).delegation;
     const leaveGrant=delegationOk(await adoptDelegation(request,ids.manager,delegationDefinition(fx,{
       sourceKinds:['Leave'],delegateUserId:ids.requester.id})),201).delegation;
@@ -132,6 +141,20 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     }
     const setTargetActive=active=>pool.query('update user_organization_scopes set active=$1 where user_id=$2 and organization_id=$3 and legal_entity_id=$4',
       [active,ids.delegate.id,commercialFixture.organizationId,commercialFixture.legalEntityId]);
+    const isolated=await pool.connect();
+    try{
+      await isolated.query('begin');
+      const leaveSource=(await isolated.query("select breach_id,employee_id from assignment_leave_overdue_sources where kind='Leave'")).rows[0];
+      await isolated.query("update employees set employee_id=repeat('w',201) where id=$1",[leaveSource.employee_id]);
+      await isolated.query('savepoint invalid_message');
+      await assert.rejects(()=>isolated.query('insert into assignment_leave_overdue_attempts(breach_id)values($1)',[leaveSource.breach_id]),
+        err=>err.code==='WGA06');
+      await isolated.query('rollback to savepoint invalid_message');
+      assert.equal((await isolated.query('select * from assignment_leave_overdue_receipts where breach_id=$1',[leaveSource.breach_id])).rowCount,0);
+    }finally{
+      await isolated.query('rollback');
+      isolated.release();
+    }
     await setTargetActive(false);
     await dispatchAssignmentLeaveOverdue(pool);
     const attempts=async()=>(await pool.query('select a.* from assignment_leave_overdue_attempts a order by a.created_at')).rows;
@@ -173,6 +196,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal(target.length,2);
     for(const notice of target)assert.deepEqual(notice.reasons,['escalation_target']);
     assert.deepEqual(named.find(n=>n.kind==='leave-approval').reasons,['current_stage_approver','escalation_target']);
+    const localized=named.find(n=>n.kind==='leave-approval');
+    assert.equal(localized.locale,'fr');
+    assert.equal(localized.title,'Retard - 1');
+    assert.equal(localized.body,'Demande leave/'+localized.requestId+'.');
+    assert.equal(localized.templateId,sources.find(([kind])=>kind==='Leave')[1].policy.id);
+    assert.equal(named.find(n=>n.kind==='assignment-approval').locale,'en');
     for(const notice of named){
       assert.equal(notice.policyClass,'CONTROL_MANDATORY');
       const origin=notice.kind==='leave-approval'?'leave-approval':'assignment-approval';
@@ -256,3 +285,37 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   });
 });
 console.log('Migration 138 preserved populated timed policies, exact deadlines and action recipients without scheduling retroactive reminders.');
+await withCommercialDatabase(async ({pool,databaseUrl})=>{
+  await withCommercialMigrationsThrough(140,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
+  const fx=await seedDelegationFixture(pool),ids=fx.identities;
+  await withCommercialApi({databaseUrl,identities:ids,enableLeave:true},async({request})=>{
+    await prepareStagedWork(request,ids,fx.today);
+    await adoptActualInputs(request,fx.today);
+    await adoptStagedPolicy(request,ids,fx.today);
+    const assignment=await createApprovalAssignment(request,fx);
+    const assignmentPolicy=await adoptAssignmentApproval(request,fx,{...assignmentApprovalDefinition(ids),creationRequired:true,stageDueMinutes:1});
+    await adoptLeavePolicy(request,fx,{...leaveDefinition(ids),stageDueMinutes:1});
+    const sources=(await createDelegationSources(request,fx,{assignment,assignmentPolicy})).filter(([kind])=>kind!=='Work');
+    await delay(Math.max(...sources.map(([,i])=>Date.parse(i.stageDeadline.dueAt)))-Date.now()+50);
+    await collectAssignmentLeaveBreaches(pool);
+    await dispatchAssignmentLeaveOverdue(pool);
+    const inbox=delegationOk(await request(WORK_APPROVAL_BASE+'/inbox',{identity:ids.manager}),200);
+    const notices=inbox.notifications.filter(n=>n.eventKey==='approval.overdue_or_escalated');
+    assert.equal(notices.length,3);
+    for(const notice of notices){
+      assert.equal(notice.title,'Approval stage overdue');
+      assert.equal(notice.locale,'en');
+      assert.equal(notice.templateId,'cd24c38c-8195-46db-b94e-0ad675e6f5c4');
+      delegationOk(await request(WORK_APPROVAL_BASE+'/inbox/'+notice.id+'/read',{identity:ids.manager,method:'POST',
+        body:{expectedOwnerKey:inbox.ownerKey}}),200);
+    }
+    const retained=['assignment_approval_policies','leave_approval_policies','assignment_leave_deadline_breaches',
+      'assignment_leave_overdue_attempts','assignment_leave_overdue_receipts','assignment_leave_overdue_reads'];
+    const before=await canonicalSnapshot(pool,retained);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('141_wos05_localized_stage_escalation'));
+    await dispatchAssignmentLeaveOverdue(pool);
+    assert.deepEqual(await canonicalSnapshot(pool,retained),before);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
+  });
+});
+console.log('Populated template upgrade retained all historical standard messages, delivery evidence and acknowledgements.');
