@@ -162,6 +162,7 @@ const expected = [
   '133_wos04_fixed_assignment_hours',
   '134_wos06_approved_project_costs',
   '135_wos06_invoice_receipt_and_cancellation',
+  '136_wos05_named_stage_delegation',
 ];
 
 export function expectedMigrationsFrom(first) {

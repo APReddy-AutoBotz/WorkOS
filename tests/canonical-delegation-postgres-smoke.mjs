@@ -1,0 +1,97 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {withCommercialDatabase,migrateCommercialDatabase,withCommercialApi} from './support/commercial-drafting-test.mjs';
+import {seedDelegationFixture,proveDelegationFlow} from './support/canonical-delegation-test.mjs';
+await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercialDatabase(pool);const fx=await seedDelegationFixture(pool);await withCommercialApi({enableLeave:true,databaseUrl,identities:fx.identities,onServerError:s=>process.stderr.write(s)},async({request})=>{await proveDelegationFlow({pool,request,fx});});});
+
+import {setTimeout as delay} from 'node:timers/promises';
+import {commercialFixture as f,commercialServerDir} from './support/commercial-drafting-test.mjs';
+import {delegationBase,delegationOk as ok,delegationDefinition,adoptDelegation,revokeDelegation,waitForDelegationStart,prepareDelegationInputs,readDelegationInstance,decideDelegationInstance,delegationCommand,delegationInstancePath,canonicalSnapshot} from './support/canonical-delegation-test.mjs';
+import {submitStagedWork,readApprovalOwner} from './support/work-approval-test.mjs';
+import {getAssignmentApprovalSource,ASSIGNMENT_APPROVAL_BASE as ab} from './support/assignment-approval-test.mjs';
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ await migrateCommercialDatabase(pool);const fx=await seedDelegationFixture(pool),ids=fx.identities;
+ await withCommercialApi({enableLeave:true,databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s)},async({request})=>{
+  const inputs=await prepareDelegationInputs(request,fx),old=(await submitStagedWork(request,ids.legacyImport,fx.today)).instance;
+  const definition=delegationDefinition(fx),key=randomUUID(),adopted=ok(await adoptDelegation(request,ids.manager,definition,key),201).delegation,replay=ok(await adoptDelegation(request,ids.manager,definition,key));assert.deepEqual(replay.delegation,adopted);assert(replay.replayed);
+  for(const field of ['delegateUserId','role','clockBasis','cohort','startsAt','endsAt']){
+   const result=await pool.query(`select canonical_delegation_valid(jsonb_populate_record(d,jsonb_build_object(
+    'definition',jsonb_set(d.definition,array[$2::text],'null'::jsonb)))) as valid
+    from canonical_delegations d where d.id=$1`,[adopted.id,field]);
+   assert.equal(result.rows[0].valid,false,field);
+  }
+  assert.equal((await adoptDelegation(request,ids.manager,{...definition,workerIds:[f.ownerId]},key)).status,409);
+  assert.equal((await adoptDelegation(request,ids.manager,{...definition,delegateUserId:ids.second.id})).status,409);
+  for(const change of [{delegateUserId:ids.manager.id},{role:'TeamLead'},{clockBasis:'Local'},{cohort:'ExistingInstances'}])assert([400,422].includes((await adoptDelegation(request,ids.manager,{...definition,...change})).status));
+  assert.equal((await adoptDelegation(request,ids.manager,{...definition,delegateUserId:ids.denied.id})).status,422);
+  assert.equal((await request(delegationBase+'/request/'+key,{identity:ids.delegate})).body.delegation,null,'Only actual adoption owner reads exact request history');
+  await waitForDelegationStart(definition);assert.equal((await decideDelegationInstance(request,ids.delegate,'Work',old)).status,403);
+  const create=async(identity=ids.requester,requestId=randomUUID())=>{const r=await request(ab+'/creations',{method:'POST',identity,body:{expectedOwnerKey:await readApprovalOwner(request,identity),expectedPolicyId:inputs.assignmentPolicy.id,employeeId:f.ownerId,projectId:f.projectId,definition:{role:null,quantityUnit:'percentage',quantityExact:'20',startsOn:fx.today,endsOn:fx.today,billable:false,status:'Active',comment:'Synthetic delegation negative request'},reason:'Synthetic inspected creation',requestId}});return r;};
+  const self=ok(await create(ids.delegate),201).instance;assert.equal(self.delegations,undefined);assert.equal((await decideDelegationInstance(request,ids.delegate,'Creation',self)).status,403);
+  const current=ok(await create(),201).instance;
+  assert.equal((await decideDelegationInstance(request,ids.requester,'Creation',current)).status,403);assert([403,404].includes((await decideDelegationInstance(request,ids.denied,'Creation',current)).status));assert.equal((await readDelegationInstance(request,'Creation',current.id)).transitions.length,0);
+  const unchanged=async i=>(await pool.query('select count(*)::int n from assignment_approval_transitions where instance_id=$1',[i.id])).rows[0].n;
+  const scopedDecision=async()=>request(delegationInstancePath('Creation',current.id)+'/decisions',{method:'POST',identity:ids.delegate,body:scopedCommand});const scopedCommand=await delegationCommand(request,ids.delegate,current);
+  for(const account of [ids.manager,ids.delegate]){
+   await pool.query("update users set status='Inactive'where id=$1",[account.id]);try{assert((await scopedDecision()).status>=400);assert.equal(await unchanged(current),0);}finally{await pool.query("update users set status='Active'where id=$1",[account.id]);}
+   await pool.query('update user_organization_scopes set active=false where user_id=$1 and organization_id=$2 and legal_entity_id=$3',[account.id,f.organizationId,f.legalEntityId]);try{assert((await scopedDecision()).status>=400);assert.equal(await unchanged(current),0);}finally{await pool.query('update user_organization_scopes set active=true where user_id=$1 and organization_id=$2 and legal_entity_id=$3',[account.id,f.organizationId,f.legalEntityId]);}
+  }
+  await pool.query("update role_permissions set enabled=false where role_name='Admin'and permission_key='allocations.manage'");try{assert.equal((await decideDelegationInstance(request,ids.delegate,'Creation',current)).status,403);assert.equal(await unchanged(current),0);}finally{await pool.query("update role_permissions set enabled=true where role_name='Admin'and permission_key='allocations.manage'");}
+  // Existing held roles and linked employee lifecycle narrow authority, never
+  // transfer identity or silently adopt a leaver's stage.
+  const roleId=(await pool.query("select id from roles where name='Admin'")).rows[0].id;
+  for(const account of [ids.manager,ids.delegate]){await pool.query('delete from user_roles where user_id=$1 and role_id=$2',[account.id,roleId]);try{assert((await scopedDecision()).status>=400);assert.equal(await unchanged(current),0);}finally{await pool.query('insert into user_roles(user_id,role_id)values($1,$2)',[account.id,roleId]);}}
+  const linked='synthetic-delegation-linked-leaver';await pool.query("insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)values($1,$1,'Synthetic linked delegate','linked-delegate@example.test','Consultant','Delivery','US','director-commercial','Active',$2,$3)",[linked,f.organizationId,f.legalEntityId]);await pool.query('update users set employee_record_id=$2,employee_id=$2 where id=$1',[ids.delegate.id,linked]);await pool.query("update employees set status='Exited'where id=$1",[linked]);try{assert((await scopedDecision()).status>=400);assert.equal(await unchanged(current),0);}finally{await pool.query("update employees set status='Active'where id=$1",[linked]);await pool.query('update users set employee_record_id=null,employee_id=null where id=$1',[ids.delegate.id]);}
+  // A cancelled/edit-revised leave source remains governed by its existing
+  // stale-source contract even when a delegate had inspected the old revision.
+  const {createLeave,currentLeaveReview}=await import('./support/leave-approval-test.mjs');const oldLeave=await createLeave(request,fx);ok(await request('/api/leave/requests/'+oldLeave.leave.id,{method:'PATCH',identity:ids.reader,body:{leave_type_id:'leave-type-annual',start_date:fx.today,end_date:fx.today,expected_calendar_token:oldLeave.quote.sourceToken,reason:'Synthetic changed retained delegated leave'}}));assert.equal((await decideDelegationInstance(request,ids.delegate,'Leave',oldLeave.instance)).status,409);const changedLeave=await currentLeaveReview(request,oldLeave.leave.id);assert(changedLeave.delegations?.length);ok(await request('/api/leave/requests/'+oldLeave.leave.id+'/cancel',{method:'PATCH',identity:ids.reader}));assert.equal((await decideDelegationInstance(request,ids.delegate,'Leave',changedLeave)).status,409);assert.equal((await pool.query('select count(*)::int n from leave_approval_transitions where instance_id=any($1::uuid[])',[[oldLeave.instance.id,changedLeave.id]])).rows[0].n,0);
+  const inboxPath='/api/v1/work-approvals/inbox';
+  const notices=async identity=>{
+   let cursor=null;
+   do {
+    const page=ok(await request(inboxPath+(cursor?'?after='+cursor:''),{identity}));
+    const notice=page.notifications.find(n=>n.instanceId===current.id);
+    if(notice)return notice;
+    cursor=page.nextAfter;
+   } while(cursor);
+   return null;
+  };
+  const delegatedNotice=await notices(ids.delegate);
+  assert(delegatedNotice,'Delegate receives the action for the new creation request');
+  assert(await notices(ids.manager),'Named approver retains the action');
+  const acknowledged=ok(await request(inboxPath+'/'+delegatedNotice.id+'/read',{method:'POST',identity:ids.delegate,body:{expectedOwnerKey:await readApprovalOwner(request,ids.delegate)}}));
+  assert(acknowledged.notification.readAt);
+  // Only the original named stage binds: B's delegation to C never chains A->B->C.
+  const chainDef=delegationDefinition(fx,{delegateUserId:ids.requester.id}),chain=ok(await adoptDelegation(request,ids.delegate,chainDef),201).delegation;await waitForDelegationStart(chainDef);const chainSource=ok(await create(),201).instance;assert.equal(chainSource.delegations.length,1);assert.equal(chainSource.delegations[0].delegatorUserId,ids.manager.id);assert.equal((await decideDelegationInstance(request,ids.requester,'Creation',chainSource)).status,403);
+  const race=ok(await create(),201).instance,results=await Promise.all([ids.manager,ids.delegate].map(actor=>decideDelegationInstance(request,actor,'Creation',race)));assert.deepEqual(results.map(r=>r.status).sort(),[201,409]);const raced=await readDelegationInstance(request,'Creation',race.id);assert.equal(raced.transitions.length,1);assert.equal((await pool.query('select count(*)::int n from project_allocations where id=$1',[race.assignmentId])).rows[0].n,0);assert.equal((await decideDelegationInstance(request,ids.delegate,'Creation',race)).status,409);
+  // New-instance mandatory handoff has two recipients. Failure on the later
+  // delivery rolls back instance, binding, compatibility, event and all rows.
+  const brokenKey=randomUUID(),tables=['assignment_approval_instances','assignment_approval_events','assignment_approval_recipients','assignment_approval_deliveries','canonical_delegation_bindings','approval_records'],before=await canonicalSnapshot(pool,tables);
+  await pool.query(`create function synthetic_delegate_delivery_failure()returns trigger language plpgsql as $$declare event text;begin select e.id into event from assignment_approval_events e join assignment_approval_recipients r on r.event_id=e.id join assignment_approval_instances i on i.id=e.instance_id where r.id=new.recipient_id and i.request_id='${brokenKey}'::uuid;if event is not null and exists(select 1 from assignment_approval_deliveries d join assignment_approval_recipients r on r.id=d.recipient_id where r.event_id=event)then raise exception 'Synthetic later delegated recipient failure';end if;return new;end$$;create trigger synthetic_delegate_delivery before insert on assignment_approval_deliveries for each row execute function synthetic_delegate_delivery_failure()`);
+  try{assert.equal((await create(ids.requester,brokenKey)).status,503);assert.deepEqual(await canonicalSnapshot(pool,tables),before);}finally{await pool.query('drop trigger synthetic_delegate_delivery on assignment_approval_deliveries;drop function synthetic_delegate_delivery_failure()');}
+  const corrected=ok(await create(ids.requester,brokenKey),201).instance,correctedReplay=ok(await create(ids.requester,brokenKey));assert(correctedReplay.replayed);assert.equal(correctedReplay.instance.id,corrected.id);assert.equal(corrected.delegations.length,1);
+  const protectedTables=['assignment_approval_transitions','assignment_approval_events','assignment_approval_recipients','assignment_approval_deliveries','canonical_delegation_decisions'],decisionBefore=await canonicalSnapshot(pool,protectedTables);
+  await pool.query(`create function synthetic_delegate_stage_failure()returns trigger language plpgsql as $$begin if exists(select 1 from assignment_approval_recipients r join assignment_approval_events e on e.id=r.event_id where r.id=new.recipient_id and e.instance_id='${corrected.id}'::uuid and e.transition_sequence=1)then raise exception 'Synthetic delegated decision handoff failure';end if;return new;end$$;create trigger synthetic_delegate_stage before insert on assignment_approval_deliveries for each row execute function synthetic_delegate_stage_failure()`);
+  const exact=randomUUID();try{assert.equal((await decideDelegationInstance(request,ids.delegate,'Creation',corrected,'Approved',exact)).status,503);assert.deepEqual(await canonicalSnapshot(pool,protectedTables),decisionBefore);}finally{await pool.query('drop trigger synthetic_delegate_stage on assignment_approval_deliveries;drop function synthetic_delegate_stage_failure()');}
+  const correctedDecision=ok(await decideDelegationInstance(request,ids.delegate,'Creation',corrected,'Approved',exact),201);assert(correctedDecision.receipt.delegationBindingId);assert.equal(ok(await decideDelegationInstance(request,ids.delegate,'Creation',corrected,'Approved',exact)).receipt.id,correctedDecision.receipt.id);
+  const revokeSource=ok(await create(),201).instance,revokeKey=randomUUID(),revocationRace=await Promise.all([decideDelegationInstance(request,ids.delegate,'Creation',revokeSource),revokeDelegation(request,ids.manager,adopted.id,revokeKey)]);assert.equal(revocationRace[1].status,201);assert([201,403].includes(revocationRace[0].status));assert.equal((await decideDelegationInstance(request,ids.delegate,'Creation',await readDelegationInstance(request,'Creation',current.id))).status,403);assert.equal(ok(await revokeDelegation(request,ids.manager,adopted.id,revokeKey)).replayed,true);
+  const retained=await readDelegationInstance(request,'Creation',corrected.id);assert.equal(retained.transitions[0].actorId,ids.delegate.id);assert(retained.delegations[0].revokedAt);assert.equal(retained.delegations[0].eligible,false);
+  // Real UTC expiry; no profile backdating or injected clock.
+  const expiryDef=delegationDefinition(fx,{sourceKinds:['Creation'],workerIds:[f.ownerId],startsAt:new Date(Date.now()+1500).toISOString(),endsAt:new Date(Date.now()+5000).toISOString()}),expiry=ok(await adoptDelegation(request,ids.manager,expiryDef),201).delegation;await waitForDelegationStart(expiryDef);const beforeExpiry=ok(await create(),201).instance,afterExpiry=ok(await create(),201).instance,expiryRequest=randomUUID(),accepted=ok(await decideDelegationInstance(request,ids.delegate,'Creation',beforeExpiry,'Approved',expiryRequest),201);await delay(Math.max(0,Date.parse(expiryDef.endsAt)-Date.now()+50));assert.equal((await decideDelegationInstance(request,ids.delegate,'Creation',afterExpiry)).status,403);assert.equal(ok(await decideDelegationInstance(request,ids.delegate,'Creation',beforeExpiry,'Approved',expiryRequest)).receipt.id,accepted.receipt.id);assert.equal((await readDelegationInstance(request,'Creation',beforeExpiry.id)).transitions.length,1);
+  const limits=await pool.query('select canonical_delegation_eligible(b,$2::timestamptz)at_start,canonical_delegation_eligible(b,$3::timestamptz)at_end from canonical_delegation_bindings b where b.id=$1',[afterExpiry.delegations[0].id,expiryDef.startsAt,expiryDef.endsAt]);assert(limits.rows[0].at_start);assert.equal(limits.rows[0].at_end,false);
+  // Append-only evidence cannot be rewritten or grafted onto historical rows.
+  for(const sql of ['update canonical_delegations set reason=reason','delete from canonical_delegation_revocations','update canonical_delegation_bindings set stage=stage','delete from canonical_delegation_decisions'])await assert.rejects(pool.query(sql));
+  await assert.rejects(pool.query('insert into canonical_delegation_bindings values($1,$2,$3,0,$4,clock_timestamp())',[randomUUID(),'Work',old.id,adopted.id]));
+  console.log('Canonical delegation API/PostgreSQL negatives passed: own request replay/conflict, overlap/self/foreign/cohort/role refusal, both-account lifecycle/scope/permission loss, no chain, direct/delegate and revocation races, initial and decision complete-recipient rollback/exact retry, real expiry and immutable historical binding/receipt evidence.');
+ });
+});
+
+// Nonempty135 -> additive136 -> replay, preserving all earlier rows and hashes.
+const {mkdtemp,mkdir,copyFile,readdir,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{runMigrations}=await import('../server/migrate.mjs');
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ const dir=await mkdtemp(join(tmpdir(),'workos-canonical-delegation-upgrade-'));
+ try{await mkdir(join(dir,'migrations'));await copyFile(join(commercialServerDir,'schema.sql'),join(dir,'schema.sql'));for(const name of await readdir(join(commercialServerDir,'migrations')))if(/^\d{3}[a-z]?_.*\.sql$/.test(name)&&Number(name.slice(0,3))<136)await copyFile(join(commercialServerDir,'migrations',name),join(dir,'migrations',name));await runMigrations({pool,rootDir:dir,logger:{log(){}}});const fx=await seedDelegationFixture(pool);
+ await withCommercialApi({enableLeave:true,databaseUrl,identities:fx.identities},async({request})=>{await prepareDelegationInputs(request,fx);const old=(await submitStagedWork(request,fx.identities.first,fx.today)).instance;const tables=['users','user_roles','role_permissions','user_permission_grants','user_organization_scopes','approval_delegations','work_approval_instances','work_approval_events','work_approval_recipients','work_approval_timed_stages','timesheets','timesheet_entries','work_submission_evidence','assignment_versions','project_allocations','leave_balances'],before=await canonicalSnapshot(pool,tables);const migrated=await migrateCommercialDatabase(pool);assert.deepEqual(migrated.applied,['136_wos05_named_stage_delegation']);assert.deepEqual(await canonicalSnapshot(pool,tables),before);assert.equal((await readDelegationInstance(request,'Work',old.id)).delegations,undefined);for(const t of ['canonical_delegations','canonical_delegation_bindings','canonical_delegation_decisions','canonical_delegation_revocations'])assert.equal((await pool.query('select count(*)::int n from '+t)).rows[0].n,0);const replay=await migrateCommercialDatabase(pool);assert.deepEqual(replay.applied,[]);assert.deepEqual(await canonicalSnapshot(pool,tables),before);});
+ console.log('Canonical delegation migration136 fresh/nonempty135 upgrade/replay: no binding, role/grant/default, source, clock or prior evidence mutation.');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

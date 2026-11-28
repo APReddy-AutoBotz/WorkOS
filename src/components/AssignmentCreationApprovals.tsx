@@ -1,3 +1,5 @@
+import {canActAtStage} from '../services/canonicalDelegations';
+import {CanonicalDelegationEvidence} from './CanonicalDelegationEvidence';
 import { useState } from 'react';
 import { workApprovals, captureWorkApprovalContext, type WorkDecisionReceipt } from '../services/workApprovals';
 import type { AssignmentApprovalPolicy, AssignmentCreationPage, AssignmentCreationInstance } from '../services/assignmentApprovals';
@@ -27,7 +29,7 @@ export const AssignmentCreationApprovals = () => {
   const load = (after: string | null = null) => lease.run('assignment', false, async (c, live) => { const r = await service.creations(c, after); if (live()) { setRows(v => after ? [...v, ...r.instances] : r.instances); setNext(r.nextAfter); } });
   const inspect = (id: string) => lease.run('assignment', false, async (c, live) => { const r = await service.creation(id, c); if (live()) { setPage(r); setReference(id); setReason(''); setReceipt(null); } });
   const v = page?.instance, stage = v?.state.currentStage === null || !v ? null : v.policy.definition.stages[v.state.currentStage], c = captureWorkApprovalContext('assignment-decide');
-  const canDecide = Boolean(v?.state.status === 'Pending' && stage?.userId === page?.actorUserId && stage?.role === c?.activeRole && v.currentVersionId === null && v.currentRevision === v.sourceRevision);
+  const canDecide = Boolean(v?.state.status === 'Pending' && v&&canActAtStage(v.policy.definition.stages,v.delegations,v.state.currentStage,page?.actorUserId,c?.activeRole) && v.currentVersionId === null && v.currentRevision === v.sourceRevision);
   const decide = (decision: 'Approved' | 'Rejected') => { if (page) void lease.run('assignment-decide', true, async (context, live) => { const r = await service.decide(page, decision, reason, crypto.randomUUID(), context); if (live()) { setReceipt(r.receipt); setPage(null); setReason(''); } }); };
   return <section aria-label="Governed assignment creation approvals" className="my-4 rounded border p-4 space-y-2"><h2>Assignment creation requests</h2><p>Requests are separate from effective allocations. Pending stages and rejections reserve no capacity. Final approval rechecks current source permissions, relationships, dates and overlap.</p>
     <button disabled={lease.waiting} onClick={() => void load()}>Load assignment creation requests</button>{next && <button disabled={lease.waiting} onClick={() => void load(next)}>More creation requests</button>}
@@ -35,6 +37,7 @@ export const AssignmentCreationApprovals = () => {
     {rows.map(i => <article key={i.id}><p>{i.worker.name} · {i.proposed.quantityExact}{i.proposed.quantityUnit==='hours'?'h':'%'} · {i.state.status}</p><button disabled={lease.waiting} onClick={() => void inspect(i.id)}>Inspect creation request {i.id}</button></article>)}
     {lease.notice && <p role="status">{lease.notice}</p>}
     {v && <article aria-label="Current assignment creation approval"><p>Request {v.id} · {v.state.status} · Worker {v.worker.name} · Project {v.projectId}</p><p>{v.proposed.role ?? 'No role'} · {v.proposed.quantityExact}{v.proposed.quantityUnit==='hours'?'h':'%'} · {v.proposed.startsOn}–{v.proposed.endsOn} · {v.proposed.status} · {v.proposed.billable ? 'Billable within source authority' : 'Non-billable'}</p><p>{v.proposed.comment}</p><p>{v.currentVersionId ? 'Effective assignment version exists; inspect the source for current planning.' : 'No effective assignment version exists for this request.'} Reserved identity {v.assignmentId}</p><p>Request reason: {v.reason}</p>
+      <CanonicalDelegationEvidence bindings={v.delegations} transitions={v.transitions}/>
       {canDecide && <fieldset disabled={lease.waiting || lease.phase === 'uncertain'}><legend>Named current creation stage</legend><label>Creation decision reason<input aria-label="Creation decision reason" value={reason} maxLength={1000} onChange={e => setReason(e.target.value)} /></label><button disabled={!reason.trim()} onClick={() => decide('Approved')}>Approve assignment creation stage</button><button disabled={!reason.trim()} onClick={() => decide('Rejected')}>Reject assignment creation stage</button></fieldset>}
       <section aria-label="Immutable assignment creation stage history">{v.transitions.map(t => <p key={t.id}>Stage {t.stage + 1} · {t.decision} · {t.reason} · Outcome {t.outcome.status}</p>)}</section>{v.notificationFailures.map(f => <p key={f.sequence}>Informational completion unavailable for decision {f.sequence}; retained source outcome is unchanged.</p>)}
     </article>}

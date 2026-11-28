@@ -63,6 +63,8 @@ Domain modules may provide approved template variables and source links, but mus
 
 Recipient resolution is server-authoritative. The engine resolves current approvers, requester, affected worker, commercial change owner, invoice-batch owner, finance preparer and escalation target from the approval instance, source type, governing source contract, policy, delegation and organization/legal-entity/entity relationship at the triggering version. Client-supplied recipients, role labels or addresses are never authoritative. A missing, stale or out-of-scope mandatory source-owner relationship fails closed visibly; callers cannot redirect or omit protected recipients. Identity deduplication preserves all applicable recipient reasons or the approved deterministic precedence.
 
+A named work-stage approver and an eligible delegate each receive a reminder or overdue notice when the policy calls for one. If the delegate is also the escalation target, one overdue receipt retains both reasons. Revoking a grant ends future delegated decisions and deliveries. Existing decision and delivery evidence remains available within the recipient's current scope.
+
 ## Authorization and audit
 
 Decision authority combines active role, permission, organization/legal entity, source-entity relationship, policy stage and delegation. Decision, reassignment, escalation, delegation and reopen actions are audited.

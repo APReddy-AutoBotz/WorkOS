@@ -1,3 +1,4 @@
+import {createCanonicalDelegationClient,validInstanceDelegations,validStageReceipt,type DelegationBinding} from './canonicalDelegations';
 import {createLeaveApprovalClient,decodeLeaveNotice,type LeaveApprovalNotice} from './leaveApprovals';
 import { reversalDecisionClient } from './reversalReviewDecisions';
 import {createAssignmentApprovalClient,decodeAssignmentApprovalNotice,type AssignmentApprovalNotice} from './assignmentApprovals';
@@ -45,6 +46,7 @@ export type WorkStageState = {
     currentStage: number | null;
 };
 export type WorkDecisionReceipt = {
+    delegationBindingId?: string;
     id: string;
     instanceId: string;
     sequence: number;
@@ -80,6 +82,7 @@ export type WorkApprovalSource = {
     }>;
 };
 export type WorkApprovalInstance = {
+    delegations?: DelegationBinding[];
     id: string;
     timesheetId: string;
     submissionId: string;
@@ -183,7 +186,7 @@ const invoiceActionNotice=(v:unknown):InvoiceActionNotice=>{if(!object(v)||!keys
 export type MilestoneBillingNotice=Omit<CommercialCandidateNotice,'kind'|'candidateId'>&{kind:'milestone-billing-eligibility';milestoneId:string};
 export type CanonicalWorkNotice=LeaveApprovalNotice|MonthlyMarginRiskNotice|RetainerRiskNotice|PurchaseOrderRiskNotice|FixedFeeRiskNotice|MilestoneBillingNotice|InvoiceActionNotice|InvoiceExportNotice|InvoiceBatchNotice|CommercialCandidateNotice|TmBillingNotice|WorkApprovalNotification|PeriodNotice|AssignmentApprovalNotice;
 export type WorkApprovalContext = ApiRequestContext & {
-    mode: 'read' | 'configure' | 'decide' | 'inbox' | 'assignment' | 'assignment-decide' | 'leave' | 'leave-decide';
+    mode: 'read' | 'configure' | 'decide' | 'inbox' | 'assignment' | 'assignment-decide' | 'leave' | 'leave-decide' | 'delegation';
     identityKey: string;
     username: string;
     accountIdentity: string;
@@ -193,7 +196,7 @@ export type WorkApprovalContext = ApiRequestContext & {
 };
 const roles = ['settings.manage', 'permissions.manage', 'notifications.manage', 'approvals.view', 'employees.view'];
 const identity = () => { const u = authService.getCurrentUser(); return u && JSON.stringify([u.id, u.employeeId, u.userName, u.role, u.permissionRole, u.cdId, [...getEffectivePermissions(u)].sort()]); };
-export const captureWorkApprovalContext = (mode: WorkApprovalContext['mode'] = 'read', isCurrent = () => true): WorkApprovalContext | null => { const u = authService.getCurrentUser(), scope = getOrganizationScope(), p = getEffectivePermissions(u); if (!u?.id || !u.userName || !scope?.organizationId || !scope.legalEntityId || !p.includes('employees.view') || mode === 'configure' && !roles.every(k => p.includes(k)) || mode === 'decide' && !['timesheets.approve', 'timesheets.submit', 'projects.view', 'approvals.view', 'notifications.view'].every(k => p.includes(k)) || mode === 'assignment' && !['allocations.manage','allocations.view','projects.view'].every(k=>p.includes(k)) || mode === 'assignment-decide' && !['allocations.manage','allocations.view','projects.view','approvals.view','notifications.view'].every(k=>p.includes(k)) || mode === 'leave' && !p.includes('leave.self_service') || mode === 'leave-decide' && !['leave.self_service','leave.approve','approvals.view','notifications.view'].every(k=>p.includes(k)) || mode === 'read' && !p.includes('timesheets.submit') || mode === 'inbox' && !p.includes('notifications.view'))
+export const captureWorkApprovalContext = (mode: WorkApprovalContext['mode'] = 'read', isCurrent = () => true): WorkApprovalContext | null => { const u = authService.getCurrentUser(), scope = getOrganizationScope(), p = getEffectivePermissions(u); if (!u?.id || !u.userName || !scope?.organizationId || !scope.legalEntityId || !p.includes('employees.view') || mode === 'configure' && !roles.every(k => p.includes(k)) || mode === 'decide' && !['timesheets.approve', 'timesheets.submit', 'projects.view', 'approvals.view', 'notifications.view'].every(k => p.includes(k)) || mode === 'assignment' && !['allocations.manage','allocations.view','projects.view'].every(k=>p.includes(k)) || mode === 'assignment-decide' && !['allocations.manage','allocations.view','projects.view','approvals.view','notifications.view'].every(k=>p.includes(k)) || mode === 'leave' && !p.includes('leave.self_service') || mode === 'leave-decide' && !['leave.self_service','leave.approve','approvals.view','notifications.view'].every(k=>p.includes(k)) || mode === 'read' && !p.includes('timesheets.submit') || mode === 'delegation' && !['approvals.view','notifications.view'].every(k=>p.includes(k)) || mode === 'inbox' && !p.includes('notifications.view'))
     return null; return { mode, scope: { ...scope }, token: getToken(), identityKey: identity()!, username: u.userName, accountIdentity: u.id, activeRole: u.role, isCurrent }; };
 export const isWorkApprovalContextCurrent = (c: WorkApprovalContext) => { const n = captureWorkApprovalContext(c.mode); return Boolean(c.isCurrent() && n && n.identityKey === c.identityKey && n.token === c.token && n.scope.organizationId === c.scope.organizationId && n.scope.legalEntityId === c.scope.legalEntityId); };
 const owner = (c: WorkApprovalContext | null) => { if (!c || !isWorkApprovalContextCurrent(c))
@@ -213,10 +216,10 @@ const sameState = (a: {
     sequence: number;
     currentStage: number | null;
 }) => a.status === b.status && a.sequence === b.sequence && a.currentStage === b.currentStage;
-export const decodeWorkDecision = (v: unknown, instance?: string): WorkDecisionReceipt => { if (!object(v) || !keys(v, ['id', 'instanceId', 'sequence', 'stage', 'decision', 'actorId', 'activeRole', 'requestId', 'operationId', 'reason', 'outcome', 'createdAt']) || !uuid(v.id) || !uuid(v.instanceId) || instance !== undefined && v.instanceId !== instance || !integer(v.sequence, 1, 10) || !integer(v.stage, 0, 9) || !['Approved', 'Rejected'].includes(String(v.decision)) || !uuid(v.actorId) || !text(v.activeRole, 100) || !uuid(v.requestId) || !text(v.operationId) || !text(v.reason, 1000) || !state(v.outcome) || v.outcome.sequence !== v.sequence || !instant(v.createdAt))
+export const decodeWorkDecision = (v: unknown, instance?: string): WorkDecisionReceipt => { if (!object(v) || !keys(v, ['id', 'instanceId', 'sequence', 'stage', 'decision', 'actorId', 'activeRole', 'requestId', 'operationId', 'reason', 'outcome', 'createdAt',...('delegationBindingId' in v?['delegationBindingId']:[])]) || 'delegationBindingId' in v&&!uuid(v.delegationBindingId) || !uuid(v.id) || !uuid(v.instanceId) || instance !== undefined && v.instanceId !== instance || !integer(v.sequence, 1, 10) || !integer(v.stage, 0, 9) || !['Approved', 'Rejected'].includes(String(v.decision)) || !uuid(v.actorId) || !text(v.activeRole, 100) || !uuid(v.requestId) || !text(v.operationId) || !text(v.reason, 1000) || !state(v.outcome) || v.outcome.sequence !== v.sequence || !instant(v.createdAt))
     return invalid(); return v as WorkDecisionReceipt; };
 export const decodeWorkApprovalInstance = (v: unknown, id?: string): WorkApprovalInstance => {
-    if (!object(v) || !keys(v, ['id', 'timesheetId', 'submissionId', 'submissionSequence', 'sourceToken', 'requesterUserId', 'worker', 'createdAt', 'policy', 'state', 'transitions', 'notificationFailures', 'source',...(Object.hasOwn(v,'stageReminders')?['stageReminders']:[]),...(Object.hasOwn(v,'overdueDeliveries')?['overdueDeliveries']:[])]) || !uuid(v.id) || id !== undefined && v.id !== id || !uuid(v.timesheetId) || !text(v.submissionId) || !integer(v.submissionSequence, 1) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !object(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || !text(v.worker.id) || !text(v.worker.code) || !text(v.worker.name, 2000) || !instant(v.createdAt) || !object(v.policy) || !keys(v.policy, ['id', 'sequence', 'effectiveFrom', 'stages']) || !uuid(v.policy.id) || !integer(v.policy.sequence, 1) || !validCapabilityDate(v.policy.effectiveFrom) || !stages(v.policy.stages) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !state(v.state) || !Array.isArray(v.notificationFailures) || v.notificationFailures.length > 10)
+    if (!object(v) || !keys(v, ['id', 'timesheetId', 'submissionId', 'submissionSequence', 'sourceToken', 'requesterUserId', 'worker', 'createdAt', 'policy', 'state', 'transitions', 'notificationFailures', 'source',...(Object.hasOwn(v,'delegations')?['delegations']:[]),...(Object.hasOwn(v,'stageReminders')?['stageReminders']:[]),...(Object.hasOwn(v,'overdueDeliveries')?['overdueDeliveries']:[])]) || !uuid(v.id) || id !== undefined && v.id !== id || !uuid(v.timesheetId) || !text(v.submissionId) || !integer(v.submissionSequence, 1) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !object(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || !text(v.worker.id) || !text(v.worker.code) || !text(v.worker.name, 2000) || !instant(v.createdAt) || !object(v.policy) || !keys(v.policy, ['id', 'sequence', 'effectiveFrom', 'stages']) || !uuid(v.policy.id) || !integer(v.policy.sequence, 1) || !validCapabilityDate(v.policy.effectiveFrom) || !stages(v.policy.stages) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !state(v.state) || !Array.isArray(v.notificationFailures) || v.notificationFailures.length > 10)
         return invalid();
     if (v.stageReminders!==undefined && (!Array.isArray(v.stageReminders) || v.stageReminders.length>10 ||
         v.stageReminders.some(x=>!object(x) || !keys(x,['stage','deliveredAt','readAt']) || !integer(x.stage,0,9) ||
@@ -241,13 +244,14 @@ export const decodeWorkApprovalInstance = (v: unknown, id?: string): WorkApprova
         if (new Set(s.entries.map(e => e.id)).size !== s.entries.length || sumHours(s.entries.map(e => e.hoursExact)) !== s.totalHoursExact || sumHours(s.entries.filter(e => e.billable).map(e => e.hoursExact)) !== s.billableHoursExact)
             return invalid();
     }
+    if(!validInstanceDelegations(v,v.policy.stages as WorkStage[]))return invalid();
     const row = v as unknown as WorkApprovalInstance, receipts = row.transitions.map(t => decodeWorkDecision(t, row.id));
     try {
         const actual = approvalState(row.policy.stages, receipts);
         if (!sameState(actual, row.state))
             return invalid();
         for (const [t, i] of receipts.map((t, i) => [t, i] as const)) {
-            if (t.actorId !== row.policy.stages[t.stage].userId || t.activeRole !== row.policy.stages[t.stage].role || t.actorId === row.requesterUserId || !sameState(t.outcome, approvalState(row.policy.stages, receipts.slice(0, i + 1))))
+            if (!validStageReceipt(row.policy.stages,row.delegations,t) || t.actorId === row.requesterUserId || !sameState(t.outcome, approvalState(row.policy.stages, receipts.slice(0, i + 1))))
                 return invalid();
         }
     }
@@ -279,6 +283,7 @@ const notification = (v: unknown): CanonicalWorkNotice => {
 const request = async (method: 'GET' | 'POST', tail: string, c: WorkApprovalContext | null, body?: Record<string, unknown>) => { const captured = owner(c), expected = await ownerKey(captured); owner(captured); const raw = await api.requestWithContext<unknown>(method, '/api/v1/work-approvals' + tail, body ? { ...body, expectedOwnerKey: expected } : undefined, captured); owner(captured); if (!object(raw) || raw.contractVersion !== WORK_APPROVAL_VERSION || raw.organizationId !== captured.scope.organizationId || raw.legalEntityId !== captured.scope.legalEntityId || raw.ownerKey !== expected || !uuid(raw.actorUserId) || captured.actorId !== undefined && raw.actorUserId !== captured.actorId)
     return invalid(); captured.actorId = raw.actorUserId; return raw; };
 export const workApprovals = {
+    delegations:createCanonicalDelegationClient(request),
     reversalReview:reversalDecisionClient(request),
     leave:createLeaveApprovalClient(request),
     assignments:createAssignmentApprovalClient(request),
@@ -330,7 +335,7 @@ export const workApprovals = {
         return invalid(); const r = await request('GET', '/instances/' + encodeURIComponent(id), ctx); const decoded = decodeWorkApprovalInstance(r.instance, id); if (!decoded.source)
         return invalid(); return { instance: decoded, actorUserId: r.actorUserId as string, ownerKey: r.ownerKey as string }; },
     decide: async (page: WorkApprovalPage, decision: 'Approved' | 'Rejected', reason: string, requestId: string, c: WorkApprovalContext | null) => { const ctx = owner(c), v = page.instance; if (ctx.mode !== 'decide' || v.state.status !== 'Pending' || !uuid(requestId) || !text(reason.trim(), 1000) || page.ownerKey !== await ownerKey(ctx))
-        return invalid(); const r = await request('POST', '/instances/' + encodeURIComponent(v.id) + '/decisions', ctx, { expectedSourceToken: v.sourceToken, expectedSequence: v.state.sequence, requestId, decision, reason }), receipt = decodeWorkDecision(r.receipt, v.id); if (typeof r.replayed !== 'boolean' || r.sourceToken !== v.sourceToken || r.actorUserId !== page.actorUserId || receipt.actorId !== page.actorUserId || receipt.activeRole !== ctx.activeRole || receipt.requestId !== requestId || receipt.decision !== decision || receipt.reason !== reason.trim() || receipt.sequence !== v.state.sequence + 1 || receipt.stage !== v.state.currentStage || !sameState(receipt.outcome, approvalState(v.policy.stages, [...v.transitions, receipt])))
+        return invalid(); const r = await request('POST', '/instances/' + encodeURIComponent(v.id) + '/decisions', ctx, { expectedSourceToken: v.sourceToken, expectedSequence: v.state.sequence, requestId, decision, reason }), receipt = decodeWorkDecision(r.receipt, v.id); if (typeof r.replayed !== 'boolean' || r.sourceToken !== v.sourceToken || r.actorUserId !== page.actorUserId || receipt.actorId !== page.actorUserId || receipt.activeRole !== ctx.activeRole || receipt.requestId !== requestId || receipt.decision !== decision || receipt.reason !== reason.trim() || receipt.sequence !== v.state.sequence + 1 || receipt.stage !== v.state.currentStage || !validStageReceipt(v.policy.stages,v.delegations,receipt) || !sameState(receipt.outcome, approvalState(v.policy.stages, [...v.transitions, receipt])))
         return invalid(); return { receipt, replayed: r.replayed as boolean, sourceToken: r.sourceToken as string }; },
     inbox: async (after: string | null, c: WorkApprovalContext | null) => { const ctx = owner(c); if (ctx.mode !== 'inbox' || after !== null && !uuid(after))
         return invalid(); const r = await request('GET', '/inbox' + (after ? '?after=' + after : ''), ctx); if (!Array.isArray(r.notifications) || r.notifications.length > 20)

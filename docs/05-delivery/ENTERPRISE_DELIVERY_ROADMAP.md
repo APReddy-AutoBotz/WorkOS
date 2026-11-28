@@ -1,5 +1,7 @@
 # Enterprise delivery and integration roadmap
 
+WOS-APR-004 is in progress in [PR #413](https://github.com/APReddy-AutoBotz/WorkOS/pull/413). Migration 136 records prospective grants, revocations, stage bindings and the actor who used each binding. The local browser journey verified adoption, reviewed batch decisions across all four approval types, recovery after a lost acknowledgement, inbox delivery, retained CSV evidence and revocation. The database journeys check current reminder recipients and exercise the overdue worker with separate, overlapping and revoked delegate assignments. Full hosted checks and review remain open.
+
 WOS-03 deployment settings saves now serialize the audit before-image, update and response. The permission registry also serializes concurrent first-time edits to the same role and permission, so both audit records retain the committed predecessor. Regression coverage includes competing administrators’ saves and rollback when audit persistence fails.
 
 WOS-04 employee self-service now connects selected-period draft and rejection actions to the worker’s saved timesheet. The governed period calculation supplies employee utilization, and the employee browser journey verifies the correction path across approval states.
