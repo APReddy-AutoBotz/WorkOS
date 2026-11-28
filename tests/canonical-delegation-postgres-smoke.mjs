@@ -14,6 +14,12 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  await withCommercialApi({enableLeave:true,databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s)},async({request})=>{
   const inputs=await prepareDelegationInputs(request,fx),old=(await submitStagedWork(request,ids.legacyImport,fx.today)).instance;
   const definition=delegationDefinition(fx),key=randomUUID(),adopted=ok(await adoptDelegation(request,ids.manager,definition,key),201).delegation,replay=ok(await adoptDelegation(request,ids.manager,definition,key));assert.deepEqual(replay.delegation,adopted);assert(replay.replayed);
+  for(const field of ['delegateUserId','role','clockBasis','cohort','startsAt','endsAt']){
+   const result=await pool.query(`select canonical_delegation_valid(jsonb_populate_record(d,jsonb_build_object(
+    'definition',jsonb_set(d.definition,array[$2::text],'null'::jsonb)))) as valid
+    from canonical_delegations d where d.id=$1`,[adopted.id,field]);
+   assert.equal(result.rows[0].valid,false,field);
+  }
   assert.equal((await adoptDelegation(request,ids.manager,{...definition,workerIds:[f.ownerId]},key)).status,409);
   assert.equal((await adoptDelegation(request,ids.manager,{...definition,delegateUserId:ids.second.id})).status,409);
   for(const change of [{delegateUserId:ids.manager.id},{role:'TeamLead'},{clockBasis:'Local'},{cohort:'ExistingInstances'}])assert([400,422].includes((await adoptDelegation(request,ids.manager,{...definition,...change})).status));

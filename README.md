@@ -1,6 +1,6 @@
 # WorkOS
 
-Named-stage approval delegation is in development in [draft PR #413](https://github.com/APReddy-AutoBotz/WorkOS/pull/413). The draft covers time-limited delegation for new work, assignment and leave approval instances.
+In the Approvals workspace, a named approver can select a delegate, worker scope, approval types and UTC dates. The rule applies to new approval instances created during that window. The named approver can still act. Each delegated decision records the actual actor and the grant used. That history remains available after revocation. [Implementation and release checks](https://github.com/APReddy-AutoBotz/WorkOS/pull/413)
 
 For a fixed-fee engagement, finance can enter a non-labor project cost and a second user can approve it. The live gross margin includes approved costs through the selected date. A previously saved forecast preserves the costs and margin recorded at the time.
 

@@ -31,10 +31,18 @@ declare u record;e employees;keys text[];k text;begin
 end $$;
 create function canonical_delegation_valid(d canonical_delegations)returns boolean language plpgsql stable as $$declare x jsonb;worker text;kind text;begin
  x=d.definition;
+ if exists (select from unnest(array['delegateUserId','role','clockBasis','cohort','startsAt','endsAt']) field
+            where jsonb_typeof(x->field) is distinct from 'string')
+ then return false; end if;
  if jsonb_typeof(x)is distinct from'object'or(select count(*)from jsonb_object_keys(x))<>8 or not(x?&array['delegateUserId','role','workerIds','sourceKinds','clockBasis','cohort','startsAt','endsAt'])or x->>'clockBasis'<>'UTC'or x->>'cohort'<>'NewInstances'or x->>'delegateUserId'=d.delegator_user_id::text or(x->>'delegateUserId')!~'^[a-f0-9-]{36}$'or length(x->>'role')not between 1 and 100 or jsonb_typeof(x->'workerIds')is distinct from'array'or jsonb_array_length(x->'workerIds')not between 1 and 200 or jsonb_typeof(x->'sourceKinds')is distinct from'array'or jsonb_array_length(x->'sourceKinds')not between 1 and 4 or(x->>'startsAt')!~'^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$'or(x->>'endsAt')!~'^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$'or(x->>'startsAt')::timestamptz>=(x->>'endsAt')::timestamptz then return false;end if;
  if(select count(distinct v)from jsonb_array_elements_text(x->'workerIds')v)<>jsonb_array_length(x->'workerIds')or(select count(distinct v)from jsonb_array_elements_text(x->'sourceKinds')v)<>jsonb_array_length(x->'sourceKinds')then return false;end if;
  for kind in select jsonb_array_elements_text(x->'sourceKinds')loop if kind not in('Creation','Leave','Material','Work')then return false;end if;
- for worker in select jsonb_array_elements_text(x->'workerIds')loop if not canonical_delegation_account(d.delegator_user_id,x->>'role',d.organization_id,d.legal_entity_id,worker,kind)or not canonical_delegation_account((x->>'delegateUserId')::uuid,x->>'role',d.organization_id,d.legal_entity_id,worker,kind)then return false;end if;end loop;end loop;return true;
+ for worker in select jsonb_array_elements_text(x->'workerIds') loop
+  if canonical_delegation_account(d.delegator_user_id,x->>'role',d.organization_id,d.legal_entity_id,worker,kind) is not true
+    or canonical_delegation_account((x->>'delegateUserId')::uuid,x->>'role',d.organization_id,d.legal_entity_id,worker,kind) is not true
+  then return false; end if;
+ end loop; end loop;
+ return true;
  exception when others then return false;
 end $$;
 create function guard_canonical_delegation()returns trigger language plpgsql as $$declare ctx jsonb;d canonical_delegations;s record;begin
@@ -66,7 +74,7 @@ create trigger retained_work_delegation after insert on work_approval_instances 
 create trigger retained_assignment_delegation after insert on assignment_approval_instances for each row execute function bind_canonical_delegation();
 create trigger retained_leave_delegation after insert on leave_approval_instances for each row execute function bind_canonical_delegation();
 create function canonical_delegation_instance_account(uid uuid,role_arg text,k text,iid uuid)returns boolean language plpgsql stable as $$declare s record;u users;project text;sheet uuid;cd text;begin
- select * into s from canonical_delegation_source(k,iid);if s.org is null or not canonical_delegation_account(uid,role_arg,s.org,s.legal,s.worker,k)then return false;end if;select * into u from users where id=uid;
+ select * into s from canonical_delegation_source(k,iid);if s.org is null or canonical_delegation_account(uid,role_arg,s.org,s.legal,s.worker,k) is not true then return false;end if;select * into u from users where id=uid;
  if k='Work'and role_arg='ProjectManager'then select timesheet_id into sheet from work_approval_instances where id=iid;return exists(select 1 from timesheet_entries e join projects p on p.id=e.project_id where e.timesheet_id=sheet and p.organization_id=s.org and p.legal_entity_id=s.legal and p.manager_id in(u.employee_record_id,u.employee_id));end if;
  if k not in('Material','Creation')then return true;end if;select project_id into project from assignment_approval_instances where id=iid;if not exists(select 1 from projects where id=project and organization_id=s.org and legal_entity_id=s.legal)then return false;end if;
  if role_arg in('Admin','HR')then return true;elsif role_arg in('Employee','TeamLead')then return exists(select 1 from project_allocations where project_id=project and employee_id in(u.employee_record_id,u.employee_id));elsif role_arg='ProjectManager'then return exists(select 1 from projects where id=project and manager_id in(u.employee_record_id,u.employee_id));elsif role_arg='CountryDirector'then select a.primary_country_director_id into cd from employees a where a.id=u.employee_record_id and(lower(a.designation)in('country director','regional lead','director')or lower(a.department)='regional leadership');return exists(select 1 from project_allocations a join employees e on e.id=a.employee_id left join employee_country_director_map m on m.employee_id=e.id where a.project_id=project and(e.primary_country_director_id=cd or m.country_director_id=cd));end if;return false;

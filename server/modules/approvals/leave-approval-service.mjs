@@ -69,9 +69,11 @@ export const decideLeaveApproval=async(c,req,id,input,o)=>{
  const v=await scopedLeaveApproval(c,req,id,o),fingerprint=capacityHash({instanceId:id,actorId:req.user.sub,activeRole:req.user.activeRole,...input}),prior=(await c.query('select * from leave_approval_transitions where instance_id=$1 and request_id=$2',[id,input.requestId])).rows[0];
  await delegationReceiptProof(c,'Leave',prior?[prior]:[]);if(prior){if(prior.request_fingerprint!==fingerprint)fail('LEAVE_APPROVAL_REQUEST_CONFLICT','This decision identity has different content.');return{receipt:leaveApprovalReceipt(prior),sourceToken:v.i.source_token,replayed:true};}
  if(!v.current||v.state.status!=='Pending'||v.state.sequence!==input.expectedSequence||v.i.source_token!==input.expectedSourceToken)fail('LEAVE_APPROVAL_STALE','Source revision, status or current stage changed. Inspect current leave history.');
- const stage=v.p.definition.stages[v.state.currentStage];await assertCanonicalActor(c,req,'Leave',v,v.p.definition.stages,v.a,leaveApprovalActor,o);await leaveApprovalActor(c,req,stage,v.a,o);if(req.user.sub===v.i.requester_user_id||[req.user.employeeRecordId,req.user.employeeId].includes(v.i.employee_id))fail('LEAVE_APPROVAL_SELF_DECISION','Requester and affected worker cannot decide.',403);
+ const namedActor=await assertCanonicalActor(c,req,'Leave',v,v.p.definition.stages,v.a,leaveApprovalActor,o);
+ if(req.user.sub===v.i.requester_user_id||[req.user.employeeRecordId,req.user.employeeId].includes(v.i.employee_id))fail('LEAVE_APPROVAL_SELF_DECISION','Requester and affected worker cannot decide.',403);
  const a=await leaveApprovalSource(c,req,v.i.request_id,o,true);if(a.worker_status!=='Active'||capacityCanonical(a.snapshot)!==capacityCanonical(v.i.source_snapshot))fail('LEAVE_APPROVAL_SOURCE_CHANGED','Current leave source or active worker changed.');
  await assertIndependentLeaveDecision(c,req,a,o.buildEmployeeScopeWhere);
+ if(namedActor.user.sub!==req.user.sub)await assertIndependentLeaveDecision(c,namedActor,a,o.buildEmployeeScopeWhere);
  const sequence=v.state.sequence+1,next=approvalState(v.p.definition.stages,[...v.transitions,{sequence,stage:v.state.currentStage,decision:input.decision}]);
  if(next.status==='Approved'){
   if(!a.calendar_evidence_id)fail('LEAVE_APPROVAL_CALENDAR_UNAVAILABLE','Retained explicit calendar authority is unavailable. Establish the calendar and edit/requote this Submitted request before final approval.',422);

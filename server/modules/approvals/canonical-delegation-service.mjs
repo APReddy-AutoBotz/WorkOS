@@ -26,11 +26,12 @@ const lockCanonicalActors=async(c,req,ids,role)=>{
 export const assertCanonicalActor=async(c,req,kind,v,stages,source,actorValidator,o)=>{
  const stage=stages[v.state.currentStage];if(!stage||stage.role!==req.user.activeRole)fail('Use the configured held role for the current stage.',403);
  await lockCanonicalActors(c,req,[stage.userId,req.user.sub],stage.role);
- await actorValidator(c,req,stage,source,o);
- if(stage.userId===req.user.sub)return;
+ const namedActor=await actorValidator(c,req,stage,source,o);
+ if(stage.userId===req.user.sub)return namedActor;
  const b=(v.delegations??[]).find(b=>b.stage===v.state.currentStage&&b.delegateUserId===req.user.sub&&b.eligible);
  if(!b)fail('No current prospective delegation covers this actor and stage.',403);
  await actorValidator(c,req,{userId:req.user.sub,role:stage.role},source,o);
+ return namedActor;
 };
 export const canonicalStageRecipients=async(c,req,v,stages,stage,source,actorValidator,o)=>{
  await lockCanonicalActors(c,req,[stages[stage].userId,...(v.delegations??[]).filter(b=>b.stage===stage&&b.eligible).map(b=>b.delegateUserId)],stages[stage].role);
