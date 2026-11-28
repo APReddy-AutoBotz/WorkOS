@@ -1,3 +1,5 @@
+import {setTimeout as delay} from 'node:timers/promises';
+import {collectAssignmentLeaveBreaches,dispatchAssignmentLeaveOverdue} from '../server/modules/approvals/assignment-leave-escalation.mjs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { startFixtureServer } from './support/compiled-fixture-server.mjs';
@@ -34,8 +36,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       const config = region(a, 'Material assignment approval policy'); await config.getByRole('button', { name: 'Load material assignment configuration', exact: true }).click();
       await config.getByLabel('Material policy workers', { exact: true }).selectOption(f.ownerId); await config.getByLabel('Material policy effective date', { exact: true }).fill(today); await config.getByLabel('Fields requiring material approval', { exact: true }).selectOption('quantityExact'); await config.getByLabel('Require creation approval', { exact: true }).selectOption('enabled');
       await config.getByLabel('Assignment stage 1 account', { exact: true }).selectOption(ids.manager.id); await config.getByLabel('Assignment stage 1 role', { exact: true }).selectOption('Admin'); await config.getByRole('button', { name: 'Add assignment approval stage', exact: true }).click(); await config.getByLabel('Assignment stage 2 account', { exact: true }).selectOption(ids.second.id); await config.getByLabel('Assignment stage 2 role', { exact: true }).selectOption('Admin'); await config.getByLabel('Assignment template locale', { exact: true }).fill('en-GB');
-      await config.getByLabel('Time allowed per stage (minutes, optional)',{exact:true}).fill('15');
-      await config.getByLabel('Remind approvers before the deadline (minutes, optional)',{exact:true}).fill('5');
+      await config.getByLabel('Time allowed per stage (minutes, optional)',{exact:true}).fill('2');
+      await config.getByLabel('Remind approvers before the deadline (minutes, optional)',{exact:true}).fill('1');
       await config.getByLabel('Escalation recipient (optional)',{exact:true}).selectOption(ids.manager.id);
       for (const t of assignmentApprovalDefinition(ids).templates) { await config.getByLabel('Assignment ' + t.key + ' title', { exact: true }).fill(t.subject); await config.getByLabel('Assignment ' + t.key + ' body', { exact: true }).fill(t.body); }
       await config.getByLabel('Assignment informational completion', { exact: true }).selectOption('enabled'); await config.getByLabel('Material policy reason', { exact: true }).fill('Synthetic explicit creation approval adoption'); let pending = reply(a, base + '/policies', 'POST'); await config.getByRole('button', { name: 'Record material assignment policy', exact: true }).click(); const adopted = await result(pending, 201); assert.equal(adopted.policy.definition.creationRequired, true);
@@ -50,7 +52,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       await r.getByRole('button', { name: 'Close allocation form', exact: true }).click();
       const absent = async () => { assert.equal((await pool.query('select count(*)::int n from project_allocations where id=$1', [instance.assignmentId])).rows[0].n, 0); assert.equal((await pool.query('select count(*)::int n from assignment_versions where assignment_id=$1', [instance.assignmentId])).rows[0].n, 0); assert.equal((await calculate()).result.sourceToken, initial.result.sourceToken); };
       await absent();
-      const decide = async page => { await nav(page, 'Creation approvals'); const q = region(page, 'Governed assignment creation approvals'); await q.getByLabel('Creation approval reference', { exact: true }).fill(instance.id); const loaded = reply(page, base + '/creation-instances/' + instance.id); await q.getByRole('button', { name: 'Load current creation approval', exact: true }).click(); const inspected = await result(loaded); await q.getByText(inspected.instance.stageDeadline.dueAt,{exact:true}).first().waitFor(); await q.getByLabel('Creation decision reason', { exact: true }).fill('Synthetic named creation stage'); const pending = reply(page, base + '/instances/' + instance.id + '/decisions', 'POST'); await q.getByRole('button', { name: 'Approve assignment creation stage', exact: true }).click(); const out = await result(pending, 201); await q.getByRole('article', { name: 'Assignment creation decision receipt', exact: true }).waitFor(); return out; };
+      await delay(Math.max(0,Date.parse(instance.stageDeadline.dueAt)-Date.now()+50));
+      await collectAssignmentLeaveBreaches(pool);
+      await dispatchAssignmentLeaveOverdue(pool);
+      await nav(a,'Creation notifications');
+      const lateInbox=region(a,'Canonical work approval notifications');
+      await lateInbox.getByRole('button',{name:'Load my governed notifications',exact:true}).click();
+      const lateNotice=lateInbox.getByRole('article').filter({hasText:'approval.overdue_or_escalated'});
+      await lateNotice.getByRole('heading',{name:'Approval stage overdue',exact:true}).waitFor();
+      await lateNotice.getByRole('button',{name:/Mark governed notification read/}).click();
+      await lateNotice.getByText(/In-app Required · Read /).waitFor();
+      const decide = async page => { await nav(page, 'Creation approvals'); const q = region(page, 'Governed assignment creation approvals'); await q.getByLabel('Creation approval reference', { exact: true }).fill(instance.id); const loaded = reply(page, base + '/creation-instances/' + instance.id); await q.getByRole('button', { name: 'Load current creation approval', exact: true }).click(); const inspected = await result(loaded); await q.getByRole('region',{name:'Overdue delivery history'}).getByText(/Delivered · Attempts 1/).waitFor(); await q.getByText(inspected.instance.stageDeadline.dueAt,{exact:true}).first().waitFor(); await q.getByLabel('Creation decision reason', { exact: true }).fill('Synthetic named creation stage'); const pending = reply(page, base + '/instances/' + instance.id + '/decisions', 'POST'); await q.getByRole('button', { name: 'Approve assignment creation stage', exact: true }).click(); const out = await result(pending, 201); await q.getByRole('article', { name: 'Assignment creation decision receipt', exact: true }).waitFor(); return out; };
       assert.equal((await decide(a)).receipt.outcome.status, 'Pending'); await absent(); assert.equal((await decide(b)).receipt.outcome.status, 'Approved');
       const versions = (await pool.query('select * from assignment_versions where assignment_id=$1', [instance.assignmentId])).rows; assert.equal(versions.length, 1); assert.equal(versions[0].sequence, 1); assert.equal(versions[0].change_kind, 'Created');
       const native = await calculate(); assert.deepEqual(native.result.points.map(p => p.declaredPercentageExact), ['20', '20', '20', '20']); assert.notEqual(native.result.sourceToken, initial.result.sourceToken); assert.equal(native.result.assignments[0].versionId, versions[0].id);

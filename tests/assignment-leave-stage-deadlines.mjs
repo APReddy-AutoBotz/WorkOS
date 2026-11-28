@@ -175,6 +175,11 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(named.find(n=>n.kind==='leave-approval').reasons,['current_stage_approver','escalation_target']);
     for(const notice of named){
       assert.equal(notice.policyClass,'CONTROL_MANDATORY');
+      const origin=notice.kind==='leave-approval'?'leave-approval':'assignment-approval';
+      assert.equal(notice.eventId,origin+'/'+notice.instanceId+'/0/approval.overdue_or_escalated/deadline');
+      const foreignRead=await request(WORK_APPROVAL_BASE+'/inbox/'+notice.id+'/read',{method:'POST',identity:ids.second,
+        body:{expectedOwnerKey:otherInbox.ownerKey}});
+      assert.equal(foreignRead.status,404);
       const read=()=>request(WORK_APPROVAL_BASE+'/inbox/'+notice.id+'/read',{method:'POST',identity:ids.manager,body:{expectedOwnerKey:managerInbox.ownerKey}});
       const first=delegationOk(await read(),200).notification;
       assert.ok(first.readAt);
