@@ -1,6 +1,6 @@
 # WorkOS
 
-When two administrators save deployment settings at the same time, each receives the values committed by their save. The audit history records the settings in effect immediately before each change.
+When two administrators save deployment settings at the same time, each receives the values committed by their save. The audit history records the settings in effect immediately before each change. If both administrators save the same new catalog item or country director, the history identifies who created it and who updated it.
 
 In the employee workspace, load a period to continue a saved draft or correct a rejected timesheet. Each action opens that worker’s saved week in work capture.
 

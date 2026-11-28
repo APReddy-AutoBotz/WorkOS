@@ -4683,6 +4683,7 @@ app.post('/api/catalogs/:catalogType', requireDatabase, requireAuth, requirePerm
   const id = body.data.id || `${catalogType.data.slice(0, -1)}-${crypto.randomUUID()}`;
   try {
     await client.query('begin');
+    await client.query("select pg_advisory_xact_lock(hashtextextended('catalog-item:' || $1, 0))", [id]);
     const previous = (await client.query('select * from catalog_items where id = $1 for update', [id])).rows[0];
     const result = await client.query(`
       insert into catalog_items (id, catalog_type, name, active)
@@ -4788,6 +4789,7 @@ app.post('/api/country-directors', requireDatabase, requireAuth, requirePermissi
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await client.query("select pg_advisory_xact_lock(hashtextextended('country-director:' || $1, 0))", [parsed.data.id]);
     const previous = (await client.query('select * from country_directors where id = $1 for update', [parsed.data.id])).rows[0];
     const result = await client.query(`
       insert into country_directors (id, name, region)
