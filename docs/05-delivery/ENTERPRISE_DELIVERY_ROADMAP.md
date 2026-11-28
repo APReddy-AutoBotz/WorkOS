@@ -1,5 +1,7 @@
 # Enterprise delivery and integration roadmap
 
+WOS-04 employee self-service now connects selected-period draft and rejection actions to the worker’s saved timesheet. The governed period calculation supplies employee utilization, and the employee browser journey verifies the correction path across approval states.
+
 WOS-04 utilization coverage is visible in the overview. Current exceptions and the current average use workers with a qualifying approved week and positive configured weekly hours.
 
 WOS-04 historical utilization uses the selected report date to bound approved work in planned, actual, forecast and resource planning reports. The database regression covers dates before, on and between approved week endings.

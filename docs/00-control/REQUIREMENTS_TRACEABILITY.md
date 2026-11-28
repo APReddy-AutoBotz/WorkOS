@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-WKF-007. The [employee browser journey](../../tests/own-work-planning-journey-browser-smoke.mjs) opens a previous week directly from its draft and rejection actions, submits the correction and checks that the correction action disappears after approval.
+
 WOS-RPT-001/002. The [database regression](../../tests/native-forecast-postgres-smoke.mjs) covers missing, positive and zero approved actuals, and the [overview browser check](../../tests/utilization-reports-browser-smoke.mjs) verifies that workers missing approved evidence stay out of current exceptions.
 
 WOS-RPT-001/002. The [forecast database regression](../../tests/native-forecast-postgres-smoke.mjs) checks the approved-week cutoff across four report endpoints, including an intervening submitted week and a forecast horizon that extends past the cutoff.

@@ -1,5 +1,7 @@
 # Work Capture and Timesheet Specification
 
+Employee self-service links editable saved Friday weeks to work capture. The editor resolves the selected week against the current worker’s scoped timesheets. An unavailable saved week cannot initialize a new draft through that action.
+
 **Governing requirements:** WOS-CORE-003 through WOS-CORE-005; WOS-IAM-003, WOS-IAM-005, WOS-IAM-010; WOS-TIM-001 through WOS-TIM-012; WOS-WKF-005, WOS-WKF-007.
 
 ## Outcome

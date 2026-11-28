@@ -13,7 +13,8 @@ import {hydrateWorkCaptureGrid,parseCaptureHourInput,canonicalCaptureHourInput,c
 import type {TimesheetEntry,DuplicateEntryCheck,OvertimeWarning} from '../types';
 import {getOrganizationScope,getToken,ApiClientError,resetBackendCheck} from '../services/apiClient';
 import { Fragment, useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams, Navigate } from 'react-router-dom';
+import { validCapabilityDate } from '../../shared/workforce-capabilities.mjs';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
 import { NoticeBanner } from '../components/ui/NoticeBanner';
@@ -63,14 +64,23 @@ const currentOwner = () => {
 };
 
 export const MyTimesheet = () => {
-  const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
-  const owner = currentOwner();
-  const aligned = useRef(false);
-  return <Fragment key={`${owner}:${toIsoDate(currentWeek)}`}><TimesheetEditor aligned={aligned} owner={owner} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} /></Fragment>;
+  const [params] = useSearchParams();
+  const savedWeek = params.get('savedWeek');
+  if (savedWeek !== null && (!validCapabilityDate(savedWeek) || new Date(`${savedWeek}T00:00:00Z`).getUTCDay() !== 5)) {
+    return <p role="alert">Invalid saved timesheet week. <Link to="/timesheets">Open current week</Link></p>;
+  }
+  return <TimesheetWeek key={savedWeek ?? 'current'} savedWeek={savedWeek} />;
 };
 
-const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
-  aligned: {current: boolean}; owner: string; currentWeek: Date; setCurrentWeek: Dispatch<SetStateAction<Date>>;
+const TimesheetWeek = ({savedWeek}: {savedWeek: string | null}) => {
+  const [currentWeek, setCurrentWeek] = useState(() => getWeekStart(savedWeek ? new Date(`${savedWeek}T00:00:00Z`) : new Date()));
+  const owner = currentOwner();
+  const aligned = useRef(savedWeek !== null);
+  return <Fragment key={`${owner}:${toIsoDate(currentWeek)}`}><TimesheetEditor aligned={aligned} owner={owner} savedWeek={savedWeek} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} /></Fragment>;
+};
+
+const TimesheetEditor = ({owner, savedWeek, currentWeek, setCurrentWeek, aligned}: {
+  aligned: {current: boolean}; owner: string; savedWeek: string | null; currentWeek: Date; setCurrentWeek: Dispatch<SetStateAction<Date>>;
 }) => {
   const navigate = useNavigate();
   const user = authService.getCurrentUser();
@@ -152,6 +162,10 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
       setAssignedProjects(assigned);setModes(projection);setMode(previous=>previous&&projection.enabledModes.includes(previous)?previous:projection.enabledModes[0]||null);
       setDailyIndex(Math.max(0,Math.min(6,Math.floor((Date.parse(projection.serverDate+'T00:00:00Z')-Date.parse(gridStart+'T00:00:00Z'))/86400000))));
       const existing=timesheets.find(t=>t.employeeId===user.id&&t.weekEnding===weekEnding);
+      if (savedWeek === weekEnding && !existing) {
+        setNotice({type:'warning', message:'This saved timesheet is unavailable in your current workspace.'});
+        return;
+      }
       if(existing){
         const hydrated=hydrateWorkCaptureGrid(existing.entries,gridStart,7);setRows(hydrated.rows);setPreservedEntries(hydrated.preservedEntries);
         setStatus(existing.status);setWriteToken(existing.writeToken!);setWorkAssurance(existing.workAssurance);setDuplicateEntryCheck(existing.duplicateEntryCheck);setHistoryHeader(existing.id);setCaptureWarnings(existing.captureWarnings);setRejectionNote(existing.rejectionNote||existing.rejectionReason);
@@ -366,7 +380,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
     <div className="animate-in fade-in duration-500 pb-12">
       {loaded&&<WorkCaptureWarnings warnings={captureWarnings}/>}
       {loaded&&!saving&&!['Submitted','Approved'].includes(status)&&<SubmissionDeadlinePreview dates={[getWeekEnding(currentWeek),...preservedEntries.map(entry=>entry.date),...rows.flatMap(row=>row.hours.flatMap((_,index)=>captureCellPresent(row,index,hourDrafts)?[toIsoDate(shiftDate(currentWeek,index-2))]:[]))]}/>}
-      {loaded ? <WorkSubmissionAssurance assurance={workAssurance} status={status} entryCheck={duplicateEntryCheck} /> : <p role="status" className="text-sm text-slate-500">Loading current work assurance...</p>}
+      {loaded ? <WorkSubmissionAssurance assurance={workAssurance} status={status} entryCheck={duplicateEntryCheck} /> : !notice && <p role="status" className="text-sm text-slate-500">Loading current work assurance...</p>}
       {loaded&&historyHeader&&!saving&&<div key={`${historyHeader}:${writeToken}`}><WorkSubmissionHistory timesheetId={historyHeader}/></div>}
       <PageHeader
         title={user?.role === 'Admin' ? 'Admin Self-Log Test' : 'My Timesheet'}
