@@ -11,13 +11,16 @@ try {
   const rows = offsets.map((offset,index) => ({
     employeeId:String(index), employeeCode:'SYN-'+index, employeeName:'Synthetic resource '+index,
     department:'Planning', allocations:[], activeProjectCount:0, plannedUtilization:0,
-    availabilityHours:40, bench:true, underloaded:false, overloaded:false,
+    availabilityHours:index===0 ? null : index===1 ? 0 : 40, bench:true, underloaded:false, overloaded:false,
     rollOffDate:offset === null ? undefined : day(offset),
   }));
   await page.evaluate(report => window.showPlanningReport(report), {
-    asOfDate:day(0),rows,summary:{people:14,averagePlanned:0,averageAvailabilityAdjustedCapacity:100,
+    asOfDate:day(0),rows,summary:{people:14,averagePlanned:0,averageAvailabilityAdjustedCapacity:null,
       benchCount:14,overloadedCount:0,underloadedCount:0,rollOffSoonCount:11},
   });
+  await page.getByText('Unavailable',{exact:true}).waitFor();
+  await page.getByText('Annual hours unavailable',{exact:true}).waitFor();
+  await page.getByText('0h available in 2028',{exact:true}).waitFor();
   await page.getByPlaceholder('Search resource').fill('unmatched search');
   await page.getByRole('button',{name:/Roll-offs in 45 days/}).click();
   const names = page.getByRole('link',{name:/^Synthetic resource /});

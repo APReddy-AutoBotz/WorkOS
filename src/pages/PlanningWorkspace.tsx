@@ -117,7 +117,7 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-6">
         <Metric label="People" value={report.summary.people} sub="Planning population" icon={UsersRound} />
         <Metric label="Avg Planned" value={`${report.summary.averagePlanned}%`} sub="Allocation load" icon={Gauge} />
-        <Metric label="Avail Cap" value={`${report.summary.averageAvailabilityAdjustedCapacity}%`} sub="Leave adjusted" icon={ShieldCheck} />
+        <Metric label="Annual availability" value={report.summary.averageAvailabilityAdjustedCapacity === null ? 'Unavailable' : `${report.summary.averageAvailabilityAdjustedCapacity}%`} sub={`Share of scheduled hours in ${report.asOfDate.slice(0,4)}`} icon={ShieldCheck} />
         <Metric label="Bench" value={report.summary.benchCount} sub="Low load" icon={Layers3} />
         <Metric label="Overload" value={report.summary.overloadedCount} sub="Above threshold" icon={AlertTriangle} />
         <Metric label="Roll-off" value={report.summary.rollOffSoonCount} sub="Next 45 days" icon={CalendarClock} />
@@ -178,7 +178,7 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
                   <div>
                     <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
                       <span>{row.plannedUtilization}% planned</span>
-                      <span>{Math.round(row.availabilityHours)}h available</span>
+                      <span>{row.availabilityHours === null ? 'Annual hours unavailable' : `${row.availabilityHours}h available in ${report.asOfDate.slice(0,4)}`}</span>
                     </div>
                     <div className="mt-2 h-2 rounded-full bg-slate-100">
                       <div

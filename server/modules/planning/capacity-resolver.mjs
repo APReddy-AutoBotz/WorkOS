@@ -32,18 +32,21 @@ const absenceFraction=leave=>{
 const subtract=(a,b)=>{const scale=Math.max((a.split('.')[1]??'').length,(b.split('.')[1]??'').length);const n=v=>BigInt(v.replace('.',''))*10n**BigInt(scale-(v.split('.')[1]??'').length);const raw=(n(a)-n(b)).toString().padStart(scale+1,'0');return canonicalHours(scale?raw.slice(0,-scale)+'.'+raw.slice(-scale):raw);};
 export const calculateWorkerCapacity=(sources,startsOn,endsOn)=>{
  if(!validCapacityRange(startsOn,endsOn))throw new TypeError('Capacity range must contain at most366 valid business dates.');
- const days=[];
- for(let i=0;i<capacityDateCount(startsOn,endsOn);i++){
+ const days=[], profileValidity=new Map(), calendarValidity=new Map();
+ const dayCount=capacityDateCount(startsOn,endsOn);
+ for(let i=0;i<dayCount;i++){
   const date=shiftCapacityDate(startsOn,i),profile=applicableProfile(sources.profiles,date);
   if(sources.limitExceeded){days.push(emptyDay(date,null,'CAPACITY_SOURCE_LIMIT'));continue;}
   if(!profile){days.push(emptyDay(date,null,'CAPACITY_PROFILE_NOT_ADOPTED'));continue;}
-  if(!validCapacityProfile(profile.definition)){days.push(emptyDay(date,profile,'CAPACITY_PROFILE_INVALID'));continue;}
+  if(!profileValidity.has(profile))profileValidity.set(profile,validCapacityProfile(profile.definition));
+  if(!profileValidity.get(profile)){days.push(emptyDay(date,profile,'CAPACITY_PROFILE_INVALID'));continue;}
   const state=workerState(sources,date),baseRefs={profileId:profile.id,calendarId:null,workerHistoryId:state.historyId,holidaySourceCount:0,approvedAbsenceSourceCount:0};
   if(state.reason){days.push(emptyDay(date,profile,state.reason,baseRefs));continue;}
   if(state.inactive){days.push(knownDay(date,profile,'0','0','0','0',baseRefs,null,['WORKER_INACTIVE']));continue;}
   const picked=resolveCapacityCalendar(sources,profile,date);if(picked.reason){days.push(emptyDay(date,profile,picked.reason,baseRefs));continue;}
   const c=picked.calendar,weekday=new Date(date+'T00:00:00Z').getUTCDay(),scheduled=profile.definition.hoursByWeekdayExact[weekday],refs={...baseRefs,calendarId:c.id};
-  if(!validCapacityCalendar(c)){days.push(emptyDay(date,profile,'CALENDAR_INVALID',refs));continue;}
+  if(!calendarValidity.has(c))calendarValidity.set(c,validCapacityCalendar(c));
+  if(!calendarValidity.get(c)){days.push(emptyDay(date,profile,'CALENDAR_INVALID',refs));continue;}
   if((!c.workingDays.includes(weekday)&&compareHours(scheduled,'0')>0)||compareHours(scheduled,c.hoursPerDayExact)>0){days.push(emptyDay(date,profile,'CALENDAR_SCHEDULE_CONFLICT',refs));continue;}
   const holidays=sources.holidays.filter(h=>h.calendarId===c.id&&h.holidayDate===date&&active(date,h)),leaves=sources.approvedAbsences.filter(l=>l.startsOn<=date&&l.endsOn>=date);refs.holidaySourceCount=holidays.length;refs.approvedAbsenceSourceCount=leaves.length;
   if(holidays.length||scheduled==='0'){days.push(knownDay(date,profile,scheduled,holidays.length?scheduled:'0','0','0',refs,picked.tier,holidays.length?['HOLIDAY']:[]));continue;}

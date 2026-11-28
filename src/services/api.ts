@@ -2788,7 +2788,7 @@ const buildLocalWorkforceCommandCenter = async (): Promise<WorkforceCommandCente
   return {
     generatedAt: new Date().toISOString(),
     dataConfidenceScore: dataQuality.score,
-    leaveAdjustedAvailabilityHours: planning.rows.reduce((sum, row) => sum + row.availabilityHours, 0),
+    leaveAdjustedAvailabilityHours: planning.rows.some(row=>row.availabilityHours===null) ? null : planning.rows.reduce((sum, row) => sum + (row.availabilityHours ?? 0), 0),
     pendingApprovalLoad: sla.pendingCount,
     overdueApprovalLoad: sla.overdueCount,
     notificationDeliveryRisk: failedDeliveries,
