@@ -1,4 +1,4 @@
-import {validStageDeadline} from '../../shared/approval-stage-deadline.mjs';
+import {validStageDeadline,validStageDeliveries} from '../../shared/approval-stage-deadline.mjs';
 import {validInstanceDelegations,validStageReceipt,type DelegationBinding} from './canonicalDelegations';
 import { validAssignmentApprovalPolicy, assignmentApprovalIdentity, materialAssignmentFields } from '../../shared/assignment-approval.mjs';
 import { validPlannedAssignment } from '../../shared/assignment-version.mjs';
@@ -21,6 +21,7 @@ export type AssignmentApprovalDefinition = {
     completionInApp: boolean;
     stageDueMinutes?: number;
     reminderLeadMinutes?: number;
+    escalationUserId?: string;
     creationRequired?: boolean;
 };
 export type AssignmentApprovalPolicy = {
@@ -41,7 +42,7 @@ export type AssignmentApprovalSource = {
     policy: AssignmentApprovalPolicy | null;
 };
 export type AssignmentApprovalInstance = {
-    stageDeadline?: {stage:number;dueAt:string;observedAt:string;overdue:boolean}; delegations?: DelegationBinding[];
+    overdueDeliveries?: {stage:number;dueAt:string;attempts:number;status:'Pending'|'Delivered'|'RecipientUnavailable'}[]; stageDeadline?: {stage:number;dueAt:string;observedAt:string;overdue:boolean}; delegations?: DelegationBinding[];
     id: string;
     assignmentId: string;
     employeeId: string;
@@ -86,7 +87,7 @@ export type AssignmentApprovalNotice = {
     sourceToken: string;
     transitionSequence: number;
     eventKey: string;
-    policyClass: 'ACTION_REQUIRED' | 'INFORMATIONAL';
+    policyClass: 'ACTION_REQUIRED' | 'INFORMATIONAL' | 'CONTROL_MANDATORY';
     templateId: string;
     operationId: string;
     locale: string;
@@ -120,7 +121,7 @@ const receipt = (v: unknown, id: string): WorkDecisionReceipt => {
 export type AssignmentCreationInstance = Omit<AssignmentApprovalInstance, 'before'> & { operationKind: 'Creation'; before: null };
 export type AssignmentCreationPage = { instance: AssignmentCreationInstance; actorUserId: string; ownerKey: string };
 const decodeInstance = (v: unknown, id?: string, creation = false): AssignmentApprovalInstance | AssignmentCreationInstance => {
-    if (!obj(v) || !keys(v, ['id', 'assignmentId', 'employeeId', 'projectId', 'sourceRevision', 'sourceVersionId', 'sourceToken', 'requesterUserId', 'requestId', 'reason', 'createdAt', 'worker', 'policy', 'before', 'proposed', 'currentRevision', 'currentVersionId', 'state', 'transitions', 'notificationFailures', ...(Object.hasOwn(v,'stageDeadline')?['stageDeadline']:[]), ...(Object.hasOwn(v,'delegations') ? ['delegations'] : []), ...(creation ? ['operationKind'] : [])]) || (creation && v.operationKind !== 'Creation') || !uuid(v.id) || id !== undefined && v.id !== id || !text(v.assignmentId, 239) || creation && (!v.assignmentId.startsWith('a-') || !uuid(v.assignmentId.slice(2))) || !text(v.employeeId) || !text(v.projectId) || !hash(v.sourceRevision) || !nullableUuid(v.sourceVersionId) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !uuid(v.requestId) || !text(v.reason, 1000) || !instant(v.createdAt) || !obj(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || v.worker.id !== v.employeeId || !text(v.worker.code) || !text(v.worker.name, 2000) || (creation ? v.before !== null || v.sourceVersionId !== null : !snapshot(v.before, v.assignmentId) || v.before.employeeId !== v.employeeId || v.before.projectId !== v.projectId) || !validPlannedAssignment(v.proposed) || !hash(v.currentRevision) || !nullableUuid(v.currentVersionId) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !Array.isArray(v.notificationFailures))
+    if (!obj(v) || !keys(v, ['id', 'assignmentId', 'employeeId', 'projectId', 'sourceRevision', 'sourceVersionId', 'sourceToken', 'requesterUserId', 'requestId', 'reason', 'createdAt', 'worker', 'policy', 'before', 'proposed', 'currentRevision', 'currentVersionId', 'state', 'transitions', 'notificationFailures', ...(Object.hasOwn(v,'overdueDeliveries')?['overdueDeliveries']:[]), ...(Object.hasOwn(v,'stageDeadline')?['stageDeadline']:[]), ...(Object.hasOwn(v,'delegations') ? ['delegations'] : []), ...(creation ? ['operationKind'] : [])]) || (creation && v.operationKind !== 'Creation') || !uuid(v.id) || id !== undefined && v.id !== id || !text(v.assignmentId, 239) || creation && (!v.assignmentId.startsWith('a-') || !uuid(v.assignmentId.slice(2))) || !text(v.employeeId) || !text(v.projectId) || !hash(v.sourceRevision) || !nullableUuid(v.sourceVersionId) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !uuid(v.requestId) || !text(v.reason, 1000) || !instant(v.createdAt) || !obj(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || v.worker.id !== v.employeeId || !text(v.worker.code) || !text(v.worker.name, 2000) || (creation ? v.before !== null || v.sourceVersionId !== null : !snapshot(v.before, v.assignmentId) || v.before.employeeId !== v.employeeId || v.before.projectId !== v.projectId) || !validPlannedAssignment(v.proposed) || !hash(v.currentRevision) || !nullableUuid(v.currentVersionId) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !Array.isArray(v.notificationFailures))
         return fail();
     const p = decodeAssignmentApprovalPolicy(v.policy), r = v as unknown as AssignmentApprovalInstance;
     if (!p.definition.workerIds.includes(r.employeeId) || (creation ? p.definition.creationRequired !== true : !materialAssignmentFields(r.before, r.proposed, p.definition.materialFields).length))
@@ -145,13 +146,14 @@ const decodeInstance = (v: unknown, id?: string, creation = false): AssignmentAp
     if (r.notificationFailures.some(f => !keys(f, ['sequence', 'code', 'createdAt']) || f.code !== 'INFORMATIONAL_NOTIFICATION_UNAVAILABLE' || !instant(f.createdAt) || !r.transitions.some(t => t.sequence === f.sequence && t.outcome.status === 'Approved')) || new Set(r.notificationFailures.map(f => f.sequence)).size !== r.notificationFailures.length)
         return fail();
     const stage=r.state.status==='Pending' && r.sourceRevision===r.currentRevision && r.sourceVersionId===r.currentVersionId ? r.state.currentStage : null;
+    if (!validStageDeliveries(r.overdueDeliveries,p.definition.stageDueMinutes,p.definition.stages,r.createdAt,r.transitions)) return fail();
     if (!validStageDeadline(r.stageDeadline,p.definition.stageDueMinutes,stage,r.createdAt,r.transitions)) return fail();
     return r;
 };
 export const decodeAssignmentApprovalInstance = (v: unknown, id?: string): AssignmentApprovalInstance => decodeInstance(v, id) as AssignmentApprovalInstance;
 export const decodeAssignmentCreationInstance = (v: unknown, id?: string): AssignmentCreationInstance => decodeInstance(v, id, true) as AssignmentCreationInstance;
 export const decodeAssignmentApprovalNotice = (v: unknown): AssignmentApprovalNotice => {
-    if (!obj(v) || !keys(v, ['kind', 'id', 'eventId', 'instanceId', 'assignmentId', 'sourceToken', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'deliveryId', 'deliveryStatus', 'createdAt', 'readAt', ...(v.reminder===true && v.eventKey==='approval.action_required' ? ['reminder'] : [])]) || !['assignment-approval', 'assignment-creation-approval'].includes(String(v.kind)) || !uuid(v.id) || !uuid(v.instanceId) || !text(v.assignmentId, 239) || !hash(v.sourceToken) || !integer(v.transitionSequence, 0, 10) || !APPROVAL_EVENT_KEYS.includes(v.eventKey as string) || !text(v.operationId) || v.eventId !== assignmentApprovalIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !uuid(v.templateId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || !v.reasons.length || v.reasons.length > 3 || v.reasons.some(k => !['requester', 'affected_worker', 'current_stage_approver'].includes(k)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !uuid(v.deliveryId) || v.deliveryStatus !== 'Delivered' || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== 'ACTION_REQUIRED' || v.channelDecision !== 'Required'))
+    if (!obj(v) || !keys(v, ['kind', 'id', 'eventId', 'instanceId', 'assignmentId', 'sourceToken', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'deliveryId', 'deliveryStatus', 'createdAt', 'readAt', ...(v.reminder===true && v.eventKey==='approval.action_required' ? ['reminder'] : [])]) || !['assignment-approval', 'assignment-creation-approval'].includes(String(v.kind)) || !uuid(v.id) || !uuid(v.instanceId) || !text(v.assignmentId, 239) || !hash(v.sourceToken) || !integer(v.transitionSequence, 0, 10) || (!APPROVAL_EVENT_KEYS.includes(v.eventKey as string) && v.eventKey!=='approval.overdue_or_escalated') || !text(v.operationId) || v.eventId !== assignmentApprovalIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !uuid(v.templateId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || !v.reasons.length || v.reasons.length > 3 || v.reasons.some(k => !(v.eventKey==='approval.overdue_or_escalated'?['current_stage_approver','escalation_target']:['requester', 'affected_worker', 'current_stage_approver']).includes(k)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !uuid(v.deliveryId) || v.deliveryStatus !== 'Delivered' || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== (v.eventKey==='approval.overdue_or_escalated'?'CONTROL_MANDATORY':'ACTION_REQUIRED') || v.channelDecision !== 'Required'))
         return fail();
     return v as AssignmentApprovalNotice;
 };

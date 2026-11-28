@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {validLeaveApprovalPolicy} from '../../../shared/leave-approval.mjs';
-import {workApprovalScope as scope,workApprovalFail as fail} from './work-approval-service.mjs';
+import {workApprovalRecipientScope, workApprovalScope as scope,workApprovalFail as fail} from './work-approval-service.mjs';
 import {leaveDecisionPermissions,leaveApprovalActor,leavePolicyView,setLeaveApprovalContext,scopedLeaveApproval,leaveApprovalView,decideLeaveApproval} from './leave-approval-service.mjs';
 export const registerLeaveApprovalRoutes=(router,o,{config,handle,parse,uuid,hash,date,reason})=>{
  router.use('/leave',o.requireLeaveRelease);
@@ -17,6 +17,7 @@ export const registerLeaveApprovalRoutes=(router,o,{config,handle,parse,uuid,has
  router.post('/leave/policies',...config,admin,read,handle(true,async(c,req)=>{
   const d=parse(z.object({expectedOwnerKey:hash,expectedLatestId:uuid.nullable(),effectiveFrom:date,definition:z.unknown().refine(validLeaveApprovalPolicy),reason}).strict(),req.body),latest=(await c.query('select * from leave_approval_policies where organization_id=$1 and legal_entity_id=$2 order by sequence desc limit 1',scope(req))).rows[0];if((latest?.id??null)!==d.expectedLatestId)fail('LEAVE_APPROVAL_POLICY_STALE','Policy changed. Reload its latest version.');
   const params=[],where=o.buildEmployeeScopeWhere(req,params,'e');params.push(d.definition.workerIds);if((await c.query(`select e.id from employees e where ${where} and e.status='Active'and e.id=any($${params.length}::text[])`,params)).rowCount!==d.definition.workerIds.length)fail('LEAVE_APPROVAL_POLICY_SCOPE','Select only currently active scoped workers.',403);
+  if (d.definition.escalationUserId) await workApprovalRecipientScope(c,req,d.definition.escalationUserId,d.definition.workerIds,o,['leave.self_service']);
   for(const stage of d.definition.stages){await leaveApprovalActor(c,req,stage,null,o);for(const id of d.definition.workerIds){const actor=await leaveApprovalActor(c,req,stage,{employee_id:id,id:null},o);if([actor.user.employeeRecordId,actor.user.employeeId].includes(id))fail('LEAVE_APPROVAL_SELF_DECISION','Affected workers cannot be their own configured leave stages.',403);}}
   await setLeaveApprovalContext(c,req);const id=randomUUID(),saved=(await c.query('insert into leave_approval_policies(id,organization_id,legal_entity_id,sequence,effective_from,definition,actor_id,active_role,reason)values($1,$2,$3,$4,$5,$6,$7,$8,$9)returning *,effective_from::text',[id,...scope(req),(latest?.sequence??0)+1,d.effectiveFrom,d.definition,req.user.sub,req.user.activeRole,d.reason])).rows[0];
   for(const t of d.definition.templates)await c.query('insert into leave_approval_templates values($1,$2,$3,$4,$5,$6)',[randomUUID(),id,t.key,d.definition.locale,t.subject,t.body]);

@@ -81,11 +81,11 @@ export const scopedWorkApproval = async (c, req, id, o, lock = false, includeSou
 };
 export const workApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at, ...(t.delegation_binding_id ? {delegationBindingId:t.delegation_binding_id} : {}) });
 export const workApprovalView = v => ({ ...(v.delegations?.length ? {delegations:v.delegations} : {}), id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, ...(v.stageReminders.length ? {stageReminders:v.stageReminders} : {}), ...(v.overdueDeliveries.length ? {overdueDeliveries:v.overdueDeliveries} : {}), source: v.source });
-export const workApprovalRecipientScope = async (c,req,id,workerIds,o) => {
+export const workApprovalRecipientScope = async (c,req,id,workerIds,o,additionalPermissions=[]) => {
     const user=await workApprovalUser(c,req,id,o), remaining=new Set(workerIds);
     for (const role of user.roles) {
         const permissions=await o.getEffectivePermissionsForUser(c,user.id,role);
-        if (!['employees.view','notifications.view'].every(key=>permissions.includes(key))) continue;
+        if (!['employees.view','notifications.view',...additionalPermissions].every(key=>permissions.includes(key))) continue;
         const actor={...req,user:{sub:user.id,activeRole:role,employeeRecordId:user.employee_record_id,
             employeeId:user.employee_id,countryDirectorId:user.country_director_id,permissions}};
         const params=[[...remaining]], where=o.buildEmployeeScopeWhere(actor,params,'e');

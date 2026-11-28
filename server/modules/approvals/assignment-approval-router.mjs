@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { validAssignmentApprovalPolicy } from '../../../shared/assignment-approval.mjs';
 import { validPlannedAssignment } from '../../../shared/assignment-version.mjs';
-import { workApprovalScope as scope, workApprovalFail as fail } from './work-approval-service.mjs';
+import { workApprovalRecipientScope, workApprovalScope as scope, workApprovalFail as fail } from './work-approval-service.mjs';
 import { assignmentDecisionPermissions, assignmentApprovalSource, assignmentApprovalPolicy, assignmentApprovalActor, assignmentApprovalPolicyView, setAssignmentApprovalContext, scopedAssignmentApproval, assignmentApprovalView, proposeAssignmentApproval, decideAssignmentApproval, assignmentCreationSource, proposeAssignmentCreation } from './assignment-approval-service.mjs';
 export const registerAssignmentApprovalRoutes = (router, o, { config, handle, parse, uuid, hash, date, reason }) => {
     const read = ['projects.view', 'allocations.view'].map(o.requirePermission), manage = o.requirePermission('allocations.manage'), decide = assignmentDecisionPermissions.map(o.requirePermission);
@@ -34,7 +34,8 @@ export const registerAssignmentApprovalRoutes = (router, o, { config, handle, pa
         p.push(d.definition.workerIds);
         if ((await c.query(`select e.id from employees e where ${where} and e.status='Active'and e.id=any($${p.length}::text[])`, p)).rowCount !== d.definition.workerIds.length)
             fail('ASSIGNMENT_APPROVAL_POLICY_SCOPE', 'Every selected worker must be currently active and scoped.', 403);
-        for (const stage of d.definition.stages)
+        if (d.definition.escalationUserId) await workApprovalRecipientScope(c,req,d.definition.escalationUserId,d.definition.workerIds,o);
+  for (const stage of d.definition.stages)
             await assignmentApprovalActor(c, req, stage, null, o);
         await setAssignmentApprovalContext(c, req);
         const id = randomUUID(), saved = (await c.query('insert into assignment_approval_policies(id,organization_id,legal_entity_id,sequence,effective_from,definition,actor_id,active_role,reason)values($1,$2,$3,$4,$5,$6,$7,$8,$9)returning *,effective_from::text', [id, ...scope(req), (latest?.sequence ?? 0) + 1, d.effectiveFrom, d.definition, req.user.sub, req.user.activeRole, d.reason])).rows[0];
