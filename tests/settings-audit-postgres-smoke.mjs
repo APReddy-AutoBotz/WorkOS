@@ -101,7 +101,7 @@ await withCommercialDraftingApi(async ({pool, request, identities, actorId}) => 
   let permissionSaves;
   try {
     await gate.query('begin');
-    const lockKey='role-permission:Employee:'+permissionKey;
+    const lockKey='workos:permission-administration';
     await gate.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[lockKey]);
     permissionSaves=Promise.allSettled([identities.manager,otherAdmin].map((identity,i)=>
       request('/api/permissions/roles/Employee',{method:'PATCH',identity,body:{permissionKey,enabled:i===0}})));
@@ -150,6 +150,20 @@ await withCommercialDraftingApi(async ({pool, request, identities, actorId}) => 
   const history=await pool.query("select count(*)::int as count from permission_change_history where role_name='Employee' and permission_key=$1",[permissionKey]);
   assert.equal(history.rows[0].count,2);
   const grantPath='/api/permissions/user-grants';
+  const managerGrant = await request(grantPath, {
+    method: 'POST', body: {userId: otherAdmin.id, permissionKey: 'permissions.manage'},
+  });
+  assert.equal(managerGrant.status, 200);
+  for (const [path, options] of [
+    ['/api/permissions/config', {}],
+    ['/api/permissions/roles/Employee', {method:'PATCH', body:{permissionKey, enabled:true}}],
+    [grantPath, {method:'POST', body:{userId:identities.reader.id, permissionKey}}],
+    [grantPath+'/'+managerGrant.body.id, {method:'DELETE'}],
+  ]) {
+    const reply = await request(path, {...options, identity:identities.denied});
+    assert.equal(reply.status, 403, 'The non-admin active role cannot administer permissions');
+  }
+  assert.equal((await request(grantPath+'/'+managerGrant.body.id, {method:'DELETE'})).status, 200);
   const target=identities.reader.id;
   const grantToReader=identity=>request(grantPath,{method:'POST',identity,body:{userId:target,permissionKey}});
   assert.equal((await grantToReader(identities.reader)).status,403);
@@ -184,6 +198,30 @@ await withCommercialDraftingApi(async ({pool, request, identities, actorId}) => 
   assert.equal((await grantToReader(confirmer)).status,500);
   assert.equal((await pool.query('select id from user_permission_grants where user_id=$1 and permission_key=$2',[target,permissionKey])).rowCount,0);
   assert.equal((await pool.query("select id from permission_change_history where change_type='UserGrant' and user_id=$1 and permission_key=$2",[target,permissionKey])).rowCount,2);
+  const authorityGate = await pool.connect();
+  let queuedEdit;
+  try {
+    await authorityGate.query('begin');
+    await authorityGate.query("select pg_advisory_xact_lock(hashtextextended('workos:permission-administration',0))");
+    queuedEdit = grantToReader(otherAdmin);
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      const waiting = await authorityGate.query(`select 1 from pg_locks where not granted
+        and pg_backend_pid() = any(pg_blocking_pids(pid)) and locktype='advisory'`);
+      if (waiting.rowCount) break;
+      assert(Date.now() < deadline, 'The authenticated permission edit must reach the transaction gate');
+      await delay(25);
+    }
+    await authorityGate.query("delete from user_roles where user_id=$1 and role_id=(select id from roles where name='Admin')", [otherAdmin.id]);
+    await authorityGate.query('commit');
+  } finally {
+    await authorityGate.query('rollback');
+    authorityGate.release();
+  }
+  const deniedEdit = await queuedEdit;
+  assert.equal(deniedEdit.status, 403);
+  assert.equal(deniedEdit.body.code, 'IDENTITY_ADMINISTRATION_REQUIRED');
+  assert.equal((await pool.query('select id from user_permission_grants where user_id=$1 and permission_key=$2',[target,permissionKey])).rowCount,0);
   const before = (await request('/api/settings')).body;
   assert.equal(hours(before),second.new_value.expectedWeeklyHours);
   await pool.query("alter table audit_logs add constraint simulate_audit_failure check (action <> 'Update Settings') not valid");

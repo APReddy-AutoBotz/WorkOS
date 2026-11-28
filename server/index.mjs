@@ -310,7 +310,7 @@ const getEffectivePermissionsForUser = async (client, userId, activeRole) => {
     } catch (error) {
       if (error?.code !== '42P01') throw error;
     }
-    return [...new Set(effectivePermissions)];
+    return [...new Set(effectivePermissions)].filter(key => key !== 'permissions.manage' || activeRole === 'Admin');
   } catch (error) {
     if (error?.code === '42P01') return getDefaultPermissionsForRole(activeRole);
     throw error;
@@ -4373,6 +4373,12 @@ app.get('/api/permissions/config', requireDatabase, requireAuth, requirePermissi
   }
 });
 
+const authorizePermissionEdit = async (client, req) => {
+  // Permission edits can change rows used to authorize concurrent editors.
+  await client.query("select pg_advisory_xact_lock(hashtextextended('workos:permission-administration',0))");
+  await assertSecurityAdministrator(client, req, getEffectivePermissionsForUser);
+};
+
 app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requirePermission('permissions.manage'), async (req, res) => {
   const schema = z.object({
     permissionKey: z.string().min(1),
@@ -4406,9 +4412,7 @@ app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requ
   const client = await pool.connect();
   try {
     await client.query('begin');
-    // A missing permission has no row to lock until the first save commits.
-    await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',
-      [`role-permission:${req.params.roleName}:${parsed.data.permissionKey}`]);
+    await authorizePermissionEdit(client, req);
     const previous = (await client.query(
       'select * from role_permissions where role_name = $1 and permission_key = $2 for update',
       [req.params.roleName, parsed.data.permissionKey],
@@ -4449,6 +4453,10 @@ app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requ
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('rollback');
+    if (error.code === 'IDENTITY_ADMINISTRATION_REQUIRED') {
+      res.status(403).json({ error: error.message, code: error.code });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'Role permission update failed' });
   } finally {
@@ -4477,6 +4485,7 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await authorizePermissionEdit(client, req);
     if (parsed.data.permissionKey === deploymentAuditPermissionKey
         && !(await hasActiveAssignedRole(client, req.user.sub, req.user.activeRole))) {
       await client.query('rollback');
@@ -4544,6 +4553,10 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
     res.json(grant);
   } catch (error) {
     await client.query('rollback');
+    if (error.code === 'IDENTITY_ADMINISTRATION_REQUIRED') {
+      res.status(403).json({ error: error.message, code: error.code });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'User permission grant failed' });
   } finally {
@@ -4555,6 +4568,7 @@ app.delete('/api/permissions/user-grants/:id', requireDatabase, requireAuth, req
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await authorizePermissionEdit(client, req);
     const previous = (await client.query('delete from user_permission_grants where id = $1 returning *', [req.params.id])).rows[0];
     if (!previous) {
       await client.query('rollback');
@@ -4585,6 +4599,10 @@ app.delete('/api/permissions/user-grants/:id', requireDatabase, requireAuth, req
     res.json({ status: 'ok' });
   } catch (error) {
     await client.query('rollback');
+    if (error.code === 'IDENTITY_ADMINISTRATION_REQUIRED') {
+      res.status(403).json({ error: error.message, code: error.code });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'User permission revoke failed' });
   } finally {

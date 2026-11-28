@@ -1,5 +1,7 @@
 # Enterprise delivery and integration roadmap
 
+WOS-03 permission administration is in verification. Role matrix edits and individual grant changes revalidate the acting administrator inside the writing transaction. Schema and stored grants are compatible with the preceding release. Rolling the application back restores its previous permission checks.
+
 WOS-APR-005 assignment and leave escalation is in verification. The scheduled worker records elapsed deadlines and delivers to eligible stage approvers and the pinned escalation recipient. A late decision records the breach even when the worker has not yet polled. Delivery history exposes failed attempts and recovery.
 
 WOS-APR-005 overdue reporting for assignment changes, assignment creation and leave merged in [PR #419](https://github.com/APReddy-AutoBotz/WorkOS/pull/419) at `7a0f3cac`. All four [hosted checks](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/46144743837) passed. The queues apply the deadline filter before pagination. A closed stage, a replaced source or an untimed policy has no current overdue item.

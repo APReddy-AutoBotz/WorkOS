@@ -249,7 +249,7 @@ export const getEffectivePermissions = (
   const userGrants = grants
     .filter(grant => grant.userId === user.id || grant.employeeId === user.employeeId)
     .map(grant => grant.permissionKey);
-  return [...new Set([...sessionPermissions, ...userGrants])];
+  return [...new Set([...sessionPermissions, ...userGrants])].filter(key => key !== 'permissions.manage' || user.role === 'Admin');
 };
 
 export const hasPermission = (

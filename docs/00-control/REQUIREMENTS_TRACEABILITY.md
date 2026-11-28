@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-IAM-003/005/006. Permission management requires the active Admin role. The [PostgreSQL regression](../../tests/settings-audit-postgres-smoke.mjs) checks a retained grant while another role is active and loss of administrator authority while a write is queued. The [permission settings test](../../tests/dynamic-permissions-smoke.mjs) checks the navigation decision.
+
 WOS-APR-005 assignment and leave escalation uses migration 140, the scheduled approval worker and scoped delivery history. The [stage deadline suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises a late decision, competing collectors, overlapping recipients, unavailable escalation accounts, retry backoff and separate acknowledgements.
 
 WOS-APR-005 overdue reporting merged in [PR #419](https://github.com/APReddy-AutoBotz/WorkOS/pull/419) at `7a0f3cac` with all four checks passing. It uses migration 139 and the current assignment and leave approval queues. [The PostgreSQL/API suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises each queue before expiry, after expiry, after advancing and after closing the instance.
