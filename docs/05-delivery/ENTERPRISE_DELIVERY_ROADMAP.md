@@ -1,6 +1,6 @@
 # Enterprise delivery and integration roadmap
 
-WOS-APR-004 is in progress in [draft PR #413](https://github.com/APReddy-AutoBotz/WorkOS/pull/413). Migration 136 records prospective grants, revocations, stage bindings and the actor who used each binding. The local browser journey verified adoption, reviewed batch decisions across all four approval types, recovery after a lost acknowledgement, inbox delivery, retained CSV evidence and revocation. The database journey also checks current reminder recipients. Full hosted checks and review remain open.
+WOS-APR-004 is in progress in [draft PR #413](https://github.com/APReddy-AutoBotz/WorkOS/pull/413). Migration 136 records prospective grants, revocations, stage bindings and the actor who used each binding. The local browser journey verified adoption, reviewed batch decisions across all four approval types, recovery after a lost acknowledgement, inbox delivery, retained CSV evidence and revocation. The database journeys check current reminder recipients and exercise the overdue worker with separate, overlapping and revoked delegate assignments. Full hosted checks and review remain open.
 
 WOS-03 deployment settings saves now serialize the audit before-image, update and response. Regression coverage includes competing administrators’ saves and rollback when audit persistence fails.
 

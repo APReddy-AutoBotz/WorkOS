@@ -316,3 +316,50 @@ where s.decided_at is null and p.definition ? 'reminderLeadMinutes' and t.status
   and not exists (select from unnest(array['timesheets.approve','timesheets.submit','projects.view','approvals.view','employees.view','notifications.view']) permission
     where invoice_notice_actor_has(i.organization_id,i.legal_entity_id,r.user_id,p.definition->'stages'->s.stage->>'role',permission) is not true)
   and invoice_historical_worker_visible(i.organization_id,i.legal_entity_id,i.employee_id,r.user_id,p.definition->'stages'->s.stage->>'role');
+
+-- Freeze the eligible delegate with the successful delivery. Reading an old
+-- notice must never resolve the grant again after revocation or expiry.
+alter table work_approval_overdue_attempts
+  add column delegation_binding_id uuid references canonical_delegation_bindings(id),
+  add column delegate_receipt uuid unique;
+
+create function retain_work_overdue_delegate() returns trigger language plpgsql as $$
+declare
+  binding canonical_delegation_bindings;
+  delegate_id uuid;
+  escalation_id uuid;
+begin
+  new.delegation_binding_id := null;
+  new.delegate_receipt := null;
+  if new.failure is not null then return new; end if;
+  select b.* into binding from canonical_delegation_bindings b
+    where b.origin='Work' and b.instance_id=new.instance_id and b.stage=new.stage
+      and canonical_delegation_eligible(b,new.created_at);
+  if not found then return new; end if;
+  select (definition->>'delegateUserId')::uuid into strict delegate_id
+    from canonical_delegations where id=binding.delegation_id;
+  select s.escalation_id into strict escalation_id from work_approval_timed_stages s
+    where s.instance_id=new.instance_id and s.stage=new.stage;
+  new.delegation_binding_id := binding.id;
+  if delegate_id is distinct from escalation_id then new.delegate_receipt := gen_random_uuid(); end if;
+  return new;
+end $$;
+-- PostgreSQL orders BEFORE triggers by name. The existing guard sets created_at.
+create trigger retain_work_overdue_delegate before insert on work_approval_overdue_attempts
+for each row execute function retain_work_overdue_delegate();
+
+create or replace view work_approval_overdue_inbox as
+select s.organization_id,s.legal_entity_id,i.employee_id,i.timesheet_id,i.submission_id,
+       a.instance_id,a.stage,a.template_id,a.locale,a.title,a.body,a.created_at,r.*
+from work_approval_overdue_attempts a join work_approval_timed_stages s using(instance_id,stage)
+join work_approval_instances i on i.id=a.instance_id
+left join canonical_delegation_bindings b on b.id=a.delegation_binding_id
+left join canonical_delegations d on d.id=b.delegation_id
+cross join lateral (values
+  (a.approver_receipt,s.approver_id,case when s.approver_id=s.escalation_id
+    then array['current_stage_approver','escalation_target'] else array['current_stage_approver'] end),
+  (a.escalation_receipt,s.escalation_id,case when d.definition->>'delegateUserId'=s.escalation_id::text
+    then array['current_stage_approver','escalation_target'] else array['escalation_target'] end),
+  (a.delegate_receipt,(d.definition->>'delegateUserId')::uuid,array['current_stage_approver'])
+) r(id,user_id,reasons)
+where a.failure is null and r.id is not null;
