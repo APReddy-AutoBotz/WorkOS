@@ -506,6 +506,7 @@ export const createOperationalImportRouter = ({
     const idempotency = context ? {...context, batchId: importBatchId} : null;
     const groups = new Map();
     const invalidWeeks = new Set();
+    const weekKey = (employeeId, weekEnding) => `${employeeId}:${weekEnding}`;
     const seenTimesheetEntryKeys = new Set();
     const stagedCaptureReplacements = [];
     let validEntryRows = 0;
@@ -536,7 +537,7 @@ export const createOperationalImportRouter = ({
 
           limit 1
         `, [row.employeeId, scope.organizationId, scope.legalEntityId])).rows[0];
-        const key = employee ? `${employee.id}:${row.weekEnding}` : null;
+        const key = employee ? weekKey(employee.id, row.weekEnding) : null;
         if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) {
           if (key) invalidWeeks.add(key);
           continue;
@@ -614,8 +615,8 @@ export const createOperationalImportRouter = ({
       }
 
       const overtimeGroups=[],deadlineGroups=[],stagedSourceKeys=new Set();
-      for (const [key, group] of groups) {
-        if (invalidWeeks.has(key)) {
+      for (const group of groups.values()) {
+        if (invalidWeeks.has(weekKey(group.employee.id, group.weekEnding))) {
           errors.push(...group.entries.map(entry => ({rowNumber:entry.rowNumber, field:'weekEnding',
             message:'Correct all rows for this employee and week before importing the timesheet.', code:'WORK_IMPORT_WEEK_INVALID'})));
           validEntryRows -= group.entries.length;
