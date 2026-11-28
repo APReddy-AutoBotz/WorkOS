@@ -237,6 +237,9 @@ jobs:
             npx --no-install playwright install-deps chromium
           fi
 
+      - name: Verify concurrent deployment settings audit and rollback
+        run: node tests/settings-audit-postgres-smoke.mjs
+
       - name: Verify acknowledged settings save and load recovery
         run: npm run test:settings-save-outcomes-browser
 
