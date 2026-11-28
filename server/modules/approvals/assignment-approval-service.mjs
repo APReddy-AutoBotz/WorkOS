@@ -1,4 +1,5 @@
 import {assignmentPlannedPercentage} from '../planning/assignment-planned-load.mjs';
+import {delegationBindings,delegationReceiptProof,assertCanonicalActor,canonicalStageRecipients} from './canonical-delegation-service.mjs';
 import { randomUUID } from 'node:crypto';
 import { validPlannedAssignment } from '../../../shared/assignment-version.mjs';
 import { validAssignmentApprovalPolicy, materialAssignmentFields, assignmentApprovalIdentity } from '../../../shared/assignment-approval.mjs';
@@ -50,8 +51,7 @@ export const assertAssignmentProposalDefinition = async (c, req, source, d, o) =
 };
 const recipients = async (c, req, v, key, stage, o) => {
     if (key === 'approval.action_required') {
-        const actor = await assignmentApprovalActor(c, req, v.p.definition.stages[stage], v.a, o);
-        return approvalRecipients([{ userId: actor.user.sub, reason: 'current_stage_approver' }]);
+        return approvalRecipients(await canonicalStageRecipients(c,req,v,v.p.definition.stages,stage,v.a,assignmentApprovalActor,o));
     }
     const workers = (await c.query("select u.id from users u join user_organization_scopes s on s.user_id=u.id where u.employee_record_id=$1 and u.status='Active'and s.organization_id=$2 and s.legal_entity_id=$3 and s.active order by u.id limit 2", [v.i.employee_id, ...scope(req)])).rows;
     if (workers.length !== 1)
@@ -105,10 +105,11 @@ export const scopedAssignmentApproval = async (c, req, id, o) => {
     if (!p || !validAssignmentApprovalPolicy(p.definition))
         fail('ASSIGNMENT_APPROVAL_POLICY_UNAVAILABLE', 'Retained source policy is invalid.');
     const notificationFailures = (await c.query('select transition_sequence sequence,code,created_at "createdAt" from assignment_approval_notification_failures where instance_id=$1 order by transition_sequence', [id])).rows;
-    return { i, p, a, latestId, transitions, state: approvalState(p.definition.stages, transitions), notificationFailures };
+    await delegationReceiptProof(c,i.operation_kind==='Creation'?'Creation':'Material',transitions);const delegations=await delegationBindings(c,req,i.operation_kind==='Creation'?'Creation':'Material',id);
+    return { i, p, a, latestId, transitions, delegations, state: approvalState(p.definition.stages, transitions), notificationFailures };
 };
-export const assignmentApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at });
-export const assignmentApprovalView = v => ({ ...(v.i.operation_kind === 'Creation' ? { operationKind: 'Creation' } : {}), id: v.i.id, assignmentId: v.i.assignment_id, employeeId: v.i.employee_id, projectId: v.i.project_id, sourceRevision: v.i.source_revision, sourceVersionId: v.i.source_version_id, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, requestId: v.i.request_id, reason: v.i.reason, createdAt: v.i.created_at, worker: { id: v.a.employee_id, code: v.a.worker_code, name: v.a.worker_name }, policy: assignmentApprovalPolicyView(v.p), before: v.i.before_snapshot, proposed: v.i.proposed_definition, currentRevision: v.a.revision, currentVersionId: v.latestId, state: v.state, transitions: v.transitions.map(assignmentApprovalReceipt), notificationFailures: v.notificationFailures });
+export const assignmentApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at,...(t.delegation_binding_id?{delegationBindingId:t.delegation_binding_id}:{}) });
+export const assignmentApprovalView = v => ({...(v.delegations?.length?{delegations:v.delegations}:{}), ...(v.i.operation_kind === 'Creation' ? { operationKind: 'Creation' } : {}), id: v.i.id, assignmentId: v.i.assignment_id, employeeId: v.i.employee_id, projectId: v.i.project_id, sourceRevision: v.i.source_revision, sourceVersionId: v.i.source_version_id, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, requestId: v.i.request_id, reason: v.i.reason, createdAt: v.i.created_at, worker: { id: v.a.employee_id, code: v.a.worker_code, name: v.a.worker_name }, policy: assignmentApprovalPolicyView(v.p), before: v.i.before_snapshot, proposed: v.i.proposed_definition, currentRevision: v.a.revision, currentVersionId: v.latestId, state: v.state, transitions: v.transitions.map(assignmentApprovalReceipt), notificationFailures: v.notificationFailures });
 
 // A creation proposal is a scoped request, never an allocation/reservation. Its
 // reserved identifier has no source row/version until the final atomic decision.
@@ -178,6 +179,7 @@ export const proposeAssignmentApproval = async (c, req, id, input, o) => {
 };
 export const decideAssignmentApproval = async (c, req, id, input, o) => {
     const v = await scopedAssignmentApproval(c, req, id, o), fingerprint = capacityHash({ instanceId: id, actorId: req.user.sub, activeRole: req.user.activeRole, ...input }), prior = (await c.query('select * from assignment_approval_transitions where instance_id=$1 and request_id=$2', [id, input.requestId])).rows[0];
+    await delegationReceiptProof(c,v.i.operation_kind==='Creation'?'Creation':'Material',prior?[prior]:[]);
     if (prior) {
         if (prior.request_fingerprint !== fingerprint)
             fail('ASSIGNMENT_APPROVAL_REQUEST_CONFLICT', 'Decision request has different content.');
@@ -186,14 +188,14 @@ export const decideAssignmentApproval = async (c, req, id, input, o) => {
     if (v.state.status !== 'Pending' || v.state.sequence !== input.expectedSequence || v.i.source_token !== input.expectedSourceToken || v.a.revision !== v.i.source_revision || v.latestId !== v.i.source_version_id)
         fail('ASSIGNMENT_APPROVAL_STALE', 'Source version or current stage changed. Reload before deciding.');
     const stage = v.p.definition.stages[v.state.currentStage];
-    if (stage.userId !== req.user.sub || stage.role !== req.user.activeRole)
-        fail('ASSIGNMENT_APPROVAL_STAGE_DENIED', 'Only the named current stage in its existing held role may decide.', 403);
+    await assertCanonicalActor(c,req,v.i.operation_kind==='Creation'?'Creation':'Material',v,v.p.definition.stages,v.a,assignmentApprovalActor,o);
     await assignmentApprovalActor(c, req, stage, v.a, o);
     if (req.user.sub === v.i.requester_user_id || [req.user.employeeRecordId, req.user.employeeId].includes(v.i.employee_id))
         fail('ASSIGNMENT_APPROVAL_SELF_DECISION', 'Requester/affected worker cannot decide this proposal.', 403);
     const sequence = v.state.sequence + 1, next = approvalState(v.p.definition.stages, [...v.transitions, { sequence, stage: v.state.currentStage, decision: input.decision }]);
     await setAssignmentApprovalContext(c, req, id);
     const t = (await c.query('insert into assignment_approval_transitions(id,instance_id,sequence,stage,decision,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,outcome)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)returning *', [randomUUID(), id, sequence, v.state.currentStage, input.decision, req.user.sub, req.user.activeRole, input.requestId, fingerprint, input.reason, req.operationId, next])).rows[0];
+    await delegationReceiptProof(c,v.i.operation_kind==='Creation'?'Creation':'Material',[t]);
     if (next.status === 'Approved') {
         const percentage=await assertAssignmentProposalDefinition(c, req, v.a, v.i.proposed_definition, o);
         const d = v.i.proposed_definition;

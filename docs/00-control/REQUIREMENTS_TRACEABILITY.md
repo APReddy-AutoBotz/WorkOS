@@ -624,6 +624,8 @@ The production frontend build verifies WOS-ORG-005 document branding in `tests/d
 
 Notification diagnostics: WOS-IAM-005/010, CORE-003, INT-002/004, NFR-SEC-004/008/013 and PRV-001 map to scoped delivery SQL, the typed diagnostic projection, new notification writes, historical integration/audit readers and real API/browser negative tests. See [the task](../tasks/WOS-05-NOTIFICATION-DIAGNOSTIC-BOUNDARY.md). Broader notification policy/retry and deployment-wide support access remain separate.
 
+WOS-APR-004 named-stage delegation is under verification in [draft #413](https://github.com/APReddy-AutoBotz/WorkOS/pull/413). The [database journey](../../tests/canonical-delegation-postgres-smoke.mjs) exercises new-instance scope, actual decision actors and retained history across work, assignment changes, creation and leave. The [upgrade test](../../tests/named-stage-delegation-upgrade.mjs) checks existing records across migration 136.
+
 Legacy approval/delegation: WOS-CORE-003/005, WOS-IAM-003/005/010, WOS-APR-004/005 and WOS-NFR-SEC-004/008/012 map to the bounded legacy delegation router/scope, immutable owner and current-authority validation, shared inbox/decision/SLA/Teams/command-center predicates, actual PostgreSQL/API negatives and browser refusal/correction journey. See [the task](../tasks/WOS-05-LEGACY-APPROVAL-SCOPE.md). Source-specific decisions and final release gates remain separate.
 
 Settings persistence outcomes: WOS-CORE-003/005, WOS-NFR-OBS-005 and WOS-NFR-UX-003/005 map to AdminSettings guarded acknowledged saves/load retry and the real React/API/PostgreSQL journey. This is not full configuration-versioning acceptance; see [the task](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md).

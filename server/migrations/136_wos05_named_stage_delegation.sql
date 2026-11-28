@@ -282,3 +282,29 @@ create function guard_canonical_delegate_decision()returns trigger language plpg
  if t.xid is distinct from pg_current_xact_id()::text or t.instance_id is distinct from b.instance_id or t.stage is distinct from b.stage or t.actor_id is distinct from new.actor_id or t.actor_id::text=s.stages->b.stage->>'userId'or not canonical_stage_actor(b.origin,b.instance_id,b.stage,(s.stages->b.stage->>'userId')::uuid,t.actor_id,s.stages->b.stage->>'role')then raise exception 'Retain only the actual same-transaction current delegated transition.'using errcode='CDG03';end if;return new;
 end $$;
 create trigger guarded_canonical_delegate_decisions before insert on canonical_delegation_decisions for each row execute function guard_canonical_delegate_decision();
+
+-- Recheck both accounts before sending a reminder to a delegated stage recipient.
+create or replace view work_approval_reminder_candidates as
+select r.id as recipient_id,i.id as instance_id,s.stage,s.due_at,
+       s.due_at - make_interval(mins=>(p.definition->>'reminderLeadMinutes')::numeric::integer) as remind_at
+from work_approval_timed_stages s
+join work_approval_instances i on i.id=s.instance_id
+join work_approval_policy_versions p on p.id=s.policy_id
+join work_approval_events ev on ev.instance_id=s.instance_id and ev.stage=s.stage and ev.event_key='approval.action_required'
+join work_approval_recipients r on r.event_id=ev.id and r.in_app
+  and canonical_stage_actor('Work',i.id,s.stage,s.approver_id,r.user_id,p.definition->'stages'->s.stage->>'role')
+join timesheets t on t.id=i.timesheet_id and t.organization_id=i.organization_id and t.legal_entity_id=i.legal_entity_id
+join users approver on approver.id=r.user_id
+left join employees actor on actor.id=approver.employee_record_id
+join employees worker on worker.id=i.employee_id
+where s.decided_at is null and p.definition ? 'reminderLeadMinutes' and t.status='Submitted'
+  and i.submission_id=(select latest.id from work_submission_evidence latest where latest.timesheet_id=t.id
+    and latest.organization_id=i.organization_id and latest.legal_entity_id=i.legal_entity_id order by latest.sequence desc limit 1)
+  and r.user_id<>i.requester_user_id and worker.id is distinct from actor.id and worker.id is distinct from actor.employee_id
+  and (p.definition->'stages'->s.stage->>'role'<>'TeamLead' or worker.reporting_manager_id in (actor.id,actor.employee_id))
+  and (p.definition->'stages'->s.stage->>'role'<>'ProjectManager' or exists(select from timesheet_entries entry
+    join projects project on project.id=entry.project_id and project.organization_id=i.organization_id and project.legal_entity_id=i.legal_entity_id
+    where entry.timesheet_id=t.id and project.manager_id in (actor.id,actor.employee_id)))
+  and not exists (select from unnest(array['timesheets.approve','timesheets.submit','projects.view','approvals.view','employees.view','notifications.view']) permission
+    where invoice_notice_actor_has(i.organization_id,i.legal_entity_id,r.user_id,p.definition->'stages'->s.stage->>'role',permission) is not true)
+  and invoice_historical_worker_visible(i.organization_id,i.legal_entity_id,i.employee_id,r.user_id,p.definition->'stages'->s.stage->>'role');
