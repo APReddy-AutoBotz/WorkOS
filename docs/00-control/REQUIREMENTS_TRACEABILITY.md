@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-CORE-005. The [deployment setup audit test](../../tests/settings-audit-postgres-smoke.mjs) exercises two administrators saving the same new catalog item and country director, then verifies creation, predecessor values and actor attribution.
+
 WOS-CORE-005. The [settings audit regression](../../tests/settings-audit-postgres-smoke.mjs) verifies competing deployment settings saves, per-request results, scoped permission denial and atomic rollback when audit persistence fails.
 
 WOS-WKF-007. The [employee browser journey](../../tests/own-work-planning-journey-browser-smoke.mjs) opens a previous week directly from its draft and rejection actions, submits the correction and checks that the correction action disappears after approval.

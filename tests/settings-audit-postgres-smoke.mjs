@@ -56,6 +56,44 @@ await withCommercialDraftingApi(async ({pool, request, identities, actorId}) => 
     assert.equal(row.organization_id,null);
     assert.equal(row.legal_entity_id,null);
   }
+  for (const [path,entity,lockPrefix,fields] of [
+    ['/api/catalogs/industries','CatalogItem','catalog-item',{}],
+    ['/api/country-directors','CountryDirector','country-director',{region:'Synthetic region'}],
+  ]) {
+    const id = 'synthetic-concurrent-'+lockPrefix;
+    const gate = await pool.connect();
+    let saves;
+    try {
+      await gate.query('begin');
+      await gate.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[lockPrefix+':'+id]);
+      saves = Promise.allSettled([identities.manager,otherAdmin].map((identity,index) =>
+        request(path,{method:'POST',identity,body:{id,...fields,name:'Synthetic revision '+index}})));
+      const deadline = Date.now()+10000;
+      for (;;) {
+        const {rows:[{writers}]} = await gate.query(`select count(*)::int as writers from pg_locks
+          where locktype='advisory' and not granted and database=(select oid from pg_database where datname=current_database())`);
+        if (writers === 2) break;
+        assert(Date.now()<deadline,'Both first-time saves must reach the serialization point');
+        await delay(25);
+      }
+    } finally {
+      try { await gate.query('rollback'); } finally { gate.release(); }
+    }
+    const responses = await saves;
+    const {rows:events} = await pool.query('select action,user_id,old_value,new_value from audit_logs where entity_type=$1 and entity_id=$2',[entity,id]);
+    assert.equal(events.length,2);
+    const create = events.find(row => row.action.startsWith('Create '));
+    const update = events.find(row => row.action.startsWith('Update '));
+    assert.equal(create.old_value,null);
+    assert.deepEqual(update.old_value,create.new_value);
+    for (const [i,response] of responses.entries()) {
+      assert.equal(response.status,'fulfilled');
+      assert.equal(response.value.status,200);
+      assert.equal(response.value.body.name,'Synthetic revision '+i);
+      const event = events.find(row => row.user_id === [actorId,otherAdmin.id][i]);
+      assert.deepEqual(event.new_value,response.value.body);
+    }
+  }
   const before = (await request('/api/settings')).body;
   assert.equal(hours(before),second.new_value.expectedWeeklyHours);
   await pool.query("alter table audit_logs add constraint simulate_audit_failure check (action <> 'Update Settings') not valid");
