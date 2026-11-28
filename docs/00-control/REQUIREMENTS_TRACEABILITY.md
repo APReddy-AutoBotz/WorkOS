@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-RPT-001/002. The [forecast database regression](../../tests/native-forecast-postgres-smoke.mjs) checks the approved-week cutoff across four report endpoints, including an intervening submitted week and a forecast horizon that extends past the cutoff.
+
 WOS-WKF-003/005. [Annual availability acceptance](../../tests/annual-planning-availability-postgres-smoke.mjs) covers employee scope, holiday and leave overlap across calendar years, a leap year, a part-time profile change and incomplete portfolio evidence. The [planning browser test](../../tests/planning-signals-browser-smoke.mjs) distinguishes confirmed zero hours from unavailable hours.
 
 WOS-NFR-PERF-003. The annual report test reads 250 independently configured workers through the scoped API, verifies all 250 hour totals and enforces the five-second dashboard target for that request.
