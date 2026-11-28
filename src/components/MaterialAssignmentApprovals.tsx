@@ -55,8 +55,9 @@ const Policy = () => {
             })}>Older material policies</button>}</section>;
 };
 const Proposals = () => {
+    const [overdue,setOverdue] = useState(false);
     const [id, setId] = useState(''), [source, setSource] = useState<AssignmentApprovalSource | null>(null), [draft, setDraft] = useState<AssignmentDefinition | null>(null), [reason, setReason] = useState(''), [page, setPage] = useState<AssignmentApprovalPage | null>(null), [rows, setRows] = useState<AssignmentApprovalInstance[]>([]), [next, setNext] = useState<string | null>(null), [decisionReason, setDecisionReason] = useState(''), [receipt, setReceipt] = useState<WorkDecisionReceipt | null>(null);
-    const lease = useApprovalLease(() => { setId(''); setSource(null); setDraft(null); setReason(''); setPage(null); setRows([]); setNext(null); setDecisionReason(''); setReceipt(null); });
+    const lease = useApprovalLease(() => { setId(''); setSource(null); setDraft(null); setReason(''); setPage(null); setOverdue(false);setRows([]); setNext(null); setDecisionReason(''); setReceipt(null); });
     const load = (selected = id) => lease.run('assignment', false, async (c, live) => {
         const s = await service.source(selected, c);
         if (live()) {
@@ -75,10 +76,10 @@ const Proposals = () => {
             setReceipt(null);
         }
     });
-    const list = (after: string | null = null) => lease.run('assignment', false, async (c, live) => {
-        const r = await service.list(c, after);
+    const list = (after: string | null = null, overdueOnly = false) => lease.run('assignment', false, async (c, live) => {
+        const r = await service.list(c, after, undefined, overdueOnly);
         if (live()) {
-            setRows(v => after ? [...v, ...r.instances] : r.instances);
+            setOverdue(overdueOnly); setRows(v => after ? [...v, ...r.instances] : r.instances);
             setNext(r.nextAfter);
         }
     });
@@ -99,7 +100,7 @@ const Proposals = () => {
             }
         });
     };
-    return <section aria-label="Material assignment proposals" className="my-4 rounded-xl border p-4 space-y-3"><h2 className="font-semibold">Material assignment proposals</h2><p>Inspect exact before/after values. Pending and rejected proposals leave the effective source unchanged; final approval rechecks current source, permission, scope, dates and overlap before applying. Existing work and commercial evidence remains retained.</p><label>Assignment proposal source<input aria-label="Assignment proposal source" value={id} onChange={e => { setId(e.target.value); setSource(null); setDraft(null); setPage(null); }}/></label><button disabled={lease.waiting || !id.trim()} onClick={() => void load()}>Load assignment proposal source</button><button disabled={lease.waiting} onClick={() => void list()}>Load material assignment proposals</button>{next && <button disabled={lease.waiting} onClick={() => void list(next)}>More material assignment proposals</button>}{lease.notice && <p role="status">{lease.notice}</p>}{lease.waiting && <p role="status">Loading or recording material assignment evidence…</p>}
+    return <section aria-label="Material assignment proposals" className="my-4 rounded-xl border p-4 space-y-3"><h2 className="font-semibold">Material assignment proposals</h2><p>Inspect exact before/after values. Pending and rejected proposals leave the effective source unchanged; final approval rechecks current source, permission, scope, dates and overlap before applying. Existing work and commercial evidence remains retained.</p><label>Assignment proposal source<input aria-label="Assignment proposal source" value={id} onChange={e => { setId(e.target.value); setSource(null); setDraft(null); setPage(null); }}/></label><button disabled={lease.waiting || !id.trim()} onClick={() => void load()}>Load assignment proposal source</button><button disabled={lease.waiting} onClick={() => void list()}>Load material assignment proposals</button><button disabled={lease.waiting} onClick={()=>void list(null,true)}>Show overdue material assignment proposals</button>{overdue && <p role="status">{rows.length ? "Showing overdue stages." : "No overdue stages in your current scope."}</p>}{next && <button disabled={lease.waiting} onClick={() => void list(next,overdue)}>More material assignment proposals</button>}{lease.notice && <p role="status">{lease.notice}</p>}{lease.waiting && <p role="status">Loading or recording material assignment evidence…</p>}
  {source && draft && <form onSubmit={e => {
                 e.preventDefault();
                 if (lease.phase === 'uncertain')
