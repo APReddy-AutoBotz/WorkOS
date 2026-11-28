@@ -118,3 +118,33 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   });
 });
 console.log('Migration 137 preserved populated untimed assignment and leave policies and pending instances.');
+
+await withCommercialDatabase(async ({pool,databaseUrl})=>{
+  await withCommercialMigrationsThrough(137,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
+  const fx=await seedDelegationFixture(pool);
+  const ids=fx.identities;
+  await withCommercialApi({databaseUrl,identities:ids,enableLeave:true},async({request})=>{
+    await prepareStagedWork(request,ids,fx.today);
+    await adoptActualInputs(request,fx.today);
+    await adoptStagedPolicy(request,ids,fx.today);
+    const assignment=await createApprovalAssignment(request,fx);
+    const assignmentPolicy=await adoptAssignmentApproval(request,fx,{...assignmentApprovalDefinition(ids),creationRequired:true,stageDueMinutes:10});
+    await adoptLeavePolicy(request,fx,{...leaveDefinition(ids),stageDueMinutes:10});
+    const sources=(await createDelegationSources(request,fx,{assignment,assignmentPolicy})).filter(([kind])=>kind!=='Work');
+    const tables=['assignment_approval_policies','assignment_approval_instances','assignment_approval_recipients',
+      'leave_approval_policies','leave_approval_instances','leave_approval_recipients'];
+    const before=await canonicalSnapshot(pool,tables);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,expectedMigrationsFrom('138_wos05_assignment_leave_reminders'));
+    assert.deepEqual(await canonicalSnapshot(pool,tables),before);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
+    for(const [kind,instance] of sources){
+      const after=await readDelegationInstance(request,kind,instance.id);
+      assert.equal(after.stageDeadline.dueAt,instance.stageDeadline.dueAt);
+      assert.deepEqual(after.policy,instance.policy);
+    }
+    assert.equal((await pool.query('select * from assignment_leave_reminder_candidates')).rowCount,0);
+    await collectAssignmentLeaveReminders(pool);
+    assert.equal((await pool.query('select * from assignment_leave_stage_reminders')).rowCount,0);
+  });
+});
+console.log('Migration 138 preserved populated timed policies, exact deadlines and action recipients without scheduling retroactive reminders.');
