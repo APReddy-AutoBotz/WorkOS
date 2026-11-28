@@ -1,4 +1,5 @@
 import {expectedMigrationsFrom} from './support/expected-migrations.mjs';
+import {verifyProjectCostJourney} from './support/project-cost-journey.mjs';
 import {verifyRiskDelivery} from './support/fixed-fee-risk-delivery-journey.mjs';
 import {verifyRiskNoticePolicy} from './support/fixed-fee-risk-policy-journey.mjs';
 import {budgetWarningStatus} from '../server/modules/commercial-drafting/fixed-fee-risk.mjs';
@@ -376,6 +377,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     const retained=await record({...makeCommand(currentCosts),view:'margin_reconciliation',expectedTotalRevenue:'130.1234'});
     assert.equal(retained.status,201,JSON.stringify(retained.body));
     assert.deepEqual(retained.body.retainedProjectCosts.grossMargin,total.grossMargin);
+    await verifyProjectCostJourney({baseUrl,tokenFor,identities,grants,engagement,project,today});
     const restricted=(await request(forecastPath+'?through='+today+'&view=budget_comparison')).body;
     assert.equal(restricted.retainedProjectCosts,undefined);
     assert.equal(restricted.saved.report.retainedProjectCosts,undefined);
