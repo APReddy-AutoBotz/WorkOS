@@ -802,6 +802,8 @@ export const normalizeIntegrationHealthReport = (r: Record<string, unknown>): In
   events: Array.isArray(r.events) ? (r.events as Record<string, unknown>[]).map(normalizeIntegrationEventLog) : [],
 });
 
+const planningNumber = (value: unknown) => value == null ? null : Number(value);
+
 export const normalizeResourcePlanningRow = (r: Record<string, unknown>): ResourcePlanningRow => ({
   employeeId: String(r.employee_id ?? r.employeeId),
   employeeCode: String(r.employee_code ?? r.employeeCode),
@@ -813,10 +815,10 @@ export const normalizeResourcePlanningRow = (r: Record<string, unknown>): Resour
   standardWeeklyHours: Number(r.standard_weekly_hours ?? r.standardWeeklyHours ?? 40),
   plannedUtilization: Number(r.planned_utilization ?? r.plannedUtilization ?? 0),
   actualUtilization: Number(r.actual_utilization ?? r.actualUtilization ?? 0),
-  availabilityHours: Number(r.availability_hours ?? r.availabilityHours ?? 0),
-  availabilityAdjustedCapacityPercent: Number(r.availability_adjusted_capacity_percent ?? r.availabilityAdjustedCapacityPercent ?? 0),
-  approvedLeaveDays: Number(r.approved_leave_days ?? r.approvedLeaveDays ?? 0),
-  holidayDays: Number(r.holiday_days ?? r.holidayDays ?? 0),
+  availabilityHours: planningNumber(r.availability_hours ?? r.availabilityHours),
+  availabilityAdjustedCapacityPercent: planningNumber(r.availability_adjusted_capacity_percent ?? r.availabilityAdjustedCapacityPercent),
+  approvedLeaveDays: planningNumber(r.approved_leave_days ?? r.approvedLeaveDays),
+  holidayDays: planningNumber(r.holiday_days ?? r.holidayDays),
   activeProjectCount: Number(r.active_project_count ?? r.activeProjectCount ?? 0),
   billableAllocationPercent: Number(r.billable_allocation_percent ?? r.billableAllocationPercent ?? 0),
   bench: Boolean(r.bench),
@@ -846,7 +848,7 @@ export const normalizeResourcePlanningReport = (r: Record<string, unknown>): Res
     summary: {
       people: Number(summary?.people ?? rows.length),
       averagePlanned: Number(summary?.average_planned ?? summary?.averagePlanned ?? 0),
-      averageAvailabilityAdjustedCapacity: Number(summary?.average_availability_adjusted_capacity ?? summary?.averageAvailabilityAdjustedCapacity ?? 0),
+      averageAvailabilityAdjustedCapacity: planningNumber(summary?.average_availability_adjusted_capacity ?? summary?.averageAvailabilityAdjustedCapacity),
       benchCount: Number(summary?.bench_count ?? summary?.benchCount ?? 0),
       overloadedCount: Number(summary?.overloaded_count ?? summary?.overloadedCount ?? 0),
       underloadedCount: Number(summary?.underloaded_count ?? summary?.underloadedCount ?? 0),
@@ -859,7 +861,7 @@ export const normalizeResourcePlanningReport = (r: Record<string, unknown>): Res
 export const normalizeWorkforceCommandCenterReport = (r: Record<string, unknown>): WorkforceCommandCenterReport => ({
   generatedAt: String(r.generated_at ?? r.generatedAt ?? new Date().toISOString()),
   dataConfidenceScore: Number(r.data_confidence_score ?? r.dataConfidenceScore ?? 0),
-  leaveAdjustedAvailabilityHours: Number(r.leave_adjusted_availability_hours ?? r.leaveAdjustedAvailabilityHours ?? 0),
+  leaveAdjustedAvailabilityHours: planningNumber(r.leave_adjusted_availability_hours ?? r.leaveAdjustedAvailabilityHours),
   pendingApprovalLoad: Number(r.pending_approval_load ?? r.pendingApprovalLoad ?? 0),
   overdueApprovalLoad: Number(r.overdue_approval_load ?? r.overdueApprovalLoad ?? 0),
   notificationDeliveryRisk: Number(r.notification_delivery_risk ?? r.notificationDeliveryRisk ?? 0),

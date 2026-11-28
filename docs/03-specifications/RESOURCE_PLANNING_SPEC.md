@@ -22,6 +22,8 @@ For WOS-RES-004, distribute a fixed hours total over the full assignment range u
 
 ## Utilization
 
+In production planning, annual available hours sum daily capacity for the calendar year of the report date. Each worker percentage uses their scheduled hours for that year. The portfolio percentage averages worker percentages when every worker has complete evidence and a positive denominator. The workforce command center requires complete worker hours before displaying their sum.
+
 - Planned: effective assignment load divided by effective capacity.
 - Actual: approved included work divided by effective available capacity.
 - Forecast: future approved/planned assignments over configured horizons.

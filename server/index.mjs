@@ -1,4 +1,5 @@
 import {compareHours} from '../shared/work-hours.mjs';
+import {annualPlanningAvailability} from './modules/planning/annual-availability.mjs';
 import {rollsOffSoon} from '../shared/planning-roll-off.mjs';
 import {validFixedHours} from '../shared/assignment-version.mjs';
 import {assignmentPlannedPercentage} from './modules/planning/assignment-planned-load.mjs';
@@ -5197,18 +5198,18 @@ app.get('/api/reports/forecast-utilization', requireDatabase, requireAuth, requi
   getUtilizationReport(req, res, 'forecast');
 });
 
-const getResourcePlanningPayload = async (req) => {
+const readResourcePlanningPayload = async (client,req) => {
   const asOfDate = String(req.query.date || todayIso()).slice(0, 10);
   const employeeParams = [];
   const employeeScopeWhere = buildEmployeeScopeWhere(req, employeeParams, 'e');
-  const settingsRows = (await pool.query('select key, value from system_settings')).rows;
+  const settingsRows = (await client.query('select key, value from system_settings')).rows;
   const settings = Object.fromEntries(settingsRows.map(row => [row.key, row.value]));
   const highThreshold = Number(settings.utilizationThresholdHigh ?? 100);
   const lowThreshold = Number(settings.utilizationThresholdLow ?? 80);
   const benchThreshold = Number(settings.benchThreshold ?? 20);
 
-  const employees = (await pool.query(`
-    select e.*,
+  const employees = (await client.query(`
+    select e.*,to_char(e.joining_date,'YYYY-MM-DD') as "joiningDate",to_char(e.exit_date,'YYYY-MM-DD') as "exitDate",e.legal_entity_id as "legalEntityId",
       coalesce(array_agg(distinct ecdm.country_director_id) filter (where ecdm.country_director_id is not null), '{}') as mapped_country_director_ids
     from employees e
     left join employee_country_director_map ecdm on ecdm.employee_id = e.id
@@ -5224,7 +5225,7 @@ const getResourcePlanningPayload = async (req) => {
       summary: {
         people: 0,
         averagePlanned: 0,
-        averageAvailabilityAdjustedCapacity: 0,
+        averageAvailabilityAdjustedCapacity: null,
         benchCount: 0,
         overloadedCount: 0,
         underloadedCount: 0,
@@ -5234,8 +5235,7 @@ const getResourcePlanningPayload = async (req) => {
     };
   }
 
-  const [allocationsResult, availabilityResult, actualResult] = await Promise.all([
-    pool.query(`
+  const allocationsResult = await client.query(`
       select
         pa.id as allocation_id,
         pa.employee_id,
@@ -5258,40 +5258,16 @@ const getResourcePlanningPayload = async (req) => {
         and pa.start_date <= $2::date
         and pa.end_date >= $2::date
       order by pa.percentage desc, p.name
-    `, [employeeIds, asOfDate]),
-    pool.query(`
-      select
-        e.id as employee_id,
-        e.standard_weekly_hours,
-        coalesce(l.approved_leave_days, 0)::numeric as approved_leave_days,
-        coalesce(h.holiday_days, 0)::numeric as holiday_days,
-        greatest(0, (e.standard_weekly_hours * 52) - ((coalesce(l.approved_leave_days, 0) + coalesce(h.holiday_days, 0)) * (e.standard_weekly_hours / 5)))::numeric as availability_hours
-      from employees e
-      left join (
-        select employee_id, sum(total_days) as approved_leave_days
-        from leave_requests
-        where status = 'Approved' and extract(year from start_date)::int = extract(year from $2::date)::int
-        group by employee_id
-      ) l on l.employee_id = e.id
-      left join lateral (
-        select count(*) as holiday_days
-        from holiday_calendars hc
-        join holidays h on h.calendar_id = hc.id
-        where hc.status = 'Active'
-          and hc.calendar_year = extract(year from $2::date)::int
-          and (hc.country = e.country or hc.country = 'Global')
-      ) h on true
-      where e.id = any($1)
-    `, [employeeIds, asOfDate]),
-    pool.query(`
+    `, [employeeIds, asOfDate]);
+  const availabilityByEmployee = await annualPlanningAvailability(client,req,employees,asOfDate);
+  const actualResult = await client.query(`
       select distinct on (employee_id)
         employee_id,
         round((billable_hours / nullif($1::numeric, 0)) * 1000) / 10 as actual_utilization
       from timesheets
       where status = 'Approved' and employee_id = any($2)
       order by employee_id, week_ending desc
-    `, [Number(settings.expectedWeeklyHours || 40), employeeIds]),
-  ]);
+    `, [Number(settings.expectedWeeklyHours || 40), employeeIds]);
 
   const allocationsByEmployee = new Map();
   allocationsResult.rows.forEach(allocation => {
@@ -5310,15 +5286,12 @@ const getResourcePlanningPayload = async (req) => {
     });
     allocationsByEmployee.set(allocation.employee_id, list);
   });
-  const availabilityByEmployee = new Map(availabilityResult.rows.map(row => [row.employee_id, row]));
   const actualByEmployee = new Map(actualResult.rows.map(row => [row.employee_id, Number(row.actual_utilization || 0)]));
 
   const rows = employees.map(employee => {
     const allocations = allocationsByEmployee.get(employee.id) || [];
     const availability = availabilityByEmployee.get(employee.id);
-    const standardWeeklyHours = Number(availability?.standard_weekly_hours || employee.standard_weekly_hours || settings.expectedWeeklyHours || 40);
-    const annualCapacityHours = Math.max(standardWeeklyHours * 52, 1);
-    const availabilityHours = round1(Number(availability?.availability_hours ?? annualCapacityHours));
+    const standardWeeklyHours = Number(employee.standard_weekly_hours || settings.expectedWeeklyHours || 40);
     const plannedUtilization = round1(allocations.reduce((sum, allocation) => sum + allocation.percentage, 0));
     const billableAllocationPercent = round1(allocations.filter(allocation => allocation.billable).reduce((sum, allocation) => sum + allocation.percentage, 0));
     const rollOffDate = allocations.length ? allocations.map(allocation => allocation.end_date).sort()[0] : null;
@@ -5333,10 +5306,10 @@ const getResourcePlanningPayload = async (req) => {
       standard_weekly_hours: standardWeeklyHours,
       planned_utilization: plannedUtilization,
       actual_utilization: actualByEmployee.get(employee.id) || 0,
-      availability_hours: availabilityHours,
-      availability_adjusted_capacity_percent: round1((availabilityHours / annualCapacityHours) * 100),
-      approved_leave_days: Number(availability?.approved_leave_days || 0),
-      holiday_days: Number(availability?.holiday_days || 0),
+      availability_hours: availability.hours,
+      availability_adjusted_capacity_percent: availability.percent,
+      approved_leave_days: availability.leaveDays,
+      holiday_days: availability.holidayDays,
       active_project_count: allocations.length,
       billable_allocation_percent: billableAllocationPercent,
       bench: plannedUtilization <= benchThreshold,
@@ -5355,7 +5328,7 @@ const getResourcePlanningPayload = async (req) => {
     summary: {
       people: rows.length,
       averagePlanned: rows.length ? round1(rows.reduce((sum, row) => sum + row.planned_utilization, 0) / rows.length) : 0,
-      averageAvailabilityAdjustedCapacity: rows.length ? round1(rows.reduce((sum, row) => sum + row.availability_adjusted_capacity_percent, 0) / rows.length) : 0,
+      averageAvailabilityAdjustedCapacity: rows.every(row=>row.availability_adjusted_capacity_percent !== null) ? round1(rows.reduce((sum, row) => sum + row.availability_adjusted_capacity_percent, 0) / rows.length) : null,
       benchCount: rows.filter(row => row.bench).length,
       overloadedCount: rows.filter(row => row.overloaded).length,
       underloadedCount: rows.filter(row => row.underloaded).length,
@@ -5363,6 +5336,21 @@ const getResourcePlanningPayload = async (req) => {
     },
     rows,
   };
+};
+
+const getResourcePlanningPayload = async req => {
+  const client = await pool.connect();
+  try {
+    await client.query('begin isolation level repeatable read read only');
+    const result = await readResourcePlanningPayload(client,req);
+    await client.query('commit');
+    return result;
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 app.get('/api/reports/resource-planning', requireDatabase, requireAuth, requirePermission('allocations.view'), requireModuleRelease('planning'), async (req, res) => {
@@ -5440,7 +5428,7 @@ app.get('/api/reports/workforce-command-center', requireDatabase, requireAuth, r
     res.json({
       generatedAt: new Date().toISOString(),
       dataConfidenceScore: quality.score,
-      leaveAdjustedAvailabilityHours: round1(planning.rows.reduce((sum, row) => sum + row.availability_hours, 0)),
+      leaveAdjustedAvailabilityHours: planning.rows.some(row=>row.availability_hours===null) ? null : round1(planning.rows.reduce((sum, row) => sum + row.availability_hours, 0)),
       pendingApprovalLoad: sla.rows[0]?.pending || 0,
       overdueApprovalLoad: sla.rows[0]?.overdue || 0,
       notificationDeliveryRisk: notificationRiskResult.rows[0]?.failed || 0,

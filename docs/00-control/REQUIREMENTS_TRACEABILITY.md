@@ -1,5 +1,9 @@
 # WorkOS Requirements Traceability
 
+WOS-WKF-003/005. [Annual availability acceptance](../../tests/annual-planning-availability-postgres-smoke.mjs) covers employee scope, holiday and leave overlap across calendar years, a leap year, a part-time profile change and incomplete portfolio evidence. The [planning browser test](../../tests/planning-signals-browser-smoke.mjs) distinguishes confirmed zero hours from unavailable hours.
+
+WOS-NFR-PERF-003. The annual report test reads 250 independently configured workers through the scoped API, verifies all 250 hour totals and enforces the five-second dashboard target for that request.
+
 WOS-RES-006. The [planning signals browser journey](../../tests/planning-signals-browser-smoke.mjs) verifies roll-offs from day zero through day 45, exclusion of earlier and later endings, chronological highlights, and the second page of matching workers. The API and the test-mode report use the same date rule as the planning workspace.
 
 WOS-RES-005 and WOS-RES-008. The [assignment creation PostgreSQL journey](../../tests/assignment-creation-postgres-smoke.mjs) reads the worker forecast before submission, after submission, after first-stage approval and after final approval. It checks the hours contributed by a future one-day assignment and the eligible capacity denominator.

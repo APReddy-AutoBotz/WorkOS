@@ -535,10 +535,10 @@ export interface ResourcePlanningRow {
   standardWeeklyHours: number;
   plannedUtilization: number;
   actualUtilization: number;
-  availabilityHours: number;
-  availabilityAdjustedCapacityPercent: number;
-  approvedLeaveDays: number;
-  holidayDays: number;
+  availabilityHours: number | null;
+  availabilityAdjustedCapacityPercent: number | null;
+  approvedLeaveDays: number | null;
+  holidayDays: number | null;
   activeProjectCount: number;
   billableAllocationPercent: number;
   bench: boolean;
@@ -554,7 +554,7 @@ export interface ResourcePlanningReport {
   summary: {
     people: number;
     averagePlanned: number;
-    averageAvailabilityAdjustedCapacity: number;
+    averageAvailabilityAdjustedCapacity: number | null;
     benchCount: number;
     overloadedCount: number;
     underloadedCount: number;
@@ -566,7 +566,7 @@ export interface ResourcePlanningReport {
 export interface WorkforceCommandCenterReport {
   generatedAt: string;
   dataConfidenceScore: number;
-  leaveAdjustedAvailabilityHours: number;
+  leaveAdjustedAvailabilityHours: number | null;
   pendingApprovalLoad: number;
   overdueApprovalLoad: number;
   notificationDeliveryRisk: number;

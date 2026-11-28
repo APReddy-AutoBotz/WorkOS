@@ -172,7 +172,7 @@
     "test:resource-demand-journey": "node tests/resource-demand-journey-browser-smoke.mjs",
     "test:worker-capacity": "node tests/worker-capacity-smoke.mjs",
     "test:worker-capacity-service": "node --import tsx tests/worker-capacity-service-smoke.mjs",
-    "test:worker-capacity-postgres": "node tests/worker-capacity-postgres-smoke.mjs",
+    "test:worker-capacity-postgres": "node tests/worker-capacity-postgres-smoke.mjs && node tests/annual-planning-availability-postgres-smoke.mjs",
     "test:worker-capacity-journey": "node tests/worker-capacity-journey-browser-smoke.mjs",
     "test:assignment-versions": "node tests/assignment-version-smoke.mjs",
     "test:assignment-versions-service": "node --import tsx tests/assignment-version-service-smoke.mjs",
