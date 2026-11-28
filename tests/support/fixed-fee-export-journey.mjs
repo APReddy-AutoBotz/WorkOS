@@ -28,9 +28,19 @@ export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,ba
   await desk.getByLabel('Invoice CSV schema').selectOption(schema);
   await desk.getByRole('checkbox',{name:'I inspected the final approval, retained lineage and control total'}).check();
   await desk.getByLabel('Invoice CSV reason').fill(command.reason);
-  const receipt=page.waitForResponse(r=>r.url().endsWith(csv+'/exports') && r.request().method()==='POST');
-  await desk.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
-  const saved=await receipt;assert.equal(saved.status(),201,await saved.text());
+  await pool.query(`create function reject_installment_notice() returns trigger language plpgsql as $$
+    begin raise exception 'Synthetic notice refusal' using errcode='INC02'; end $$`);
+  await pool.query('create trigger reject_installment_notice before insert on invoice_export_notice_events for each row execute function reject_installment_notice()');
+  let saved;
+  try {
+    const receipt=page.waitForResponse(r=>r.url().endsWith(csv+'/exports') && r.request().method()==='POST');
+    await desk.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
+    saved=await receipt;
+    assert.equal(saved.status(),201,await saved.text());
+  } finally {
+    await pool.query('drop trigger reject_installment_notice on invoice_export_notice_events');
+    await pool.query('drop function reject_installment_notice()');
+  }
   const a=(await saved.json()).artifact;
   await desk.getByRole('region',{name:'Verified invoice CSV'}).waitFor();
   const download=page.waitForEvent('download');
@@ -42,6 +52,25 @@ export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,ba
   const parts=bytes.toString('utf8').split('\r\n');
   const row=parts[1].split(',');
   assert.equal(ok(await call(csv+'/exports',saved.request().postDataJSON()),200).artifact.id,a.id);
+  const recovery=page.getByRole('region',{name:'Invoice notification recovery'});
+  await recovery.getByLabel('Invoice recovery engagement').selectOption(engagementId);
+  await recovery.getByRole('button',{name:'Load invoice recovery batches'}).click();
+  await recovery.getByLabel('Invoice recovery batch',{exact:true}).selectOption(batchId);
+  const targetsPath=csv+'/notice-recovery-sources/'+batchId;
+  const targetResponse=page.waitForResponse(r=>r.url().endsWith(targetsPath));
+  await recovery.getByRole('button',{name:'Load invoice recovery targets'}).click();
+  const {targets}=await (await targetResponse).json();
+  assert.deepEqual(targets.map(t=>t.kind),['producer']);
+  await recovery.getByLabel('Invoice recovery target').selectOption(targets[0].id);
+  await recovery.getByLabel('Invoice recovery reason').fill('Recover the original installment export notice');
+  const recoveryResponse=page.waitForResponse(r=>r.url().endsWith(csv+'/notice-recoveries') && r.request().method()==='POST');
+  await recovery.getByRole('button',{name:'Attempt invoice notice recovery'}).click();
+  const recovered=await recoveryResponse;
+  assert.equal(recovered.status(),201,await recovered.text());
+  await recovery.getByText(/Recovery attempt recorded/).waitFor();
+  assert.deepEqual(ok(await call(targetsPath),200).targets,[]);
+  assert.equal((await pool.query('select id from invoice_export_notice_events where batch_id=$1 and artifact_id=$2',[batchId,a.id])).rowCount,1);
+  assert.equal(ok(await call(csv+'/artifacts/'+a.id),200).artifact.sha256,a.sha256);
   const mutate=async(index,value)=>{
     const line=[...row];line[index]=value;
     const payload=Buffer.from([parts[0],line.join(','),''].join('\r\n'));
@@ -61,6 +90,7 @@ export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,ba
   await change(reviewer.role,[grant],false);
   assert.equal((await call(csv+'/artifacts/'+a.id)).status,403);
   assert.equal((await call(csv+'/confirmation-sources/'+batchId)).status,403);
+  assert.equal((await call(targetsPath)).status,403);
   await change(reviewer.role,[grant],true);
   const attestation={expectedOwnerKey:reviewerKey,requestId:randomUUID(),batchId,artifactId:a.id,artifactVersion:1,artifactSha256:a.sha256,
     currency:a.currency,total:a.total,reference:'Synthetic downstream installment',reason:'Matched downstream installment receipt'};

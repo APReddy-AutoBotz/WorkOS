@@ -10,6 +10,8 @@ Under WOS-CORE-005, the role switch records the actor and role transition before
 
 WOS-INV-008 reconciliation exports recognize an existing request across UUID letter case in both the concurrency lock and the audit lookup. Historical audit entries retain their original spelling.
 
+Fixed-fee installment notification recovery uses the accepted export artifact. The PostgreSQL and browser journey checks a failed notification, operator recovery, one notice for the artifact and permission removal. This carries the recovery scenario from #252 into the current billing workflow.
+
 ## Launch work by accountable role
 
 Reconciled on 28 November 2026 against the eight open workstream issues. Engineering verified the main-branch handover archive for `6c70d15b`, including billing fixes through #392. Independent commercial acceptance and buyer rehearsal each require a named revision. [Candidate verification](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint)

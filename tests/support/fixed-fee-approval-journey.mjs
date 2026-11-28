@@ -9,7 +9,7 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
   const preparer=identities.reader,reviewer=identities.manager;
   const access=[...draftGrants,grant,'commercial.contracts.manage','commercial.invoice_approval.manage','commercial.invoice_approval.decide','approvals.view'];
   access.push('commercial.purchase_orders.release','commercial.invoice_batch.confirm','reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
-    'commercial.invoice_export.configure','integrations.invoice_alert_routes.manage');
+    'commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage');
   if (reversalScenario==='stale reviewer') access.push('commercial.invoice_export.deliver');
   const roles=[preparer.role,reviewer.role];
   const saved=(await pool.query('select role_name,permission_key,enabled from role_permissions where role_name=any($1) and permission_key=any($2)',[roles,access])).rows;
