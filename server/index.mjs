@@ -5027,9 +5027,9 @@ const getUtilizationReport = async (req, res, mode) => {
   const settingsResult = await pool.query('select key, value from system_settings');
   const settings = Object.fromEntries(settingsResult.rows.map(row => [row.key, row.value]));
   const expectedWeeklyHours = Number(settings.expectedWeeklyHours || 40);
-  const highThreshold = Number(settings.utilizationThresholdHigh || 100);
-  const lowThreshold = Number(settings.utilizationThresholdLow || 80);
-  const benchThreshold = Number(settings.benchThreshold || 20);
+  const highThreshold = Number(settings.utilizationThresholdHigh ?? 100);
+  const lowThreshold = Number(settings.utilizationThresholdLow ?? 80);
+  const benchThreshold = Number(settings.benchThreshold ?? 20);
 
   const reportDate = parsed.data.date || todayIso();
   const forecastMonths = parsed.data.months || 3;
@@ -5202,9 +5202,9 @@ const getResourcePlanningPayload = async (req) => {
   const employeeScopeWhere = buildEmployeeScopeWhere(req, employeeParams, 'e');
   const settingsRows = (await pool.query('select key, value from system_settings')).rows;
   const settings = Object.fromEntries(settingsRows.map(row => [row.key, row.value]));
-  const highThreshold = Number(settings.utilizationThresholdHigh || 100);
-  const lowThreshold = Number(settings.utilizationThresholdLow || 80);
-  const benchThreshold = Number(settings.benchThreshold || 20);
+  const highThreshold = Number(settings.utilizationThresholdHigh ?? 100);
+  const lowThreshold = Number(settings.utilizationThresholdLow ?? 80);
+  const benchThreshold = Number(settings.benchThreshold ?? 20);
 
   const employees = (await pool.query(`
     select e.*,
