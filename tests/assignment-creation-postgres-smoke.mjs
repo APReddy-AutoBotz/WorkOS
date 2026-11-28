@@ -6,6 +6,10 @@ import { readApprovalOwner } from './support/work-approval-test.mjs';
 import {expectedMigrationsFrom, includeReleaseGrant} from './support/expected-migrations.mjs';
 import { runMigrations } from '../server/migrate.mjs';
 import { capacityHash } from '../server/modules/planning/worker-capacity-service.mjs';
+import { actualCapacityDefinition } from './support/actual-work-test.mjs';
+import { nativeCheckpoint } from '../shared/native-forecast.mjs';
+import { shiftCapacityDate } from '../shared/worker-capacity.mjs';
+import { sumHours } from '../shared/work-hours.mjs';
 const base = '/api/v1/work-approvals/assignments';
 await withCommercialDatabase(async ({ pool, databaseUrl }) => withCommercialMigrationsThrough(126, async rootDir => {
   await runMigrations({ pool, rootDir, logger: { log() {} } });
@@ -111,6 +115,27 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     try { assert.equal((await decideAssignment(request, ids.second, await get(optional.id))).status, 201); }
     finally { await pool.query('drop trigger synthetic_creation_optional on assignment_approval_events;drop function synthetic_creation_optional_failure()'); }
     assert.equal((await get(optional.id)).notificationFailures.length, 1); assert((await pool.query('select * from project_allocations where id=$1', [optional.assignmentId])).rowCount);
+    const profile = await request('/api/v1/worker-capacity/workers/' + f.ownerId + '/profiles', { method: 'POST', body: {
+      expectedLatestId: null, effectiveFrom: today, definition: actualCapacityDefinition, reason: 'Synthetic forecast capacity'
+    } });
+    assert.equal(profile.status, 201, JSON.stringify(profile.body));
+    const futureDay = shiftCapacityDate(today, 1);
+    const window = new URLSearchParams({ startsOn: today, endsOn: nativeCheckpoint(today, 1), months: '1' });
+    const forecast = async () => {
+      const response = await request('/api/v1/native-forecast/workers/' + f.ownerId + '/period?' + window);
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      return response.body.periodLoad;
+    };
+    const baseline = await forecast();
+    assert.notEqual(baseline.plannedHours, null);
+    const proposed = await create({ definition: { ...definition, startsOn: futureDay, endsOn: futureDay } });
+    assert.deepEqual(await forecast(), baseline, 'A proposed assignment contributes no load');
+    assert.equal((await decideAssignment(request, ids.manager, proposed)).status, 201);
+    assert.deepEqual(await forecast(), baseline, 'Intermediate approval contributes no load');
+    assert.equal((await decideAssignment(request, ids.second, await get(proposed.id))).status, 201);
+    const approvedForecast = await forecast();
+    assert.equal(approvedForecast.plannedHours, sumHours([baseline.plannedHours, '1.6']), '20% of one future eight-hour day');
+    assert.equal(approvedForecast.eligibleHours, baseline.eligibleHours);
     const overlap = await create(); assert.equal((await decideAssignment(request, ids.manager, overlap)).status, 201);
     const overlapPolicy = await request('/api/v1/assignment-overlap/policies', { method: 'POST', body: { expectedLatestId: null, effectiveFrom: today, definition: { enabled: true, quantityUnit: 'percentage', includedStatus: 'Active', warningThresholdExact: null, blockingThresholdExact: '40' }, reason: 'Synthetic explicit current-load boundary' } }); assert.equal(overlapPolicy.status, 201, JSON.stringify(overlapPolicy.body));
     const beforeOverlap = await ledger(); assert.equal((await decideAssignment(request, ids.second, await get(overlap.id))).status, 422); assert.deepEqual(await ledger(), beforeOverlap); await noSource(overlap.assignmentId);

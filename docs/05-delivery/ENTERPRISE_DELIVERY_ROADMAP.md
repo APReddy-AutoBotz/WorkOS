@@ -14,6 +14,8 @@ Fixed-fee installment notification recovery uses the accepted export artifact. T
 
 ## Launch work by accountable role
 
+For workforce acceptance, the [assignment creation journey](../../tests/assignment-creation-postgres-smoke.mjs) covers a future assignment from proposal through final approval and measures its effect on planned hours. Use it alongside the leave-adjusted capacity and fixed-hour distribution checks for WOS-04.
+
 Reconciled on 28 November 2026 against the eight open workstream issues. Engineering verified the main-branch handover archive for `6c70d15b`, including billing fixes through #392. Independent commercial acceptance and buyer rehearsal each require a named revision. [Candidate verification](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint)
 
 | Issue | Evidence to reuse | Next action and exit condition | Accountable role |

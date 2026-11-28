@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-RES-005 and WOS-RES-008. The [assignment creation PostgreSQL journey](../../tests/assignment-creation-postgres-smoke.mjs) reads the worker forecast before submission, after submission, after first-stage approval and after final approval. It checks the hours contributed by a future one-day assignment and the eligible capacity denominator.
+
 WOS-INV-003 and WOS-INV-008. The milestone invoice client regression verifies a two-line export with distinct case-sensitive milestone IDs and independently rejects repeated milestones, lines, items and events at generation and download.
 
 WOS-INV-003 and WOS-INV-008. The invoice CSV service regression checks each T&M lineage identity independently on rendering and verified download, including repeated UUIDs with different casing, valid two-line totals and a matching checksum.
