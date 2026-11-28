@@ -31,6 +31,17 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
      name:'synthetic-invalid-billability.csv', mimeType:'text/csv', buffer:Buffer.from(invalidCsv),
    });
    await admin.getByText('Billable on row 2 must be true/false, yes/no, y/n, 1/0 or blank.', {exact:true}).waitFor();
+   const validCsv=csv(importWorker,importSource).trimEnd();
+   const badSibling=validCsv.split('\n')[1].replace(',0.5,', ',invalid,');
+   const invalidWeek=await preview('synthetic-invalid-week.csv', validCsv+'\n'+badSibling+'\n');
+   const rejectedWeek=await invalidWeek.json();
+   assert.equal(rejectedWeek.validRows,0);
+   assert(rejectedWeek.errors.some(error=>error.rowNumber===2 && error.field==='weekEnding'));
+   const differentStatus=validCsv.split('\n')[1].replace(',Submitted,', ',Draft,').replace('Synthetic source import','Synthetic second item');
+   const mixedWeek=await preview('synthetic-mixed-status.csv',validCsv+'\n'+differentStatus+'\n');
+   const mixedReceipt=await mixedWeek.json();
+   assert.equal(mixedReceipt.validRows,0);
+   assert(mixedReceipt.errors.some(error=>error.rowNumber===3 && error.field==='status'));
    const collision=await preview('synthetic-source-conflict.csv',csv(importWorker,source));assert.equal(collision.status(),200);assert.equal((await collision.json()).validRows,0);assert.equal(await admin.getByRole('button',{name:'Apply Valid Rows',exact:true}).isDisabled(),true);assert.deepEqual(await claims(),initialClaims);
    const checked=await preview('synthetic-source-valid.csv',csv(importWorker,importSource));assert.equal(checked.status(),200);const checkedBody=await checked.json();assert.equal(checkedBody.validRows,1,JSON.stringify(checkedBody));assert.equal(checkedBody.sourceIdentityCheck.mode,'preview');await admin.getByText(/Source-linked entries: 1 \(preview\)/).waitFor();const applying=admin.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/imports/timesheets/apply'&&response.request().method()==='POST');await admin.getByRole('button',{name:'Apply Valid Rows',exact:true}).click();const applied=await applying;assert.equal(applied.status(),200);assert.equal((await applied.json()).sourceIdentityCheck.mode,'apply');await admin.getByText(/Source-linked entries: 1 \(applied\)/).waitFor();assert.equal((await claims()).length,3);
    const whitespace=await preview('synthetic-source-whitespace.csv',csv(invalidWorker,{...source,externalId:' ID-WHITESPACE '}));assert.equal(whitespace.status(),200);assert(JSON.parse(whitespace.request().postData()).clientErrors.some(error=>error.field==='sourceIdentity'),'exact whitespace is rejected in client preflight, never silently trimmed');assert.equal((await whitespace.json()).validRows,0);assert.equal((await pool.query("select count(*)::int n from work_entry_source_claims where external_id='ID-WHITESPACE'")).rows[0].n,0,'CSV must not silently trim exact IDs');

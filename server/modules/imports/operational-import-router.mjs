@@ -505,6 +505,7 @@ export const createOperationalImportRouter = ({
     const requestHash = versioned ? hashImportRequest(canonicalRequest(parsed.data, parsed.data.rows)) : null;
     const idempotency = context ? {...context, batchId: importBatchId} : null;
     const groups = new Map();
+    const invalidWeeks = new Set();
     const seenTimesheetEntryKeys = new Set();
     const stagedCaptureReplacements = [];
     let validEntryRows = 0;
@@ -520,7 +521,6 @@ export const createOperationalImportRouter = ({
 
       for (const [index, row] of parsed.data.rows.entries()) {
         const rowNumber = rowNumbers[index];
-        if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
         const rowErrors = [];let sourceIdentity;
         try{sourceIdentity=resolveWorkSourceIdentityAliases(row);}catch(error){rowErrors.push({rowNumber,field:'sourceIdentity',message:error.message,code:'WORK_SOURCE_IDENTITY_INVALID'});}
         if (((row.status || 'Submitted') === 'Submitted' && isAfterToday(row.weekEnding)) || isAfterToday(row.date)) rowErrors.push({rowNumber, field: 'date', message: 'Future work dates cannot be imported; Submitted headers must also end no later than today.'});
@@ -536,6 +536,11 @@ export const createOperationalImportRouter = ({
 
           limit 1
         `, [row.employeeId, scope.organizationId, scope.legalEntityId])).rows[0];
+        const key = employee ? `${employee.id}:${row.weekEnding}` : null;
+        if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) {
+          if (key) invalidWeeks.add(key);
+          continue;
+        }
         if (!employee) rowErrors.push({rowNumber, field: 'employeeId', message: 'Timesheet must reference an active employee.'});
 
         let project = null;
@@ -566,13 +571,19 @@ export const createOperationalImportRouter = ({
           }
         }
         if (rowErrors.length > 0) {
+          if (key) invalidWeeks.add(key);
           errors.push(...rowErrors);
           continue;
         }
 
         const status = row.status || 'Submitted';
-        try{validateImportWorkStatus(status);}catch(error){errors.push({rowNumber,field:'status',message:error.message,code:error.code});continue;}
-        const key = `${employee.id}:${row.weekEnding}`;
+        try {
+          validateImportWorkStatus(status);
+        } catch (error) {
+          invalidWeeks.add(key);
+          errors.push({rowNumber, field:'status', message:error.message, code:error.code});
+          continue;
+        }
         const group = groups.get(key) || {
           employee,
           weekEnding: row.weekEnding,
@@ -581,6 +592,7 @@ export const createOperationalImportRouter = ({
           entries: [],
         };
         if (group.status !== status) {
+          invalidWeeks.add(key);
           errors.push({rowNumber, field: 'status', message: 'Rows for the same employee/week must use the same timesheet status.'});
           continue;
         }
@@ -602,7 +614,13 @@ export const createOperationalImportRouter = ({
       }
 
       const overtimeGroups=[],deadlineGroups=[],stagedSourceKeys=new Set();
-      for (const group of groups.values()) {
+      for (const [key, group] of groups) {
+        if (invalidWeeks.has(key)) {
+          errors.push(...group.entries.map(entry => ({rowNumber:entry.rowNumber, field:'weekEnding',
+            message:'Correct all rows for this employee and week before importing the timesheet.', code:'WORK_IMPORT_WEEK_INVALID'})));
+          validEntryRows -= group.entries.length;
+          continue;
+        }
         let policyEntries,submissionTiming,sourceKeys;
         let previous,previousEvidence,previousDuplicateCheck;
         try {
