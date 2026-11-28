@@ -4406,6 +4406,9 @@ app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requ
   const client = await pool.connect();
   try {
     await client.query('begin');
+    // A missing permission has no row to lock until the first save commits.
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',
+      [`role-permission:${req.params.roleName}:${parsed.data.permissionKey}`]);
     const previous = (await client.query(
       'select * from role_permissions where role_name = $1 and permission_key = $2 for update',
       [req.params.roleName, parsed.data.permissionKey],
