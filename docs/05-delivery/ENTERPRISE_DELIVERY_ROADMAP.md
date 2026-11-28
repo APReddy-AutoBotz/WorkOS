@@ -1,6 +1,6 @@
 # Enterprise delivery and integration roadmap
 
-WOS-03 deployment settings saves now serialize the audit before-image, update and response. The permission registry also serializes concurrent first-time edits to the same role and permission, so both audit records retain the committed predecessor. Regression coverage includes competing administrators’ saves and rollback when audit persistence fails.
+WOS-03 deployment settings saves now serialize the audit before-image, update and response. The permission registry also serializes concurrent first-time edits to the same role and permission, so both audit records retain the committed predecessor. Individual permission grants retain their original actor and role when a second administrator confirms them. Revocation followed by a new grant records a new grant identity. Regression coverage includes competing administrators’ saves and rollback when audit persistence fails.
 
 WOS-04 employee self-service now connects selected-period draft and rejection actions to the worker’s saved timesheet. The governed period calculation supplies employee utilization, and the employee browser journey verifies the correction path across approval states.
 

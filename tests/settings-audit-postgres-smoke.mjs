@@ -149,6 +149,41 @@ await withCommercialDraftingApi(async ({pool, request, identities, actorId}) => 
   assert.deepEqual(retained.rows,[stored]);
   const history=await pool.query("select count(*)::int as count from permission_change_history where role_name='Employee' and permission_key=$1",[permissionKey]);
   assert.equal(history.rows[0].count,2);
+  const grantPath='/api/permissions/user-grants';
+  const target=identities.reader.id;
+  const grantToReader=identity=>request(grantPath,{method:'POST',identity,body:{userId:target,permissionKey}});
+  assert.equal((await grantToReader(identities.reader)).status,403);
+  const results=await Promise.all([grantToReader(identities.manager),grantToReader(otherAdmin)]);
+  for(const reply of results)assert.equal(reply.status,200,JSON.stringify(reply.body));
+  const grant=results[0].body;
+  assert.deepEqual(results[1].body,grant);
+  const grantor=grant.granted_by;
+  assert([actorId,otherAdmin.id].includes(grantor));
+  const confirmer=grantor===actorId?otherAdmin:identities.manager;
+  const grantEvents=async()=>(await pool.query(`select action,user_id,old_value,new_value from audit_logs
+    where entity_type='UserPermissionGrant' and entity_id=$1`,[grant.id])).rows;
+  const events=await grantEvents();
+  assert.equal(events.length,2);
+  assert.deepEqual(events.find(e=>e.action==='Grant User Permission'),{
+    action:'Grant User Permission',user_id:grantor,old_value:null,new_value:grant,
+  });
+  assert.deepEqual(events.find(e=>e.action==='Confirm Existing User Permission'),{
+    action:'Confirm Existing User Permission',user_id:confirmer.id,old_value:grant,new_value:grant,
+  });
+  const grantHistory=(await pool.query(`select changed_by,new_value from permission_change_history
+    where change_type='UserGrant' and user_id=$1 and permission_key=$2`,[target,permissionKey])).rows;
+  assert.deepEqual(grantHistory,[{changed_by:grantor,new_value:grant}]);
+  assert.equal((await request(grantPath+'/'+grant.id,{method:'DELETE',identity:confirmer})).status,200);
+  const reissued=await grantToReader(confirmer);
+  assert.equal(reissued.status,200);
+  assert.notEqual(reissued.body.id,grant.id);
+  assert.equal(reissued.body.granted_by,confirmer.id);
+  assert.deepEqual((await grantEvents()).find(e=>e.action==='Revoke User Permission').old_value,grant);
+  await pool.query("alter table audit_logs add constraint reject_new_user_grant check (action <> 'Grant User Permission') not valid");
+  assert.equal((await request(grantPath+'/'+reissued.body.id,{method:'DELETE',identity:confirmer})).status,200);
+  assert.equal((await grantToReader(confirmer)).status,500);
+  assert.equal((await pool.query('select id from user_permission_grants where user_id=$1 and permission_key=$2',[target,permissionKey])).rowCount,0);
+  assert.equal((await pool.query("select id from permission_change_history where change_type='UserGrant' and user_id=$1 and permission_key=$2",[target,permissionKey])).rowCount,2);
   const before = (await request('/api/settings')).body;
   assert.equal(hours(before),second.new_value.expectedWeeklyHours);
   await pool.query("alter table audit_logs add constraint simulate_audit_failure check (action <> 'Update Settings') not valid");
@@ -156,4 +191,4 @@ await withCommercialDraftingApi(async ({pool, request, identities, actorId}) => 
   assert.deepEqual((await request('/api/settings')).body,before);
   assert.equal((await audit()).rowCount,3);
 });
-console.log('Concurrent settings, catalog and role-permission audit history, per-save responses and atomic rollback passed.');
+console.log('Concurrent settings, catalog, role-permission and individual grant audit history, per-save responses and atomic rollback passed.');
