@@ -16,6 +16,8 @@ Switching roles records the previous and selected roles before the browser recei
 
 The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.
 
+When a buyer requires assignment creation approval, a future assignment enters the worker’s planned hours after the final approver accepts it. For example, a one-day 20% assignment adds 1.6 planned hours on a day with eight available hours.
+
 Forecast checkpoints and roll-offs use the UTC source date returned by the report. The chart labels individual checkpoint dates and the audited CSV includes the source and horizon end dates.
 
 The compatibility utilization report distinguishes approved zero billable hours from unapproved work or unavailable weekly capacity. Its global CSV uses the same inclusion rule. Weekly plan gaps require matching worker coverage. The missing-worker list uses the scoped eligible roster and all timesheets in the selected period. Weekly submission coverage counts each eligible worker once, independently of the review filter.
