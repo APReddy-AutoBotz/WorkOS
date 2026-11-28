@@ -18,6 +18,8 @@ WOS-04 utilization coverage is visible in the overview. Current exceptions and t
 
 WOS-04 historical utilization uses the selected report date to bound approved work in planned, actual, forecast and resource planning reports. The database regression covers dates before, on and between approved week endings.
 
+WOS-03 permission administration is in verification. Role matrix edits and individual grant changes revalidate the acting administrator inside the writing transaction. Schema and stored grants are compatible with the preceding release. Rolling the application back restores its previous permission checks.
+
 WOS-04 annual availability reconciliation uses effective daily capacity in the production planning report. The worker and portfolio checks cover year-crossing approved leave, a holiday within that leave, a midyear part-time change, and unavailable schedule or absence evidence. The separate legacy leave availability report retains its compatibility calculation.
 
 WOS-04 planning acceptance includes matching the 45-day roll-off count to the worker list and highlights. The browser journey covers both date boundaries and a list longer than the first ten results.

@@ -38,6 +38,9 @@ const admin = await authService.login('admin-1', 'workos-test-only');
 assert.ok(admin, 'admin account should be available');
 assert.equal(canManagePermissions(admin), true, 'Admin should manage permission settings by default');
 
+assert.equal(canManagePermissions({...admin, role: 'Employee', permissionRole: 'Employee', permissions: ['permissions.manage']}), false,
+  'Permission settings require the active Admin role even with a retained individual grant');
+
 const config = await adminService.getPermissionConfig();
 assert.ok(config.permissions.length >= 20, 'permission registry should expose enterprise permission keys');
 for (const key of ['commercial.service_units.policy','commercial.service_units.value','commercial.service_units.issue','commercial.service_cost.view','commercial.service_cost.record','commercial.fixed_fee_cost.record','commercial.fixed_fee_forecast.record','commercial.fixed_fee_elapsed.record','commercial.fixed_fee_margin.view','commercial.fixed_fee_progress.record','commercial.fixed_fee_transition.approve','commercial.fixed_fee_statement.sign','commercial.fixed_fee_risk.configure','commercial.po_risk.configure','commercial.retainer_risk.configure','commercial.project_costs.prepare','commercial.project_costs.decide','commercial.service_margin_risk.configure','commercial.fixed_fee_cost.view','commercial.service_margin.view','commercial.service_margin.record','commercial.service_periods.issue','commercial.service_periods.value','commercial.service_periods.decide','commercial.service_units.decide','commercial.service_units.capture','commercial.retainer_statements.prepare','commercial.retainer_statements.decide','commercial.retainer_eligibility.issue','commercial.rate_candidates.view','commercial.rate_candidates.manage','commercial.cost_candidates.view','commercial.cost_candidates.manage']) {

@@ -10,6 +10,8 @@ WOS-APR-005 assignment and leave advance reminders merged in [PR #418](https://g
 
 WOS-COM-007/012/015. The [project cost browser journey](../../tests/support/project-cost-journey.mjs) checks separate preparer and reviewer sessions, pending and approved costs, live gross margin, the prior forecast and the newly retained forecast.
 
+WOS-IAM-003/005/006. Permission management requires the active Admin role. The [PostgreSQL regression](../../tests/settings-audit-postgres-smoke.mjs) checks a retained grant while another role is active and loss of administrator authority while a write is queued. The [permission settings test](../../tests/dynamic-permissions-smoke.mjs) checks the navigation decision.
+
 WOS-CORE-005. The [deployment setup audit test](../../tests/settings-audit-postgres-smoke.mjs) exercises two administrators saving the same new role permission, catalog item and country director, then verifies creation, predecessor values and actor attribution. The same test verifies concurrent individual grants, confirmation audit evidence and a new grant identity after revocation.
 
 WOS-CORE-005. The [settings audit regression](../../tests/settings-audit-postgres-smoke.mjs) verifies competing deployment settings saves, per-request results, scoped permission denial and atomic rollback when audit persistence fails.
