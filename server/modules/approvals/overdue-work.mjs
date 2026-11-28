@@ -69,11 +69,44 @@ export function collectWorkStageReminders(pool) {
     order by c.due_at,c.recipient_id limit 100 on conflict do nothing`);
 }
 
+export async function collectAssignmentLeaveReminders(pool) {
+  const {rows: scopes} = await pool.query(`select distinct organization_id,legal_entity_id
+    from assignment_leave_reminder_candidates c where c.remind_at<=now() and c.due_at>now()
+      and not exists(select from assignment_leave_stage_reminders d
+        where (c.kind='Leave' and d.leave_recipient_id=c.recipient_id)
+          or (c.kind<>'Leave' and d.assignment_recipient_id=c.recipient_id))
+    order by organization_id,legal_entity_id limit 100`);
+  for (const scope of scopes) {
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const key = ['work-approval-scope',scope.organization_id,scope.legal_entity_id].join(':');
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+      await client.query(`insert into assignment_leave_stage_reminders(assignment_recipient_id,leave_recipient_id)
+        select case when c.kind<>'Leave' then c.recipient_id end,case when c.kind='Leave' then c.recipient_id end
+        from assignment_leave_reminder_candidates c
+        where c.organization_id=$1 and c.legal_entity_id=$2 and c.remind_at<=now() and c.due_at>now()
+          and not exists(select from assignment_leave_stage_reminders d
+            where (c.kind='Leave' and d.leave_recipient_id=c.recipient_id)
+              or (c.kind<>'Leave' and d.assignment_recipient_id=c.recipient_id))
+        order by c.due_at,c.recipient_id limit 100 on conflict do nothing`,[scope.organization_id,scope.legal_entity_id]);
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+}
+
 export async function processOverdueWork(pool,o) {
   await collectOverdueWorkStages(pool);
   for (let n=0;n<10;n++) if (!await processRiskTransaction(pool,c=>dispatchNext(c,o))) break;
   if ((await pool.query("select to_regclass('work_approval_stage_reminders') is not null as ready")).rows[0].ready)
     await collectWorkStageReminders(pool);
+  if ((await pool.query("select to_regclass('assignment_leave_stage_reminders') is not null as ready")).rows[0].ready)
+    await collectAssignmentLeaveReminders(pool);
 }
 
 export async function timedWorkInboxRows(c,req,o,{after=null,id=null}={}) {

@@ -20,6 +20,7 @@ export type AssignmentApprovalDefinition = {
     }[];
     completionInApp: boolean;
     stageDueMinutes?: number;
+    reminderLeadMinutes?: number;
     creationRequired?: boolean;
 };
 export type AssignmentApprovalPolicy = {
@@ -76,6 +77,7 @@ export type AssignmentApprovalPage = {
     ownerKey: string;
 };
 export type AssignmentApprovalNotice = {
+    reminder?: true;
     kind: 'assignment-approval' | 'assignment-creation-approval';
     id: string;
     eventId: string;
@@ -149,7 +151,7 @@ const decodeInstance = (v: unknown, id?: string, creation = false): AssignmentAp
 export const decodeAssignmentApprovalInstance = (v: unknown, id?: string): AssignmentApprovalInstance => decodeInstance(v, id) as AssignmentApprovalInstance;
 export const decodeAssignmentCreationInstance = (v: unknown, id?: string): AssignmentCreationInstance => decodeInstance(v, id, true) as AssignmentCreationInstance;
 export const decodeAssignmentApprovalNotice = (v: unknown): AssignmentApprovalNotice => {
-    if (!obj(v) || !keys(v, ['kind', 'id', 'eventId', 'instanceId', 'assignmentId', 'sourceToken', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'deliveryId', 'deliveryStatus', 'createdAt', 'readAt']) || !['assignment-approval', 'assignment-creation-approval'].includes(String(v.kind)) || !uuid(v.id) || !uuid(v.instanceId) || !text(v.assignmentId, 239) || !hash(v.sourceToken) || !integer(v.transitionSequence, 0, 10) || !APPROVAL_EVENT_KEYS.includes(v.eventKey as string) || !text(v.operationId) || v.eventId !== assignmentApprovalIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !uuid(v.templateId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || !v.reasons.length || v.reasons.length > 3 || v.reasons.some(k => !['requester', 'affected_worker', 'current_stage_approver'].includes(k)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !uuid(v.deliveryId) || v.deliveryStatus !== 'Delivered' || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== 'ACTION_REQUIRED' || v.channelDecision !== 'Required'))
+    if (!obj(v) || !keys(v, ['kind', 'id', 'eventId', 'instanceId', 'assignmentId', 'sourceToken', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'deliveryId', 'deliveryStatus', 'createdAt', 'readAt', ...(v.reminder===true && v.eventKey==='approval.action_required' ? ['reminder'] : [])]) || !['assignment-approval', 'assignment-creation-approval'].includes(String(v.kind)) || !uuid(v.id) || !uuid(v.instanceId) || !text(v.assignmentId, 239) || !hash(v.sourceToken) || !integer(v.transitionSequence, 0, 10) || !APPROVAL_EVENT_KEYS.includes(v.eventKey as string) || !text(v.operationId) || v.eventId !== assignmentApprovalIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !uuid(v.templateId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || !v.reasons.length || v.reasons.length > 3 || v.reasons.some(k => !['requester', 'affected_worker', 'current_stage_approver'].includes(k)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !uuid(v.deliveryId) || v.deliveryStatus !== 'Delivered' || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== 'ACTION_REQUIRED' || v.channelDecision !== 'Required'))
         return fail();
     return v as AssignmentApprovalNotice;
 };

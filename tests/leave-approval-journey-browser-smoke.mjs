@@ -45,6 +45,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       await config.getByLabel('Leave stage 2 account',{exact:true}).selectOption(ids.second.id);
       await config.getByLabel('Leave stage 2 role',{exact:true}).selectOption('Admin');
       await config.getByLabel('Time allowed per stage (minutes, optional)',{exact:true}).fill('15');
+      await config.getByLabel('Remind approvers before the deadline (minutes, optional)',{exact:true}).fill('5');
       await config.getByLabel('Leave template locale',{exact:true}).fill('en-GB');
       for(const label of ['Action request','Correction','Completion']){await config.getByLabel('Leave '+label+' title',{exact:true}).fill('Leave {{sourceRef}}');await config.getByLabel('Leave '+label+' body',{exact:true}).fill('Worker {{workerCode}} stage {{stageNumber}}.');}
       await config.getByLabel('Leave informational completion in-app',{exact:true}).selectOption('enabled');

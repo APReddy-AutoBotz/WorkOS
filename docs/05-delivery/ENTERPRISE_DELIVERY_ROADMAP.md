@@ -1,5 +1,7 @@
 # Enterprise delivery and integration roadmap
 
+**WOS-APR-005 in verification.** Assignment change, assignment creation and leave policies can specify an advance reminder for the current stage. Acceptance requires evidence for recipient eligibility, concurrent delivery, independent read receipts and migration replay. Overdue escalation for these sources remains open.
+
 WOS-APR-004 named-stage delegation merged at `0e423dd0` in [PR #413](https://github.com/APReddy-AutoBotz/WorkOS/pull/413). Migration 136 records prospective grants, revocations, stage bindings and the actor who used each binding. The hosted browser journey verified adoption, reviewed batch decisions across all four approval types, recovery after a lost acknowledgement, inbox delivery, retained CSV evidence and revocation. The database journeys check current reminder recipients and exercise the overdue worker with separate, overlapping and revoked delegate assignments. All four jobs passed before merge. [Delegation CI](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/46133254081)
 
 WOS-03 deployment settings saves now serialize the audit before-image, update and response. The permission registry also serializes concurrent first-time edits to the same role and permission, so both audit records retain the committed predecessor. Regression coverage includes competing administrators’ saves and rollback when audit persistence fails.
