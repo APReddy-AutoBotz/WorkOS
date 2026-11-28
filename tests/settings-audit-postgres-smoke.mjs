@@ -94,6 +94,61 @@ await withCommercialDraftingApi(async ({pool, request, identities, actorId}) => 
       assert.deepEqual(event.new_value,response.value.body);
     }
   }
+  const permissionKey='projects.view';
+  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','permissions.manage',true) on conflict(role_name,permission_key) do update set enabled=true");
+  await pool.query("delete from role_permissions where role_name='Employee' and permission_key=$1",[permissionKey]);
+  const gate=await pool.connect();
+  let permissionSaves;
+  try {
+    await gate.query('begin');
+    const lockKey='role-permission:Employee:'+permissionKey;
+    await gate.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[lockKey]);
+    permissionSaves=Promise.allSettled([identities.manager,otherAdmin].map((identity,i)=>
+      request('/api/permissions/roles/Employee',{method:'PATCH',identity,body:{permissionKey,enabled:i===0}})));
+    const deadline=Date.now()+10000;
+    for(;;){
+      const {rows:[{writers}]}=await gate.query(`select count(*)::int as writers from pg_locks
+        where locktype='advisory' and not granted and database=(select oid from pg_database where datname=current_database())
+          and classid::bigint=((hashtextextended($1,0)>>32)&4294967295)
+          and objid::bigint=(hashtextextended($1,0)&4294967295)`,[lockKey]);
+      if(writers===2)break;
+      assert(Date.now()<deadline,'Both permission saves must reach the same first-write boundary');
+      await delay(25);
+    }
+  } finally {
+    try {await gate.query('rollback');} finally {gate.release();}
+  }
+  for(const [i,reply] of (await permissionSaves).entries()){
+    assert.equal(reply.status,'fulfilled');
+    assert.equal(reply.value.status,200,JSON.stringify(reply.value.body));
+    assert.equal(reply.value.body.enabled,i===0);
+  }
+  const permissionRows=(await pool.query(`select changed_by,old_value,new_value from permission_change_history
+    where role_name='Employee' and permission_key=$1`,[permissionKey])).rows;
+  const permissionEvents=(await pool.query(`select user_id,old_value,new_value from audit_logs
+    where entity_type='RolePermission' and entity_id=$1`,['Employee:'+permissionKey])).rows;
+  assert.equal(permissionRows.length,2);
+  assert.equal(permissionEvents.length,2);
+  const initial=permissionRows.find(row=>row.old_value===null);
+  assert(initial,'One history entry must record the initial permission');
+  const replacement=permissionRows.find(row=>row!==initial);
+  assert.deepEqual(replacement.old_value,initial.new_value);
+  const stored=(await pool.query("select * from role_permissions where role_name='Employee' and permission_key=$1",[permissionKey])).rows[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(stored)),replacement.new_value);
+  for(const row of permissionRows){
+    const event=permissionEvents.find(event=>event.user_id===row.changed_by);
+    assert.deepEqual(event.old_value,row.old_value);
+    assert.deepEqual(event.new_value,row.new_value);
+  }
+  await pool.query("alter table audit_logs add constraint reject_role_permission_audit check (action <> 'Update Role Permission') not valid");
+  const rejected=await request('/api/permissions/roles/Employee',{
+    method:'PATCH',body:{permissionKey,enabled:!stored.enabled},
+  });
+  assert.equal(rejected.status,500);
+  const retained=await pool.query("select * from role_permissions where role_name='Employee' and permission_key=$1",[permissionKey]);
+  assert.deepEqual(retained.rows,[stored]);
+  const history=await pool.query("select count(*)::int as count from permission_change_history where role_name='Employee' and permission_key=$1",[permissionKey]);
+  assert.equal(history.rows[0].count,2);
   const before = (await request('/api/settings')).body;
   assert.equal(hours(before),second.new_value.expectedWeeklyHours);
   await pool.query("alter table audit_logs add constraint simulate_audit_failure check (action <> 'Update Settings') not valid");
@@ -101,4 +156,4 @@ await withCommercialDraftingApi(async ({pool, request, identities, actorId}) => 
   assert.deepEqual((await request('/api/settings')).body,before);
   assert.equal((await audit()).rowCount,3);
 });
-console.log('Concurrent deployment settings audit, per-save response, permission denial and rollback passed.');
+console.log('Concurrent settings, catalog and role-permission audit history, per-save responses and atomic rollback passed.');

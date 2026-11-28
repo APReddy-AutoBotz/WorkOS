@@ -2,7 +2,7 @@
 
 For a fixed-fee engagement, finance can enter a non-labor project cost and a second user can approve it. The live gross margin includes approved costs through the selected date. A previously saved forecast preserves the costs and margin recorded at the time.
 
-When two administrators save deployment settings at the same time, each receives the values committed by their save. The audit history records the settings in effect immediately before each change. If both administrators save the same new catalog item or country director, the history identifies who created it and who updated it.
+When two administrators save deployment settings at the same time, each receives the values committed by their save. The audit history records the settings in effect immediately before each change. If both administrators save the same new catalog item or country director, the history identifies who created it and who updated it. Concurrent first-time saves of a role permission also retain the previous setting and the administrator responsible in both permission history and the audit log.
 
 In the employee workspace, load a period to continue a saved draft or correct a rejected timesheet. Each action opens that worker’s saved week in work capture.
 
