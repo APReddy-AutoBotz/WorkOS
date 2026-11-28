@@ -834,7 +834,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         body: { ...originalPortfolioCommand, requestId: reportRequest.requestId.toLowerCase() },
       });
       assert.equal(repeated.status, 409);
-      assert.equal(repeated.body.code, 'BILLING_REPORT_ALREADY_RECORDED');
+      assert.equal(repeated.body.error.code, 'BILLING_REPORT_ALREADY_RECORDED');
       const raceReport = { ...reportRequest, requestId: randomUUID() };
       const raceResults = await Promise.all([
         request(route + '/reconciliation/exports', { method: 'POST', body: raceReport }),
