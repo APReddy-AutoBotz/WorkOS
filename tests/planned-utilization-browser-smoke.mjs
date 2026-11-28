@@ -312,16 +312,16 @@ try {
   await filters().nth(0).selectOption('All Departments');
   await filters().nth(1).selectOption('synthetic-director-a');
   await expectTableRows([rows()[0], rows()[1], rows()[2], rows()[4]]);
-  await filters().nth(2).selectOption('Over 100%');
+  await filters().nth(2).selectOption('above');
   await expectTableRows([rows()[1]]);
   await filters().nth(1).selectOption('All Directors');
   await expectTableRows([rows()[1], rows()[3]]);
-  await filters().nth(2).selectOption('80-100%');
+  await filters().nth(2).selectOption('within');
   await expectTableRows([rows()[0]]);
-  await filters().nth(2).selectOption('Under 80%');
+  await filters().nth(2).selectOption('below');
   await expectTableRows([rows()[2], rows()[4]]);
   await button('Deep Audit').click();
-  assert.equal(await filters().nth(2).inputValue(), 'Over 100%');
+  assert.equal(await filters().nth(2).inputValue(), 'above');
   await expectTableRows([rows()[1], rows()[3]]);
   await filters().nth(2).selectOption('All Bands');
   await search().fill('no-synthetic-match');
@@ -336,7 +336,7 @@ try {
   await search().fill('medium');
   await filters().nth(0).selectOption('Synthetic Delivery');
   await filters().nth(1).selectOption('synthetic-director-a');
-  await filters().nth(2).selectOption('80-100%');
+  await filters().nth(2).selectOption('within');
   await expectTableRows([rows()[0]]);
   await captureExports('baseline');
 
@@ -365,7 +365,7 @@ try {
   await expectSuccess('after-failures');
   assert.equal(await search().inputValue(), 'medium', 'search survives failed refresh and successful retry');
   assert.deepEqual(await filters().evaluateAll(selects => selects.map(select => select.value)),
-    ['Synthetic Delivery', 'synthetic-director-a', '80-100%'], 'all existing filter selections survive recovery');
+    ['Synthetic Delivery', 'synthetic-director-a', 'within'], 'all existing filter selections survive recovery');
   await expectTableRows([rows('after-failures')[0]]);
   const beforeStaleCallbacks = await effects();
   await invokeCaptured(['baseline-plan', 'baseline-csv']);
@@ -499,7 +499,18 @@ try {
   await settle(narrowRecovery, bundle('narrow-recovery'));
   await expectSuccess('narrow-recovery');
   await expectTableRows(eligibleRows('narrow-recovery'));
-  const narrowEmpty = await refresh(lastId(narrowRecovery));
+  const custom = await refresh(lastId(narrowRecovery));
+  const configured = bundle('custom-bands');
+  configured.settings = {...settings, utilizationThresholdLow: 65, utilizationThresholdHigh: 125};
+  await settle(custom, configured);
+  const bands = filters().nth(2);
+  await bands.selectOption({label:'65–125%'});
+  await expectTableRows(configured.planned.rows.slice(0,3));
+  await bands.selectOption({label:'Under 65%'});
+  await expectTableRows([configured.planned.rows[4]]);
+  await bands.selectOption({label:'Over 125%'});
+  await expectTableRows([configured.planned.rows[3]]);
+  const narrowEmpty = await refresh(lastId(custom));
   await settle(narrowEmpty, bundle('narrow-empty', {empty: true}));
   await expectEmpty();
   await expectNarrowFit(page.getByRole('status'));

@@ -8,6 +8,8 @@ WOS-INV-003 and WOS-INV-008. The invoice CSV service regression checks each T&M 
 
 WOS-RES-006. The [PostgreSQL report journey](../../tests/native-forecast-postgres-smoke.mjs) checks explicit zero thresholds against worker bands, bench counts and the resource planning flags. It also checks report defaults when threshold settings are absent.
 
+The [planned utilization browser journey](../../tests/planned-utilization-browser-smoke.mjs) checks the displayed filters and matching workers when a buyer selects 65% and 125% as the band limits. Workers exactly at either limit stay in the middle band.
+
 WOS-INV-006. The populated milestone upgrade journey starts the API with a configured finance adapter and verifies that existing invoice batches can be inspected before provider tables are installed. It checks retained artifact bytes, billing confirmation and occupancy after migration.
 
 WOS-INV-006 and WOS-NFR-REL-004. The finance provider receipt test covers declared and streamed response sizes on delivery and lookup, including retry with the same operation and acceptance at the size limit.
