@@ -34,18 +34,24 @@ export const InvoiceNoticeRecovery = ({ choices }: { choices: Choice[] }) => {
       'employees.view',
       'notifications.view',
     ].every(hasRatePermission);
+  const resetTargets = () => {
+    setTargets([]);
+    setNextTarget(null);
+    setSelected('');
+    setReason('');
+  };
+  const resetBatches = () => {
+    setDrafts([]);
+    setNextDraft(null);
+    setBatch('');
+    resetTargets();
+  };
   const clear = (message: string) => {
     ++generation.current;
     context.current = null;
     inFlight.current = false;
     setEngagement('');
-    setDrafts([]);
-    setNextDraft(null);
-    setBatch('');
-    setTargets([]);
-    setNextTarget(null);
-    setSelected('');
-    setReason('');
+    resetBatches();
     setPending(null);
     setBusy(false);
     setNotice(message);
@@ -101,22 +107,18 @@ export const InvoiceNoticeRecovery = ({ choices }: { choices: Choice[] }) => {
   };
   const loadDrafts = (after?: string) =>
     void run(async (c) => {
+      if (!after) resetBatches();
       const x = await invoiceDrafts.list(c, after);
       setDrafts((old) => (after ? [...old, ...x.batches] : x.batches));
       setNextDraft(x.nextAfter);
-      if (!after) {
-        setBatch('');
-        setTargets([]);
-        setSelected('');
-      }
     });
   const loadTargets = (after?: string) => {
     if (batch)
       void run(async (c) => {
+        if (!after) resetTargets();
         const x = await invoiceCsv.recoveryTargets(batch, c, after);
         setTargets((old) => (after ? [...old, ...x.targets] : x.targets));
         setNextTarget(x.nextAfter);
-        if (!after) setSelected('');
       });
   };
   const execute = (op: InvoiceNoticeRecoveryOperation, receipt = false) =>
@@ -125,14 +127,14 @@ export const InvoiceNoticeRecovery = ({ choices }: { choices: Choice[] }) => {
       try {
         await invoiceCsv.recover(op, c, receipt);
         setPending(null);
-        setTargets([]);
-        setSelected('');
+        resetTargets();
         setNotice(
           'Recovery attempt recorded. Reload targets to check remaining work; no external alert was sent.',
         );
       } catch (e) {
         if (!receipt && e instanceof ApiClientError && [400, 403, 409, 422].includes(e.status)) {
           setPending(null);
+          resetTargets();
           setNotice('Recovery was refused. Reload before a deliberate new request.');
           return;
         }
@@ -170,10 +172,8 @@ export const InvoiceNoticeRecovery = ({ choices }: { choices: Choice[] }) => {
               disabled={busy || !!pending}
               onChange={(e) => {
                 setEngagement(e.target.value);
-                setDrafts([]);
-                setBatch('');
-                setTargets([]);
-                setSelected('');
+                resetBatches();
+                setNotice('');
               }}
             >
               <option value="">Choose</option>
@@ -200,8 +200,8 @@ export const InvoiceNoticeRecovery = ({ choices }: { choices: Choice[] }) => {
               disabled={busy || !!pending}
               onChange={(e) => {
                 setBatch(e.target.value);
-                setTargets([]);
-                setSelected('');
+                resetTargets();
+                setNotice('');
               }}
             >
               <option value="">Choose</option>
@@ -232,7 +232,11 @@ export const InvoiceNoticeRecovery = ({ choices }: { choices: Choice[] }) => {
               aria-label="Invoice recovery target"
               value={selected}
               disabled={busy || !!pending}
-              onChange={(e) => setSelected(e.target.value)}
+              onChange={(e) => {
+                setSelected(e.target.value);
+                setReason('');
+                setNotice('');
+              }}
             >
               <option value="">Choose</option>
               {targets.map((x) => (
@@ -247,11 +251,12 @@ export const InvoiceNoticeRecovery = ({ choices }: { choices: Choice[] }) => {
             <input
               aria-label="Invoice recovery reason"
               value={reason}
-              disabled={busy || !!pending}
+              maxLength={1000}
+              disabled={!selected || busy || !!pending}
               onChange={(e) => setReason(e.target.value)}
             />
           </label>
-          <button type="button" disabled={!selected || busy || !!pending} onClick={submit}>
+          <button type="button" disabled={!selected || reason.trim().length < 3 || busy || !!pending} onClick={submit}>
             Attempt invoice notice recovery
           </button>
           {pending && (

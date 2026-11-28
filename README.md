@@ -6,7 +6,7 @@ Managed-service reporting supports a read-only comparison of a retained monthly 
 
 The application build and runtime share an immutable Node image. CI and buyer Compose use the same pinned PostgreSQL image. CI retains the tested production image, its checksums and runtime package inventories for seven days. [Container verification and handover](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#verifying-the-tested-container)
 
-If a fixed-fee installment export succeeds and its notification fails, open **Invoice notification recovery**. Select the engagement and batch, load the recovery targets, and record the reason for retrying the notice. Finance can retrieve the original invoice CSV throughout recovery.
+If a fixed-fee installment export succeeds and its notification fails, open **Invoice notification recovery**. Select the engagement and batch, load the recovery targets, and record the reason for retrying the notice. Changing the engagement, batch or target clears the previous reason. Enter a reason for the selected target before submitting. Finance can retrieve the original invoice CSV throughout recovery.
 
 Billing reconciliation exports use a single request ID across engagement and portfolio reports. If a retry reports that the export was already recorded, use the original request ID to check audit history. Uppercase and lowercase UUIDs identify the same request.
 

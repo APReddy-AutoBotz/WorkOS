@@ -10,7 +10,7 @@ Under WOS-CORE-005, the role switch records the actor and role transition before
 
 WOS-INV-008 reconciliation exports recognize an existing request across UUID letter case in both the concurrency lock and the audit lookup. Historical audit entries retain their original spelling.
 
-Fixed-fee installment notification recovery uses the accepted export artifact. The PostgreSQL and browser journey checks a failed notification, operator recovery, one notice for the artifact and permission removal. This carries the recovery scenario from #252 into the current billing workflow.
+Fixed-fee installment notification recovery uses the accepted export artifact. The PostgreSQL and browser journey checks a failed notification, operator recovery, one notice for the artifact and permission removal. The recovery workspace clears dependent page positions and the prior reason when the selection changes. An uncertain submission retains its original receipt lookup.
 
 ## Launch work by accountable role
 
