@@ -25,11 +25,13 @@ WOS-01 imports only approved files from the pinned commit, excludes history/bran
 
 Every import has batch ID, file/source, schema version, idempotency key, dry-run result, row status/error, actor and audit. Validation covers required headers, formats, scoped identifiers, references, duplicates, dates/effective overlaps and policy constraints. Apply is transactional by defined unit and reports partial outcomes explicitly.
 
+Project, allocation and timesheet imports validate explicit billability before applying any rows. The CSV preview and both API versions accept the same case-insensitive true/false, yes/no, y/n and 1/0 values. Blank cells retain the channel default. An invalid value identifies its row and leaves the batch unapplied. An exact replay of a previously committed versioned import retains its original receipt.
+
+The replacement unit for a timesheet import is one resolved employee and week ending. A rejected row prevents replacement of that entire identified week. Preview and apply can still accept complete weeks for other employees. Error results identify each withheld row so the operator can correct and resubmit the complete week.
+
 ## Migration policy
 
 Migrations are ordered, versioned and ledgered. CI proves fresh install and supported upgrade. Data conversions define preconditions, backup, counts/control totals, postchecks and roll-forward/rollback. Startup is not the only production migration mechanism.
-
-Project, allocation and timesheet imports validate explicit billability before applying any rows. The CSV preview and both API versions accept the same case-insensitive true/false, yes/no, y/n and 1/0 values. Blank cells retain the channel default. An invalid value identifies its row and leaves the batch unapplied. An exact replay of a previously committed versioned import retains its original receipt.
 
 ## Production readiness
 

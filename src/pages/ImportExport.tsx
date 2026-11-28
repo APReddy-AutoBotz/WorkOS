@@ -437,6 +437,38 @@ export const ImportExport = () => {
       else if (id === 'employees' && row.employeeId) employeeIds.add(row.employeeId);
     });
 
+    if (id === 'timesheets') {
+      const employeeKeys = new Map<string, string>();
+      for (const employee of employees) {
+        employeeKeys.set(employee.id, employee.id);
+        employeeKeys.set(employee.employeeId, employee.id);
+      }
+      const invalidWeeks = new Set<string>();
+      const weekStatuses = new Map<string, string>();
+      const weekKeys = rows.map((row, index) => {
+        const employeeId = employeeKeys.get(row.employeeId);
+        if (!employeeId || !row.weekEnding) return null;
+        const key = JSON.stringify([employeeId, row.weekEnding]);
+        const status = row.status || 'Submitted';
+        const rowNumber = index + 2;
+        if (weekStatuses.has(key) && weekStatuses.get(key) !== status) {
+          addError(errors, rowNumber, 'status', 'Rows for the same employee/week must use the same timesheet status.');
+          rowsWithErrors.add(rowNumber);
+        } else {
+          weekStatuses.set(key, status);
+        }
+        if (rowsWithErrors.has(rowNumber)) invalidWeeks.add(key);
+        return key;
+      });
+      weekKeys.forEach((key, index) => {
+        const rowNumber = index + 2;
+        if (key && invalidWeeks.has(key) && !rowsWithErrors.has(rowNumber)) {
+          addError(errors, rowNumber, 'weekEnding', 'Correct all rows for this employee and week before importing the timesheet.');
+          rowsWithErrors.add(rowNumber);
+        }
+      });
+    }
+
     return {
       errors,
       validRows: rows.filter((_, index) => !rowsWithErrors.has(index + 2)),

@@ -16,6 +16,8 @@ WOS-04 employee self-service now connects selected-period draft and rejection ac
 
 WOS-04 utilization coverage is visible in the overview. Current exceptions and the current average use workers with a qualifying approved week and positive configured weekly hours.
 
+WOS-04 timesheet replacement now validates an identified employee week as a group before replacing entries. Verification covers invalid rows mixed with a valid week for a second worker. Production data needs no migration.
+
 WOS-04 import billability is in verification. Project, assignment and timesheet imports check explicit billable values before writing. The CSV preview identifies the invalid row. The PostgreSQL suite checks both API versions and the browser journey checks correction and re-upload.
 
 WOS-04 historical utilization uses the selected report date to bound approved work in planned, actual, forecast and resource planning reports. The database regression covers dates before, on and between approved week endings.

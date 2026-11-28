@@ -37,6 +37,36 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const raced={...source,externalId:'CONCURRENT'},raceWorkers=[await worker(),await worker()],race=await Promise.all(raceWorkers.map(employee_id=>post({...body,employee_id,entries:[{...entry,source_identity:raced}]})));assert.deepEqual(race.map(result=>result.status).sort(),[200,409]);assert.equal((await pool.query('select count(*)::int n from timesheets where employee_id=any($1::text[])',[raceWorkers])).rows[0].n,1);
   for(const versioned of [false,true]){
    const employeeId=await worker(),identity={...source,externalId:'IMPORT-'+versioned},row={employeeId,weekEnding:today,workType:'Client Misc Task',clientName:'Synthetic imported source',category:'Synthetic imported identity',date:today,hours:'0.5',remark:'Synthetic imported note',billable:versioned?' N ':' no ',status:'Draft',sourceIdentity:identity},url=versioned?'/api/v1/imports/timesheets/apply':'/api/imports/timesheets/apply';const call=(rows,dryRun=false,key=randomUUID())=>request(url,{method:'POST',headers:versioned?{'Idempotency-Key':key}:{},body:{fileName:'synthetic-source.csv',rows,...(versioned?{schemaVersion:'timesheet-import/1',dryRun}:{})}});
+   const retainedWorker = await worker();
+   const retainedCode = 'code-'+randomUUID();
+   await pool.query('update employees set employee_id=$1 where id=$2',[retainedCode,retainedWorker]);
+   const wholeRow = {...row, employeeId:retainedWorker, sourceIdentity:null};
+   const independentWorker = await worker();
+   assert.equal((await call([wholeRow])).body.validRows,1);
+   const savedWeek = async () => (await pool.query(`select to_jsonb(t) header, to_jsonb(e) entry from timesheets t
+     join timesheet_entries e on e.timesheet_id=t.id where t.employee_id=$1 and t.week_ending=$2 order by e.id`,[retainedWorker,today])).rows;
+   const beforeWeek = await savedWeek();
+   assert.equal(beforeWeek.length,1);
+   const independent = {...wholeRow, employeeId:independentWorker};
+   const sibling = {...wholeRow, employeeId:retainedCode, clientName:'Synthetic companion', hours:'1'};
+   for (const bad of [
+     {...wholeRow, clientName:''},
+     {...wholeRow, status:'Submitted'},
+     {...sibling},
+   ]) {
+     const rows=[sibling, bad, independent];
+     if (versioned) {
+       const preview=await call(rows,true);
+       assert.equal(preview.body.validRows,1,JSON.stringify(preview.body));
+       assert.deepEqual(await savedWeek(),beforeWeek);
+     }
+     const result=await call(rows);
+     assert.equal(result.body.status,'Partial',JSON.stringify(result.body));
+     assert.equal(result.body.validRows,1);
+     assert(result.body.errors.some(e=>e.rowNumber===2 && e.code==='WORK_IMPORT_WEEK_INVALID'));
+     assert.deepEqual(await savedWeek(),beforeWeek);
+   }
+   assert.equal((await pool.query('select count(*)::int n from timesheets where employee_id=$1 and week_ending=$2',[independentWorker,today])).rows[0].n,1);
    const beforeBillable = await workSnapshot(pool);
    const existingClaims = await claims(pool);
    const invalid = await call([row, {...row, billable:'treu'}]);
