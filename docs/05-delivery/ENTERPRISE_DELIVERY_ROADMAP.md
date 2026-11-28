@@ -1,5 +1,7 @@
 # Enterprise delivery and integration roadmap
 
+WOS-04 utilization coverage is visible in the overview. Current exceptions and the current average use workers with a qualifying approved week and positive configured weekly hours.
+
 WOS-04 historical utilization uses the selected report date to bound approved work in planned, actual, forecast and resource planning reports. The database regression covers dates before, on and between approved week endings.
 
 WOS-04 annual availability reconciliation uses effective daily capacity in the production planning report. The worker and portfolio checks cover year-crossing approved leave, a holiday within that leave, a midyear part-time change, and unavailable schedule or absence evidence. The separate legacy leave availability report retains its compatibility calculation.

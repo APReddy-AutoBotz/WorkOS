@@ -5028,7 +5028,7 @@ const getUtilizationReport = async (req, res, mode) => {
 
   const settingsResult = await pool.query('select key, value from system_settings');
   const settings = Object.fromEntries(settingsResult.rows.map(row => [row.key, row.value]));
-  const expectedWeeklyHours = Number(settings.expectedWeeklyHours || 40);
+  const expectedWeeklyHours = Number(settings.expectedWeeklyHours ?? 40);
   const highThreshold = Number(settings.utilizationThresholdHigh ?? 100);
   const lowThreshold = Number(settings.utilizationThresholdLow ?? 80);
   const benchThreshold = Number(settings.benchThreshold ?? 20);
@@ -5155,6 +5155,7 @@ const getUtilizationReport = async (req, res, mode) => {
         case when $7 = 'actual' then coalesce(la.actual_utilization, 0) else el.planned_utilization end desc,
         el.name
     `, params);
+    const measured = result.rows.filter(row => row.latest_approved_week && expectedWeeklyHours > 0);
     res.json({
       mode,
       asOfDate: targetDate,
@@ -5171,9 +5172,11 @@ const getUtilizationReport = async (req, res, mode) => {
         averagePlanned: result.rows.length
           ? Number((result.rows.reduce((sum, row) => sum + Number(row.planned_utilization), 0) / result.rows.length).toFixed(1))
           : 0,
-        averageActual: result.rows.length
-          ? Number((result.rows.reduce((sum, row) => sum + Number(row.actual_utilization), 0) / result.rows.length).toFixed(1))
-          : 0,
+        actualWorkerCount: measured.length,
+        actualBelowThreshold: measured.filter(row => Number(row.actual_utilization) < lowThreshold || Number(row.actual_utilization) <= benchThreshold).length,
+        averageActual: measured.length
+          ? Number((measured.reduce((sum, row) => sum + Number(row.actual_utilization), 0) / measured.length).toFixed(1))
+          : null,
         overloaded: result.rows.filter(row => Number(row.planned_utilization) > highThreshold).length,
         underutilized: result.rows.filter(row => {
           const planned = Number(row.planned_utilization);
