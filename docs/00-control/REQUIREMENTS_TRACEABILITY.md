@@ -18,6 +18,8 @@ WOS-CORE-005. The [deployment setup audit test](../../tests/settings-audit-postg
 
 WOS-CORE-005. The [settings audit regression](../../tests/settings-audit-postgres-smoke.mjs) verifies competing deployment settings saves, per-request results, scoped permission denial and atomic rollback when audit persistence fails.
 
+WOS-TIM-003 and WOS-TIM-011. The [work import database suite](../../tests/work-source-identity-postgres-smoke.mjs) exercises malformed billability across project, allocation and work imports. The [CSV browser journey](../../tests/work-source-identity-journey-browser-smoke.mjs) covers the upload error and subsequent valid preview.
+
 WOS-WKF-007. The [employee browser journey](../../tests/own-work-planning-journey-browser-smoke.mjs) opens a previous week directly from its draft and rejection actions, submits the correction and checks that the correction action disappears after approval.
 
 WOS-RPT-001/002. The [database regression](../../tests/native-forecast-postgres-smoke.mjs) covers missing, positive and zero approved actuals, and the [overview browser check](../../tests/utilization-reports-browser-smoke.mjs) verifies that workers missing approved evidence stay out of current exceptions.

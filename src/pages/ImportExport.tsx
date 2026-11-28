@@ -1,3 +1,4 @@
+import {validateImportBillability, parseImportBillable} from '../../shared/import-billability.mjs';
 import {categoryImportKeySuffix} from '../../shared/work-category.mjs';
 import {overlapImportNotice} from '../../shared/assignment-overlap-policy.mjs';
 import {resolveWorkSourceIdentityAliases,sourceIdentityImportNotice} from '../../shared/work-source-identity.mjs';
@@ -479,6 +480,15 @@ export const ImportExport = () => {
     }
     if (!isCurrentRequest()) return;
     const { headers, rows } = parseCsv(csvText);
+    if (id === 'timesheets' || id === 'allocations' || id === 'projects') {
+      try {
+        validateImportBillability(rows);
+      } catch (error) {
+        setLastResult(error instanceof Error ? error.message : 'Invalid billable value.');
+        setIsPreviewing(false);
+        return;
+      }
+    }
     const option = importOptions.find(item => item.id === id);
     const employeeCredentials = id === 'employees'
       ? rows.map(row => row.initialPassword).filter((value): value is string => Boolean(value))
@@ -933,7 +943,7 @@ export const ImportExport = () => {
           startDate: row.startDate || current?.startDate || new Date().toISOString().split('T')[0],
           endDate: row.endDate || current?.endDate || new Date().toISOString().split('T')[0],
           status: (row.status as Project['status']) || current?.status || 'Proposed',
-          billable: row.billable ? row.billable === 'true' : current?.billable ?? true,
+          billable: parseImportBillable(row.billable, current?.billable ?? true),
           plannedUtilization: current?.plannedUtilization || 0,
           actualUtilization: current?.actualUtilization || 0,
           resourceCount: current?.resourceCount || 0,
@@ -944,7 +954,10 @@ export const ImportExport = () => {
     }
 
     if (pendingImport.id === 'allocations') {
-      const [allEmployees, allProjects] = await Promise.all([employeeService.getAll(), projectService.getAll()]);
+      const [allEmployees, allProjects, allocations] = await Promise.all([
+        employeeService.getAll(), projectService.getAll(), allocationService.getAll(),
+      ]);
+      const savedBillability = new Map(allocations.map(allocation => [allocation.id, allocation.billable]));
       for (const row of pendingImport.validRows) {
         const employee = allEmployees.find(item => item.id === row.employeeId || item.employeeId === row.employeeId);
         const project = allProjects.find(item => item.id === row.projectId || item.projectCode === row.projectId);
@@ -959,7 +972,7 @@ export const ImportExport = () => {
           percentage: Number(row.percentage),
           startDate: row.startDate,
           endDate: row.endDate,
-          billable: row.billable ? row.billable === 'true' : true,
+          billable: parseImportBillable(row.billable, savedBillability.get(row.id) ?? true),
           status: (row.status as Allocation['status']) || 'Active',
         };
         await allocationService.save(allocation);
@@ -986,7 +999,7 @@ export const ImportExport = () => {
           rejectionReason: row.rejectionReason,
           entries: [],
         };
-        const billable = row.billable ? row.billable === 'true' : row.workType === 'Project Work';
+        const billable = parseImportBillable(row.billable, row.workType === 'Project Work');
         const hours = Number(row.hours);
         current.totalHours += hours;
         current.billableHours += billable ? hours : 0;
@@ -1003,7 +1016,7 @@ export const ImportExport = () => {
           hours,
           remark: row.remark,
           status,
-          billable: true,
+          billable,
           weekEnding: row.weekEnding,
         });
         groups.set(key, current);

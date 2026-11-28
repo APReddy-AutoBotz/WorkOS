@@ -88,6 +88,7 @@ import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.
 import {attachImportErrorSourceIdentifiers, importErrorRowSchema, resolveImportApplyRowNumbers} from './modules/imports/import-error-provenance.mjs';
 import {safeEmployeeImportDryRunErrors, validateEmployeeImportDryRun} from './modules/imports/employee-import-dry-run.mjs';
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
+import {parseImportBillable} from '../shared/import-billability.mjs';
 import {createProjectImportRouter} from './modules/imports/project-import-router.mjs';
 import {createOperationalImportRouter} from './modules/imports/operational-import-router.mjs';
 import {createProjectCodeLockKey, createScopedIdempotencyLockKey, hashEmployeeImportRequest, hashImportRequest, normalizeEmployeeImportClientErrors, normalizeIdempotencyKey, redactCredentialEchoes} from './modules/imports/idempotency.mjs';
@@ -5664,7 +5665,7 @@ const projectImportRouter = createProjectImportRouter({
   audit,
   importErrorRowSchema,
   strictIsoDateSchema,
-  parseBoolean,
+  parseBoolean: parseImportBillable,
   collectDuplicateImportRows,
   resolveImportApplyRowNumbers,
   attachImportErrorSourceIdentifiers,
@@ -6535,7 +6536,7 @@ const operationalImportRouter = createOperationalImportRouter({
   audit,
   importErrorRowSchema,
   strictIsoDateSchema,
-  parseBoolean,
+  parseBoolean: parseImportBillable,
   collectDuplicateImportRows,
   resolveImportApplyRowNumbers,
   attachImportErrorSourceIdentifiers,
