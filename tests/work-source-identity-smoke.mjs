@@ -1,3 +1,4 @@
+import {parseImportBillable, validateImportBillability} from '../shared/import-billability.mjs';
 import assert from 'node:assert/strict';
 import {normalizeWorkSourceIdentity as normalize,workSourceIdentityIsValid as valid,workSourceIdentityKey as key,resolveWorkSourceIdentityAliases as aliases,readSourceIdentityCheck,sourceIdentityCommandRequiresAcknowledgement,sourceIdentityImportNotice} from '../shared/work-source-identity.mjs';
 import {workSourceIdentityInput} from '../server/modules/work-capture/work-source-identity.mjs';
@@ -10,3 +11,8 @@ const base={id:'source-entry',employeeId:'worker-synthetic',weekEnding:'2026-10-
 const row={id:'source-row',hours:[0,0],exactHours:['0','0'],remarks:['',''],sourceIdentities:[null,source],sourceIdentityRecorded:[false,true]};assert(captureCellPresent(row,1,{}));const split=patchVisibleCaptureRow([row],{},row.id,[0],{clientName:'Changed visible'},'retained-source');assert.deepEqual(split.rows.find(value=>value.id==='retained-source').sourceIdentities,[null,source]);const removed=removeVisibleCaptureRow([row],{},row.id,[0]);assert.deepEqual(removed.rows[0].sourceIdentities,[null,source]);
 const prior={id:'source-entry',work_date:'2026-10-19',work_type:'Client Misc Task',client_name:'Synthetic context',category:'Synthetic category',source_identity:source,evidence_url:'https://example.test/source',work_reference:'TASK-SOURCE'},client={query:async()=>({rows:[prior]})};const incoming={...prior};delete incoming.source_identity;delete incoming.evidence_url;delete incoming.work_reference;const preserved=await resolveWorkEntryMetadataReplacement(client,'header-synthetic',[incoming]);assert.deepEqual(preserved[0].source_identity,source);assert.equal(preserved[0].evidence_url,prior.evidence_url);await assert.rejects(resolveWorkEntryMetadataReplacement(client,'header-synthetic',[incoming,incoming]),{code:'WORK_SOURCE_REPLACEMENT_CONFLICT'});await assert.rejects(resolveWorkEntryMetadataReplacement(client,'header-synthetic',[{...incoming,client_name:'Changed context'}]),{code:'WORK_SOURCE_REPLACEMENT_CONFLICT'});
 console.log('Exact case-sensitive source keys/Unicode/CSV aliases, strict optional input, independent legacy preservation/conflicts and hidden/weekend/zero grid identity retention passed.');
+
+for (const value of [true, 'TRUE', ' 1 ', 'YeS', 'y']) assert.equal(parseImportBillable(value, false), true);
+for (const value of [false, 'False', ' 0 ', 'NO', 'n']) assert.equal(parseImportBillable(value, true), false);
+for (const fallback of [true, false]) assert.equal(parseImportBillable('', fallback), fallback);
+assert.throws(() => validateImportBillability([{billable:'treu'}], [8]), /Billable on row 8/);

@@ -29,6 +29,8 @@ Every import has batch ID, file/source, schema version, idempotency key, dry-run
 
 Migrations are ordered, versioned and ledgered. CI proves fresh install and supported upgrade. Data conversions define preconditions, backup, counts/control totals, postchecks and roll-forward/rollback. Startup is not the only production migration mechanism.
 
+Project, allocation and timesheet imports validate explicit billability before applying any rows. The CSV preview and both API versions accept the same case-insensitive true/false, yes/no, y/n and 1/0 values. Blank cells retain the channel default. An invalid value identifies its row and leaves the batch unapplied. An exact replay of a previously committed versioned import retains its original receipt.
+
 ## Production readiness
 
 Readiness covers required configuration, safe secrets, database/schema, identity, named admin, demo-disabled state, provider status, backup ownership, monitoring/alerts, support contacts and release version.

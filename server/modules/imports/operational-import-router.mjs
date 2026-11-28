@@ -1,3 +1,4 @@
+import {InvalidImportBillability, validateImportBillability} from '../../../shared/import-billability.mjs';
 import {assertAssignmentMaterialWrite} from '../planning/assignment-approval-check.mjs';
 import {categoryImportKeySuffix} from '../../../shared/work-category.mjs';
 import {categoryCodeInput,applyWorkCategories} from '../work-capture/work-category.mjs';
@@ -281,6 +282,7 @@ export const createOperationalImportRouter = ({
       const transaction = await beginImportOperation({client, req, res, channel, versioned, context, requestHash});
       transactionOpen = transaction.transactionOpen;
       if (transaction.handled) return;
+      validateImportBillability(parsed.data.rows, rowNumbers);
       await lockWorkPolicy(client,req);
       const blockOverAllocation = await getSetting('blockOverAllocation', false);
 
@@ -467,6 +469,7 @@ export const createOperationalImportRouter = ({
       if (transactionOpen) {
         try { await client.query('rollback'); } catch { /* Preserve the original failure. */ }
       }
+      if (error instanceof InvalidImportBillability) return res.status(400).json({error: error.message, code: error.code});
       logError(error);
       if (versioned) res.status(500).json({error: {code: 'ALLOCATION_IMPORT_FAILED', message: 'The Allocation Control import could not be completed.'}});
       else res.status(500).json({error: 'Allocation import apply failed'});
@@ -512,6 +515,7 @@ export const createOperationalImportRouter = ({
       const transaction = await beginImportOperation({client, req, res, channel, versioned, context, requestHash});
       transactionOpen = transaction.transactionOpen;
       if (transaction.handled) return;
+      validateImportBillability(parsed.data.rows, rowNumbers);
       await lockWorkPolicy(client,req);
 
       for (const [index, row] of parsed.data.rows.entries()) {
@@ -714,6 +718,7 @@ export const createOperationalImportRouter = ({
       if (sendReportingPeriodError(res, error)) return;
       if(['WSI01','WSI02'].includes(error?.code)){res.status(409).json({error:'Source identity conflict at commit. No work in this command was applied.',code:error.code==='WSI01'?'WORK_SOURCE_IDENTITY_CONFLICT':'WORK_SOURCE_IDENTITY_IMMUTABLE'});return;}
       if(['WDL01','WDL02'].includes(error?.code)){res.status(error.code==='WDL01'?422:409).json({error:'Submission timing changed before commit. No work in this command was applied; revalidate before retrying.',code:error.code==='WDL01'?'WORK_SUBMISSION_DEADLINE_BLOCKED':'WORK_SUBMISSION_DEADLINE_AUTHORITY'});return;}
+      if (error instanceof InvalidImportBillability) return res.status(400).json({error: error.message, code: error.code});
       logError(error);
       if (versioned) res.status(500).json({error: {code: 'TIMESHEET_IMPORT_FAILED', message: 'The timesheet import could not be completed.'}});
       else res.status(500).json({error: 'Timesheet import apply failed'});

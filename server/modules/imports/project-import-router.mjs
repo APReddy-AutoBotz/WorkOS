@@ -1,3 +1,4 @@
+import {InvalidImportBillability, validateImportBillability} from '../../../shared/import-billability.mjs';
 import {assertLegacyProjectMutationAllowed,lockCommercialLifecycle,sendGovernedProjectConflict} from '../commercial-drafting/project-mutation.mjs';
 import {randomUUID} from 'node:crypto';
 import {Router} from 'express';
@@ -197,6 +198,7 @@ export const createProjectImportRouter = ({
         }
       }
 
+      validateImportBillability(parsed.data.rows, rowNumbers);
       // Preflight every attempted target, even rows later rejected by business
       // validation, so mixed batches cannot partially bypass governed conflicts.
       await assertLegacyProjectMutationAllowed(client,scope,(await client.query('select id from projects where organization_id=$1 and legal_entity_id=$2 and project_code=any($3::text[])',[scope.organizationId,scope.legalEntityId,parsed.data.rows.map(row=>row.projectCode)])).rows.map(row=>row.id));
@@ -371,6 +373,7 @@ export const createProjectImportRouter = ({
         }
       }
       if(sendGovernedProjectConflict(res,error))return;
+      if (error instanceof InvalidImportBillability) return res.status(400).json({error: error.message, code: error.code});
       logError(error);
       if (versioned) {
         res.status(500).json({error: {code: 'PROJECT_IMPORT_FAILED', message: 'The project import could not be completed.'}});

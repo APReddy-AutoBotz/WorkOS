@@ -90,6 +90,8 @@ Full-day leave requests use the worker’s effective schedule and calendar once 
 
 Actual Utilization reconciles approved hours against eligible capacity for a selected worker and period. The report shows excluded hours, unresolved classifications and the sources behind its percentage. [Actual work reconciliation](docs/tasks/WOS-04-ACTUAL-WORK-RECONCILIATION.md)
 
+Project, allocation and timesheet CSVs accept true/false, yes/no, y/n and 1/0 in the billable column, regardless of case. Leave it blank to use the existing import default. An unrecognized value blocks the file and identifies the row to correct.
+
 Buyers can adopt effective-dated work categories for project, descriptive client and non-client work. Capture and CSV imports retain the selected catalog version with the submitted entry. [Work category specification](docs/tasks/WOS-04-WORK-CATEGORY-CONTEXT.md)
 
 Allocation Control supports buyer-selected warning and blocking thresholds for overlapping active assignments. Thresholds use the declared assignment percentages and become effective on the adopted date. [Assignment overlap policy](docs/tasks/WOS-04-ASSIGNMENT-OVERLAP-POLICY.md)

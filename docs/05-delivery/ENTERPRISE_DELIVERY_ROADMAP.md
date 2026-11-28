@@ -16,6 +16,8 @@ WOS-04 employee self-service now connects selected-period draft and rejection ac
 
 WOS-04 utilization coverage is visible in the overview. Current exceptions and the current average use workers with a qualifying approved week and positive configured weekly hours.
 
+WOS-04 import billability is in verification. Project, assignment and timesheet imports check explicit billable values before writing. The CSV preview identifies the invalid row. The PostgreSQL suite checks both API versions and the browser journey checks correction and re-upload.
+
 WOS-04 historical utilization uses the selected report date to bound approved work in planned, actual, forecast and resource planning reports. The database regression covers dates before, on and between approved week endings.
 
 WOS-03 permission administration merged at `d873f41a` with four passing checks. [PR #423](https://github.com/APReddy-AutoBotz/WorkOS/pull/423) · [Hosted verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/46151844934). Role matrix edits and individual grant changes revalidate the acting administrator inside the writing transaction. Schema and stored grants are compatible with the preceding release. Rolling the application back restores its previous permission checks.
