@@ -78,7 +78,7 @@ export const createInvoiceDraftRouter = (o) => {
     try {
       c = await o.pool.connect();
       if (write === 'snapshot') {
-        const requestId = parse(uuid, r.body?.requestId);
+        const requestId = parse(uuid, r.body?.requestId).toLowerCase();
         sessionLock = `tm-reconciliation-export:${scope(r).join(':')}:${r.user.sub}:${requestId}`;
         await c.query('select pg_advisory_lock(hashtextextended($1,0))', [sessionLock]);
       }
@@ -527,7 +527,7 @@ export const createInvoiceDraftRouter = (o) => {
         : { engagementId: d.engagementId };
       const prior = (
         await c.query(
-          "select 1 from audit_logs where organization_id=$1 and legal_entity_id=$2 and user_id=$3 and module='Reports' and action in ('Export T&M Billing Reconciliation','Export Milestone Billing Reconciliation','Export Portfolio Billing Reconciliation') and entity_id=$4",
+          "select 1 from audit_logs where organization_id=$1 and legal_entity_id=$2 and user_id=$3 and module='Reports' and action in ('Export T&M Billing Reconciliation','Export Milestone Billing Reconciliation','Export Portfolio Billing Reconciliation') and lower(entity_id)=lower($4)",
           [...scope(r), r.user.sub, d.requestId],
         )
       ).rowCount;

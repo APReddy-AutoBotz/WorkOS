@@ -6,6 +6,8 @@ Managed-service reporting supports a read-only comparison of a retained monthly 
 
 The application build and runtime share an immutable Node image. CI and buyer Compose use the same pinned PostgreSQL image. CI retains the tested production image, its checksums and runtime package inventories for seven days. [Container verification and handover](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#verifying-the-tested-container)
 
+Billing reconciliation exports use a single request ID across engagement and portfolio reports. If a retry reports that the export was already recorded, use the original request ID to check audit history. Uppercase and lowercase UUIDs identify the same request.
+
 Microsoft Entra sign-in issues the session cookie after the identity link, login event and audit record commit together. If persistence fails, start a fresh sign-in after service recovers.
 
 Switching roles records the previous and selected roles before the browser receives the new session. If the audit write fails, retry the switch once the audit database is available.
