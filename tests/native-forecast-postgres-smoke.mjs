@@ -25,6 +25,35 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercial
  const key=randomUUID(),saved=await retain(result,key);assert.equal(saved.status,201,JSON.stringify(saved.body));const evidence=saved.body.evidence,csv=saved.body.csv,frozen=(await pool.query('select * from native_forecast_evidence where id=$1',[evidence.id])).rows[0];assert.equal(csv,nativeForecastCsv(f,evidence.result));assert.equal(sha(csv),evidence.artifact.sha256);assert.equal(Buffer.byteLength(csv),evidence.artifact.bytes);assert.deepEqual((await retain(result,key)).body.evidence,evidence);assert.equal((await retain(result,key,'Different payload')).status,409);const race=await Promise.all([retain(result,'11111111-1111-4111-8111-111111111111'),retain(result,'11111111-1111-4111-8111-111111111111')]);assert.deepEqual(race.map(x=>x.status).sort(),[200,201]);assert.equal(race[0].body.evidence.id,race[1].body.evidence.id);await assert.rejects(pool.query('update native_forecast_evidence set reason=reason where id=$1',[evidence.id]));await assert.rejects(pool.query('delete from native_forecast_evidence where id=$1',[evidence.id]));await assert.rejects(pool.query("insert into native_forecast_evidence select gen_random_uuid(),organization_id,legal_entity_id,employee_id,99,gen_random_uuid(),request_fingerprint,starts_on,ends_on,months,calculation_version,input_canonical,source_token,result,artifact_csv,artifact_sha256,artifact_bytes,actor_id,active_role,source,reason,created_at from native_forecast_evidence where id=$1",[evidence.id]),{code:'WNF01'});
  const forged=await pool.connect();try{await forged.query('begin');await forged.query("select set_config('workos.native_forecast_context',$1,true)",[JSON.stringify({actorId:frozen.actor_id,activeRole:frozen.active_role,organizationId:frozen.organization_id,legalEntityId:frozen.legal_entity_id,employeeId:frozen.employee_id})]);await assert.rejects(forged.query("insert into native_forecast_evidence select gen_random_uuid(),organization_id,legal_entity_id,employee_id,98,gen_random_uuid(),request_fingerprint,starts_on,ends_on,months,calculation_version,input_canonical,source_token,result,artifact_csv||'changed',artifact_sha256,artifact_bytes,actor_id,active_role,source,reason,created_at from native_forecast_evidence where id=$1",[evidence.id]),{code:'WNF02'});}finally{await forged.query('rollback');forged.release();}
  const versionPath='/api/v1/assignment-versions/assignments/'+ids.primary,current=(await request(versionPath)).body.current;let edited=await request(versionPath+'/versions',{method:'POST',body:{expectedRevision:current.revision,expectedLatestId:current.versionId,definition:{...current.snapshot,quantityExact:'20.00000000000000001'},reason:'Synthetic exact native planner edit'}});assert.equal(edited.status,400,'snapshot contains immutable identity fields; command requires exact definition');const{assignmentId,employeeId,projectId,...definition}=current.snapshot;edited=await request(versionPath+'/versions',{method:'POST',body:{expectedRevision:current.revision,expectedLatestId:current.versionId,definition:{...definition,quantityExact:'20.00000000000000001'},reason:'Synthetic exact native planner edit'}});assert.equal(edited.status,201,JSON.stringify(edited.body));let changed=(await get()).body.result;assert.equal(changed.points[0].declaredPercentageExact,'25.00000000000000001');assert.equal((await retain(result)).status,409);assert.deepEqual((await retain(result,key)).body.evidence,evidence);
+ const planningRelease=await request('/api/v1/organization-setup/module-releases/planning',{method:'PUT',body:{
+   enabled:true,expectedRevision:0,evidence:'Synthetic utilization report boundary validation'
+ }});
+ assert.equal(planningRelease.status,201,JSON.stringify(planningRelease.body));
+ const thresholdKeys=['utilizationThresholdHigh','utilizationThresholdLow','benchThreshold'];
+ const originalSettings=(await pool.query('select key,value from system_settings where key=any($1)',[thresholdKeys])).rows;
+ await pool.query("insert into system_settings(key,value) select k,'0'::jsonb from unnest($1::text[]) k on conflict(key) do update set value=excluded.value",[thresholdKeys]);
+ const reportDate=nativeCheckpoint(today,3);
+ const planning=await request('/api/reports/resource-planning?date='+reportDate);
+ assert.equal(planning.status,200,JSON.stringify(planning.body));
+ const plannedWorker=planning.body.rows.find(row=>row.employee_id===f.ownerId);
+ assert(plannedWorker.planned_utilization>0);
+ assert.equal(plannedWorker.overloaded,true);
+ assert.equal(plannedWorker.bench,false);
+ assert.equal(plannedWorker.underloaded,false);
+ const reported=await request('/api/reports/forecast-utilization?date='+today+'&months=3');
+ assert.equal(reported.status,200,JSON.stringify(reported.body));
+ assert.deepEqual(reported.body.thresholds,{high:0,low:0,bench:0});
+ assert.equal(reported.body.rows.find(row=>row.id===f.ownerId).utilization_band,'Overloaded');
+ const afterRollOff=await request('/api/reports/planned-utilization?date='+shiftCapacityDate(reportDate,1));
+ assert.equal(afterRollOff.status,200,JSON.stringify(afterRollOff.body));
+ const zeroLoad=afterRollOff.body.rows.filter(row=>Number(row.planned_utilization)===0);
+ assert(zeroLoad.some(row=>row.id===f.ownerId));
+ assert(zeroLoad.every(row=>row.utilization_band==='Bench'));
+ assert.equal(afterRollOff.body.summary.bench,zeroLoad.length);
+ await pool.query('delete from system_settings where key=any($1)',[thresholdKeys]);
+ const defaults=await request('/api/reports/forecast-utilization?date='+today+'&months=3');
+ assert.deepEqual(defaults.body.thresholds,{high:100,low:80,bench:20});
+ for(const {key,value} of originalSettings)await pool.query('insert into system_settings(key,value)values($1,$2)',[key,JSON.stringify(value)]);
  const nextForecast=()=>request(base+f.ownerId+'/period?'+q(1,next));
  const baseline=(await nextForecast()).body,beforeFixed=baseline.plannedHours[0];
  const fixed=await request('/api/allocations',{method:'POST',body:{employee_id:f.ownerId,project_id:f.projectId,fixed_hours:'8',start_date:today,end_date:next,billable:false,status:'Active'}});

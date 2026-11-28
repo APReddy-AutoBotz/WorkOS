@@ -18,6 +18,8 @@ For workforce acceptance, the [assignment creation journey](../../tests/assignme
 
 Reconciled on 28 November 2026 against the eight open workstream issues. Engineering verified the main-branch handover archive for `6c70d15b`, including billing fixes through #392. Independent commercial acceptance and buyer rehearsal each require a named revision. [Candidate verification](../00-control/IMPLEMENTATION_STATUS.md#launch-acceptance-checkpoint)
 
+The WOS-04 report checks exercise zero-valued bench, underutilization and overload thresholds in the utilization and resource planning APIs.
+
 | Issue | Evidence to reuse | Next action and exit condition | Accountable role |
 | --- | --- | --- | --- |
 | [WOS-01 #3](https://github.com/APReddy-AutoBotz/WorkOS/issues/3) | Bootstrap import verified against all 118 included file hashes and five hosted acceptance jobs | Retain the historical import and reference-source attestations. [Buyer-configurable branding merged](https://github.com/APReddy-AutoBotz/WorkOS/pull/361). | Engineering release lead |

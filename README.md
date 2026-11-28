@@ -14,7 +14,7 @@ Microsoft Entra sign-in issues the session cookie after the identity link, login
 
 Switching roles records the previous and selected roles before the browser receives the new session. If the audit write fails, retry the switch once the audit database is available.
 
-The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.
+The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity. Utilization and resource planning reports honor a configured 0% threshold. With a 0% bench threshold, only workers with zero planned utilization count as bench.
 
 When a buyer requires assignment creation approval, a future assignment enters the worker’s planned hours after the final approver accepts it. For example, a one-day 20% assignment adds 1.6 planned hours on a day with eight available hours.
 

@@ -135,9 +135,9 @@ export const PlannedUtilization = () => {
         (emp.mappedCountryDirectorIds && emp.mappedCountryDirectorIds.includes(cdFilter));
 
       let matchesBand = true;
-      if (bandFilter === 'Over 100%') matchesBand = emp.plannedUtilization > settings.utilizationThresholdHigh;
-      else if (bandFilter === '80-100%') matchesBand = emp.plannedUtilization >= 80 && emp.plannedUtilization <= 100;
-      else if (bandFilter === 'Under 80%') matchesBand = emp.plannedUtilization < settings.utilizationThresholdLow;
+      if (bandFilter === 'above') matchesBand = emp.plannedUtilization > settings.utilizationThresholdHigh;
+      else if (bandFilter === 'within') matchesBand = emp.plannedUtilization >= settings.utilizationThresholdLow && emp.plannedUtilization <= settings.utilizationThresholdHigh;
+      else if (bandFilter === 'below') matchesBand = emp.plannedUtilization < settings.utilizationThresholdLow;
 
       return matchesSearch && matchesDept && matchesCd && matchesBand;
     });
@@ -368,7 +368,7 @@ export const PlannedUtilization = () => {
               <h4 className="text-[10px] font-bold text-heading uppercase tracking-widest">High Capacity Tech</h4>
            </div>
            <p className="text-xs text-body/70 font-medium mb-3 leading-relaxed">System Engineering units in EMEA show elevated planned load for the next quarter.</p>
-           <button onClick={() => setBandFilter('Over 100%')} className="text-[10px] font-bold text-primary uppercase tracking-widest flex items-center gap-1 hover:underline">
+           <button onClick={() => setBandFilter('above')} className="text-[10px] font-bold text-primary uppercase tracking-widest flex items-center gap-1 hover:underline">
              Deep Audit <ChevronRight size={14} />
            </button>
         </div>
@@ -424,9 +424,9 @@ export const PlannedUtilization = () => {
                 className="bg-white border border-border-light rounded-lg px-2 py-1.5 text-[10px] font-bold outline-none cursor-pointer"
               >
                 <option>All Bands</option>
-                <option>Over 100%</option>
-                <option>80-100%</option>
-                <option>Under 80%</option>
+                <option value="above">Over {settings.utilizationThresholdHigh}%</option>
+                <option value="within">{settings.utilizationThresholdLow}–{settings.utilizationThresholdHigh}%</option>
+                <option value="below">Under {settings.utilizationThresholdLow}%</option>
               </select>
               <button type="button" onClick={handleExport} disabled={!canExport} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed py-1.5 px-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
                  <Download size={12} /> CSV
@@ -467,11 +467,11 @@ export const PlannedUtilization = () => {
                     <div className="flex flex-col items-center">
                        <span className={cn(
                          "text-sm font-bold mb-1",
-                         emp.plannedUtilization > 100 ? "text-danger" : "text-heading"
+                         emp.plannedUtilization > settings.utilizationThresholdHigh ? "text-danger" : "text-heading"
                        )}>{formatPercent(emp.plannedUtilization)}</span>
                        <div className="w-24 h-1 bg-gray-100 rounded-full overflow-hidden">
                           <div
-                            className={cn("h-full transition-all duration-500", emp.plannedUtilization > 100 ? "bg-danger" : "bg-primary")}
+                            className={cn("h-full transition-all duration-500", emp.plannedUtilization > settings.utilizationThresholdHigh ? "bg-danger" : "bg-primary")}
                             style={{ width: `${Math.min(emp.plannedUtilization, 100)}%` }}
                           />
                        </div>
