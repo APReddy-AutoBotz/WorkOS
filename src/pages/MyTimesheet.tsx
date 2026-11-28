@@ -69,7 +69,7 @@ export const MyTimesheet = () => {
   if (savedWeek !== null && (!validCapabilityDate(savedWeek) || new Date(`${savedWeek}T00:00:00Z`).getUTCDay() !== 5)) {
     return <p role="alert">Invalid saved timesheet week. <Link to="/timesheets">Open current week</Link></p>;
   }
-  return <TimesheetWeek key={savedWeek ?? 'current'} savedWeek={savedWeek} />;
+  return <Fragment key={savedWeek ?? 'current'}><TimesheetWeek savedWeek={savedWeek} /></Fragment>;
 };
 
 const TimesheetWeek = ({savedWeek}: {savedWeek: string | null}) => {
