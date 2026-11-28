@@ -830,14 +830,18 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         409,
       );
       const repeated = await request(route + '/reconciliation/portfolio/exports', {
-        method:'POST', body:{...originalPortfolioCommand,requestId:reportRequest.requestId.toLowerCase()},
+        method: 'POST',
+        body: { ...originalPortfolioCommand, requestId: reportRequest.requestId.toLowerCase() },
       });
-      assert.equal(repeated.status,409);
-      assert.equal(repeated.body.code,'BILLING_REPORT_ALREADY_RECORDED');
+      assert.equal(repeated.status, 409);
+      assert.equal(repeated.body.code, 'BILLING_REPORT_ALREADY_RECORDED');
       const raceReport = { ...reportRequest, requestId: randomUUID() };
       const raceResults = await Promise.all([
         request(route + '/reconciliation/exports', { method: 'POST', body: raceReport }),
-        request(route + '/reconciliation/exports', { method: 'POST', body: {...raceReport,requestId:raceReport.requestId.toUpperCase()} }),
+        request(route + '/reconciliation/exports', {
+          method: 'POST',
+          body: { ...raceReport, requestId: raceReport.requestId.toUpperCase() },
+        }),
       ]);
       assert.deepEqual(raceResults.map((x) => x.status).sort(), [201, 409]);
       assert.equal(
