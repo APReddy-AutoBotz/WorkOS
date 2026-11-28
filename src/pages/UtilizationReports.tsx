@@ -52,13 +52,13 @@ const reportLenses: Array<{
 
 const getPrimaryMetric = (lens: ReportLens, report?: UtilizationReport) => {
   if (!report || report.rows.length === 0) return '--';
-  if (lens === 'actual') return formatPercent(report.summary.averageActual);
+  if (lens === 'actual') return report.summary.averageActual == null ? 'Unavailable' : formatPercent(report.summary.averageActual);
   return formatPercent(report.summary.averagePlanned);
 };
 
 const getExceptionCount = (lens: ReportLens, report?: UtilizationReport) => {
   if (!report || report.rows.length === 0) return '--';
-  if (lens === 'actual') return report.summary.underutilized + report.summary.bench;
+  if (lens === 'actual') return report.summary.actualWorkerCount ? report.summary.actualBelowThreshold : 'Unavailable';
   return report.summary.overloaded;
 };
 
@@ -136,7 +136,8 @@ export const UtilizationReports = () => {
     if (!selectedReport) return [];
     if (selectedLens === 'actual') {
       return selectedReport.rows
-        .filter(row => row.actualUtilization < selectedReport.thresholds.low)
+        .filter(row => row.latestApprovedWeek && selectedReport.expectedWeeklyHours > 0 &&
+          (row.actualUtilization < selectedReport.thresholds.low || row.actualUtilization <= selectedReport.thresholds.bench))
         .sort((a, b) => a.actualUtilization - b.actualUtilization)
         .slice(0, 5)
         .map(row => ({ ...row, value: row.actualUtilization }));
@@ -218,8 +219,8 @@ export const UtilizationReports = () => {
             {[
               { label: 'Population', value: selectedReport.summary.rows },
               { label: 'Avg Planned', value: formatPercent(selectedReport.summary.averagePlanned) },
-              { label: 'Avg Current', value: formatPercent(selectedReport.summary.averageActual) },
-              { label: 'Bench', value: selectedReport.summary.bench },
+              { label: 'Avg Current', value: getPrimaryMetric('actual', selectedReport) },
+              { label: 'Planned bench', value: selectedReport.summary.bench },
             ].map(item => (
               <div key={item.label} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{item.label}</p>
@@ -227,6 +228,7 @@ export const UtilizationReports = () => {
               </div>
             ))}
           </div>
+          <p className="mt-4 text-sm text-slate-600">Current utilization uses the latest approved week through {selectedReport.sourceDate}. {selectedReport.summary.actualWorkerCount} of {selectedReport.summary.rows} workers contribute, using {selectedReport.expectedWeeklyHours} expected hours per week.</p>
           <div className="mt-5 flex flex-wrap gap-3">
             <Link to={selectedConfig.path} className="btn-secondary px-4 py-2 text-[10px]">
               Open Detailed Report
@@ -252,7 +254,7 @@ export const UtilizationReports = () => {
               </div>
             ))}
             {exceptionRows.length === 0 && (
-              <p className="py-8 text-center text-sm font-bold text-slate-400">No exceptions in the selected report.</p>
+              <p className="py-8 text-center text-sm font-bold text-slate-400">{selectedLens === 'actual' && !selectedReport.summary.actualWorkerCount ? 'Current exceptions are unavailable.' : 'No exceptions in the selected report.'}</p>
             )}
           </div>
         </Card>

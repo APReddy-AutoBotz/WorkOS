@@ -785,10 +785,12 @@ export interface UtilizationReport {
   summary: {
     rows: number;
     averagePlanned: number;
-    averageActual: number;
+    averageActual: number | null;
+    actualWorkerCount: number;
+    actualBelowThreshold: number;
     overloaded: number;
     underutilized: number;
     bench: number;
   };
-  rows: Employee[];
+  rows: (Employee & { latestApprovedWeek: string | null })[];
 }

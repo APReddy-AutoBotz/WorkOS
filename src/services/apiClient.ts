@@ -268,7 +268,8 @@ export const normalizeEmployee = (r: Record<string, unknown>): Employee => ({
   activeProjectCount: 0,
 });
 
-export const normalizeUtilizationReportEmployee = (r: Record<string, unknown>): Employee => ({
+export const normalizeUtilizationReportEmployee = (r: Record<string, unknown>): UtilizationReport['rows'][number] => ({
+  latestApprovedWeek: r.latest_approved_week ? String(r.latest_approved_week).slice(0, 10) : null,
   id: String(r.id),
   employeeId: String(r.employee_id),
   name: String(r.name),
@@ -316,7 +317,9 @@ export const normalizeUtilizationReport = (r: Record<string, unknown>): Utilizat
     summary: {
       rows: Number(summary?.rows ?? rows.length),
       averagePlanned: Number(summary?.averagePlanned ?? 0),
-      averageActual: Number(summary?.averageActual ?? 0),
+      averageActual: summary?.averageActual == null ? null : Number(summary.averageActual),
+      actualWorkerCount: Number(summary?.actualWorkerCount ?? 0),
+      actualBelowThreshold: Number(summary?.actualBelowThreshold ?? 0),
       overloaded: Number(summary?.overloaded ?? 0),
       underutilized: Number(summary?.underutilized ?? 0),
       bench: Number(summary?.bench ?? 0),

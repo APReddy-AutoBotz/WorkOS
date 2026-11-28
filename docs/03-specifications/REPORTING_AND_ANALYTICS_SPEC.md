@@ -1,5 +1,7 @@
 # Reporting and Analytics Specification
 
+The overview reports the arithmetic mean of the measured worker percentages and discloses both measured and total eligible worker counts. Measurement requires a qualifying approved week and positive expected weekly hours. With no measured workers the average and current exception count are unavailable.
+
 Weekly actuals in the planning and utilization report APIs use the most recent currently approved timesheet with a week ending on or before the source date. Forecast allocation uses the horizon end independently. This cutoff compares work dates. Historical approval status at the time of the report is outside this calculation.
 
 The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.

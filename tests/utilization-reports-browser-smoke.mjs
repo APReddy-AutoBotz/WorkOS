@@ -40,6 +40,7 @@ const employee = (id, plannedUtilization, actualUtilization) => ({
   status: 'Active',
   plannedUtilization,
   actualUtilization,
+  latestApprovedWeek: '2026-10-18',
   activeProjectCount: 1,
 });
 const report = (lens, tag = 'baseline', empty = false, noExceptions = false) => {
@@ -47,6 +48,7 @@ const report = (lens, tag = 'baseline', empty = false, noExceptions = false) => 
     employee(`${tag}-${lens}-high`, noExceptions ? 90 : 120, noExceptions ? 85 : 60),
     employee(`${tag}-${lens}-low`, noExceptions ? 90 : 60, noExceptions ? 85 : 15),
   ];
+  if (lens === 'actual' && !empty) rows.push({...employee(`${tag}-missing`, 0, 0), latestApprovedWeek: null});
   return {
     mode: lens,
     asOfDate: '2026-10-18',
@@ -57,7 +59,9 @@ const report = (lens, tag = 'baseline', empty = false, noExceptions = false) => 
     summary: {
       rows: rows.length,
       averagePlanned: empty ? 0 : (lens === 'forecast' ? 96.5 : 90),
-      averageActual: empty ? 0 : 37.5,
+      actualWorkerCount: empty ? 0 : 2,
+      actualBelowThreshold: empty || noExceptions ? 0 : 2,
+      averageActual: empty ? null : 37.5,
       overloaded: empty || noExceptions ? 0 : 1,
       underutilized: empty || noExceptions ? 0 : 2,
       bench: empty || noExceptions ? 0 : 1,
@@ -158,13 +162,13 @@ try {
   assert.equal(await lensButton('actual').getByText('37.5%', {exact: true}).count(), 1);
   assert.equal(await lensButton('forecast').getByText('96.5%', {exact: true}).count(), 1);
   assert.equal(await lensButton('planned').getByText('1', {exact: true}).count(), 1);
-  assert.equal(await lensButton('actual').getByText('3', {exact: true}).count(), 1);
+  assert.equal(await lensButton('actual').getByText('2', {exact: true}).count(), 1);
   assert.equal(await lensButton('forecast').getByText('1', {exact: true}).count(), 1);
   for (const lens of lenses) {
     await lensButton(lens).click();
     await expectSuccess(lens, 'baseline');
     await expectLinks(lens);
-    assert.equal(await snapshot(lens).getByText('2', {exact: true}).count(), 1, 'existing population total is preserved');
+    assert.equal(await snapshot(lens).getByText(lens === 'actual' ? '3' : '2', {exact: true}).count(), 1, 'population includes workers without approved evidence');
     assert.equal(await snapshot(lens).getByText('1', {exact: true}).count(), 1, 'existing bench total is preserved');
     assert.equal(await snapshot(lens).getByText('37.5%', {exact: true}).count(), 1);
     const expectedRows = lens === 'actual' ? ['low', 'high'] : ['high'];
@@ -173,7 +177,18 @@ try {
   }
 
   // Error cases rotate across the three service methods.
-  let after = lastId(keyboardRetry);
+  const missing = await refresh(lastId(keyboardRetry));
+  const missingReports = reports('missing');
+  const actual = missingReports.actual;
+  actual.rows = actual.rows.map(row => ({...row, latestApprovedWeek: null, actualUtilization: 0}));
+  Object.assign(actual.summary, {actualWorkerCount: 0, actualBelowThreshold: 0, averageActual: null});
+  await settle(missing, missingReports);
+  await lensButton('actual').click();
+  await exceptions('actual').getByText('Current exceptions are unavailable.').waitFor();
+  assert.equal(await snapshot('actual').getByText('Unavailable', {exact: true}).count(), 1);
+  assert.equal(await exceptions('actual').getByRole('link').count(), 0);
+  await lensButton('forecast').click();
+  let after = lastId(missing);
   for (const [index, status] of [401, 403, 404, 502, 503, 504, 500, 'network'].entries()) {
     const attempt = await refresh(after);
     const failureLens = lenses[index % lenses.length];

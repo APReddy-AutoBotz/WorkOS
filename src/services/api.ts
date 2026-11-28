@@ -2687,12 +2687,16 @@ const buildLocalUtilizationReport = async (mode: UtilizationReportMode, months =
   if (mode === 'forecast') targetDate.setUTCMonth(targetDate.getUTCMonth() + months);
   const asOfDate = targetDate.toISOString().slice(0, 10);
   const includeProposed = mode === 'forecast';
+  const approved = timesheets.filter(sheet => sheet.status === 'Approved' && sheet.weekEnding.slice(0, 10) <= sourceDate);
+  const latestByWorker = new Map(approved.sort((a, b) => a.weekEnding.localeCompare(b.weekEnding)).map(sheet => [sheet.employeeId, sheet]));
   const rows = getUtilizationEligibleEmployees(employees, allocations, projects, asOfDate, includeProposed).map(employee => ({
+    latestApprovedWeek: latestByWorker.get(employee.id)?.weekEnding.slice(0, 10) ?? null,
     ...employee,
     plannedUtilization: getAllocationLoad(employee.id, allocations, projects, asOfDate, asOfDate, includeProposed),
-    actualUtilization: getLatestApprovedActualUtilization(employee.id, timesheets, settings),
+    actualUtilization: settings.expectedWeeklyHours > 0 ? roundMetric((latestByWorker.get(employee.id)?.billableHours ?? 0) * 100 / settings.expectedWeeklyHours) : 0,
     activeProjectCount: getActiveAllocationsForEmployee(employee.id, allocations, projects, asOfDate, asOfDate, includeProposed).length,
   }));
+  const measured = rows.filter(row => row.latestApprovedWeek && settings.expectedWeeklyHours > 0);
   return {
     mode,
     asOfDate,
@@ -2707,7 +2711,9 @@ const buildLocalUtilizationReport = async (mode: UtilizationReportMode, months =
     summary: {
       rows: rows.length,
       averagePlanned: rows.length ? Number((rows.reduce((sum, row) => sum + row.plannedUtilization, 0) / rows.length).toFixed(1)) : 0,
-      averageActual: rows.length ? Number((rows.reduce((sum, row) => sum + row.actualUtilization, 0) / rows.length).toFixed(1)) : 0,
+      actualWorkerCount: measured.length,
+      actualBelowThreshold: measured.filter(row => row.actualUtilization < settings.utilizationThresholdLow || row.actualUtilization <= settings.benchThreshold).length,
+      averageActual: measured.length ? roundMetric(measured.reduce((sum, row) => sum + row.actualUtilization, 0) / measured.length) : null,
       overloaded: rows.filter(row => row.plannedUtilization > settings.utilizationThresholdHigh).length,
       underutilized: rows.filter(row => row.plannedUtilization < settings.utilizationThresholdLow && row.plannedUtilization > settings.benchThreshold).length,
       bench: rows.filter(row => row.plannedUtilization <= settings.benchThreshold).length,
