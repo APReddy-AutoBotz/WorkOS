@@ -5040,7 +5040,7 @@ const getUtilizationReport = async (req, res, mode) => {
   const targetDate = mode === 'forecast' ? forecastDate.toISOString().slice(0, 10) : reportDate;
   const includeProposed = mode === 'forecast';
 
-  const params = [targetDate, expectedWeeklyHours, highThreshold, lowThreshold, benchThreshold, includeProposed, mode];
+  const params = [targetDate, expectedWeeklyHours, highThreshold, lowThreshold, benchThreshold, includeProposed, mode, reportDate];
   const scopeWhere = buildEmployeeScopeWhere(req, params, 'e');
 
   try {
@@ -5109,7 +5109,8 @@ const getUtilizationReport = async (req, res, mode) => {
           t.billable_hours,
           round((t.billable_hours / nullif($2::numeric, 0)) * 1000) / 10 as actual_utilization
         from timesheets t
-        where t.status = 'Approved'
+        join scoped_employees se on se.id=t.employee_id and se.organization_id=t.organization_id and se.legal_entity_id=t.legal_entity_id
+        where t.status = 'Approved' and t.week_ending <= $8::date
         order by t.employee_id, t.week_ending desc
       )
       select
@@ -5135,7 +5136,7 @@ const getUtilizationReport = async (req, res, mode) => {
         el.teams_user_id,
         el.planned_utilization,
         coalesce(la.actual_utilization, 0) as actual_utilization,
-        la.week_ending as latest_approved_week,
+        la.week_ending::timestamp at time zone 'UTC' as latest_approved_week,
         el.active_project_count,
         case
           when el.planned_utilization > $3::numeric then 'Overloaded'
@@ -5265,9 +5266,10 @@ const readResourcePlanningPayload = async (client,req) => {
         employee_id,
         round((billable_hours / nullif($1::numeric, 0)) * 1000) / 10 as actual_utilization
       from timesheets
-      where status = 'Approved' and employee_id = any($2)
+      where status = 'Approved' and employee_id = any($2) and week_ending <= $3::date
+        and organization_id=$4 and legal_entity_id=$5
       order by employee_id, week_ending desc
-    `, [Number(settings.expectedWeeklyHours || 40), employeeIds]);
+    `, [Number(settings.expectedWeeklyHours || 40), employeeIds, asOfDate, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
 
   const allocationsByEmployee = new Map();
   allocationsResult.rows.forEach(allocation => {

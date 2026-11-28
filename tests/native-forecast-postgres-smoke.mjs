@@ -29,6 +29,28 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercial
    enabled:true,expectedRevision:0,evidence:'Synthetic utilization report boundary validation'
  }});
  assert.equal(planningRelease.status,201,JSON.stringify(planningRelease.body));
+ await pool.query(`insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours,organization_id,legal_entity_id)
+   values(gen_random_uuid(),$1,'2020-03-22','Submitted',38,38,$2,$3),
+         (gen_random_uuid(),$1,'2020-03-29','Approved',20,20,$2,$3)`,[f.ownerId,f.organizationId,f.legalEntityId]);
+ for(const [day,week,hours] of [
+   ['2020-03-14',null,0],
+   ['2020-03-15','2020-03-15',7.25],
+   ['2020-03-28','2020-03-15',7.25],
+   ['2020-03-29','2020-03-29',20]
+ ]){
+   let expected;
+   for(const mode of ['actual','planned','forecast']){
+     const response=await request('/api/reports/'+mode+'-utilization?date='+day);
+     assert.equal(response.status,200,JSON.stringify(response.body));
+     const row=response.body.rows.find(worker=>worker.id===f.ownerId);
+     assert.equal(row.latest_approved_week,week && week+'T00:00:00.000Z');
+     expected=Math.round(hours*1000/response.body.expectedWeeklyHours)/10;
+     assert.equal(Number(row.actual_utilization),expected);
+   }
+   const planning=await request('/api/reports/resource-planning?date='+day);
+   assert.equal(planning.status,200,JSON.stringify(planning.body));
+   assert.equal(planning.body.rows.find(row=>row.employee_id===f.ownerId).actual_utilization,expected);
+ }
  const thresholdKeys=['utilizationThresholdHigh','utilizationThresholdLow','benchThreshold'];
  const originalSettings=(await pool.query('select key,value from system_settings where key=any($1)',[thresholdKeys])).rows;
  await pool.query("insert into system_settings(key,value) select k,'0'::jsonb from unnest($1::text[]) k on conflict(key) do update set value=excluded.value",[thresholdKeys]);

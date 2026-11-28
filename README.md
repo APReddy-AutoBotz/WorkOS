@@ -1,5 +1,7 @@
 # WorkOS
 
+When you select a report date, planning and utilization reports use the latest currently approved timesheet week ending on or before that date. A longer forecast horizon does not bring later work into the actual utilization figure.
+
 In the planning workspace, select **Roll-offs in 45 days** to see workers whose next assignment ending falls between the report date and day 45, inclusive. Results show the nearest endings first. Use **Show more resources** to continue through the list.
 
 **Annual availability** uses each worker’s effective daily schedule for the calendar year of the report. A holiday that falls during approved leave reduces hours once. Leave across New Year contributes only its applicable days to each year. If a worker’s schedule or absence history cannot establish their annual hours, the report displays **Unavailable** and withholds the portfolio percentage.

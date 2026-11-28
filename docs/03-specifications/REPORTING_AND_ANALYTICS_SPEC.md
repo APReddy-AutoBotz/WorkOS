@@ -1,5 +1,7 @@
 # Reporting and Analytics Specification
 
+Weekly actuals in the planning and utilization report APIs use the most recent currently approved timesheet with a week ending on or before the source date. Forecast allocation uses the horizon end independently. This cutoff compares work dates. Historical approval status at the time of the report is outside this calculation.
+
 The compatibility forecast counts projects below 100% allocated using eligible workers and projects in term at the horizon end. Peak pressure requires positive workforce capacity.
 
 Forecast checkpoints and roll-offs use the UTC source date returned by the report. The chart labels individual checkpoint dates and the audited CSV includes the source and horizon end dates.
