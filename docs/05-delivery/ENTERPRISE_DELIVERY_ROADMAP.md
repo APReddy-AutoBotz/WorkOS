@@ -1,7 +1,5 @@
 # Enterprise delivery and integration roadmap
 
-WOS-03 permission administration is in verification. Role matrix edits and individual grant changes revalidate the acting administrator inside the writing transaction. Schema and stored grants are compatible with the preceding release. Rolling the application back restores its previous permission checks.
-
 WOS-APR-005 assignment and leave escalation is in verification. The scheduled worker records elapsed deadlines and delivers to eligible stage approvers and the pinned escalation recipient. A late decision records the breach even when the worker has not yet polled. Delivery history exposes failed attempts and recovery.
 
 WOS-APR-005 overdue reporting for assignment changes, assignment creation and leave merged in [PR #419](https://github.com/APReddy-AutoBotz/WorkOS/pull/419) at `7a0f3cac`. All four [hosted checks](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/46144743837) passed. The queues apply the deadline filter before pagination. A closed stage, a replaced source or an untimed policy has no current overdue item.
@@ -17,6 +15,8 @@ WOS-04 employee self-service now connects selected-period draft and rejection ac
 WOS-04 utilization coverage is visible in the overview. Current exceptions and the current average use workers with a qualifying approved week and positive configured weekly hours.
 
 WOS-04 historical utilization uses the selected report date to bound approved work in planned, actual, forecast and resource planning reports. The database regression covers dates before, on and between approved week endings.
+
+WOS-03 permission administration is in verification. Role matrix edits and individual grant changes revalidate the acting administrator inside the writing transaction. Schema and stored grants are compatible with the preceding release. Rolling the application back restores its previous permission checks.
 
 WOS-04 annual availability reconciliation uses effective daily capacity in the production planning report. The worker and portfolio checks cover year-crossing approved leave, a holiday within that leave, a midyear part-time change, and unavailable schedule or absence evidence. The separate legacy leave availability report retains its compatibility calculation.
 

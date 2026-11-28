@@ -1,7 +1,5 @@
 # WorkOS Requirements Traceability
 
-WOS-IAM-003/005/006. Permission management requires the active Admin role. The [PostgreSQL regression](../../tests/settings-audit-postgres-smoke.mjs) checks a retained grant while another role is active and loss of administrator authority while a write is queued. The [permission settings test](../../tests/dynamic-permissions-smoke.mjs) checks the navigation decision.
-
 WOS-APR-005 assignment and leave escalation uses migration 140, the scheduled approval worker and scoped delivery history. The [stage deadline suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises a late decision, competing collectors, overlapping recipients, unavailable escalation accounts, retry backoff and separate acknowledgements.
 
 WOS-APR-005 overdue reporting merged in [PR #419](https://github.com/APReddy-AutoBotz/WorkOS/pull/419) at `7a0f3cac` with all four checks passing. It uses migration 139 and the current assignment and leave approval queues. [The PostgreSQL/API suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises each queue before expiry, after expiry, after advancing and after closing the instance.
@@ -9,6 +7,8 @@ WOS-APR-005 overdue reporting merged in [PR #419](https://github.com/APReddy-Aut
 WOS-APR-005 assignment and leave advance reminders merged in [PR #418](https://github.com/APReddy-AutoBotz/WorkOS/pull/418) at `b33dac43` after all four hosted checks passed. Migration 138 links each delivery to its pinned action recipient and retains acknowledgement separately. See the real-clock, concurrent collector and API checks in [the stage timing suite](../../tests/assignment-leave-stage-deadlines.mjs).
 
 WOS-COM-007/012/015. The [project cost browser journey](../../tests/support/project-cost-journey.mjs) checks separate preparer and reviewer sessions, pending and approved costs, live gross margin, the prior forecast and the newly retained forecast.
+
+WOS-IAM-003/005/006. Permission management requires the active Admin role. The [PostgreSQL regression](../../tests/settings-audit-postgres-smoke.mjs) checks a retained grant while another role is active and loss of administrator authority while a write is queued. The [permission settings test](../../tests/dynamic-permissions-smoke.mjs) checks the navigation decision.
 
 WOS-CORE-005. The [deployment setup audit test](../../tests/settings-audit-postgres-smoke.mjs) exercises two administrators saving the same new role permission, catalog item and country director, then verifies creation, predecessor values and actor attribution. The same test verifies concurrent individual grants, confirmation audit evidence and a new grant identity after revocation.
 
