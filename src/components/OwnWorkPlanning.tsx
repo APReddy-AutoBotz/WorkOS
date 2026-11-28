@@ -1,6 +1,8 @@
 import {GovernedActualWork} from './GovernedActualWork';
 import {useEffect,useRef,useState} from 'react';
 import {Link} from 'react-router-dom';
+import {authService} from '../services/authService';
+import {hasPermission} from '../services/permissions';
 import {validCapacityRange} from '../../shared/worker-capacity.mjs';
 import {ApiClientError} from '../services/apiClient';
 import {captureOwnWorkContext,isOwnWorkContextCurrent,ownWorkPlanningService,type OwnWorkContext,type OwnWorkPage} from '../services/ownWorkPlanning';
@@ -20,7 +22,14 @@ export const OwnWorkPlanning=()=>{
    <h3 className="font-semibold">My assignments overlapping this period</h3><p>Showing {page.assignments.length} records on this page.</p><ul aria-label="My period assignments">{page.assignments.map(a=><li key={a.id} className="border-t py-2"><p>{a.projectName} · {a.projectCode} · {a.snapshot.role??'No role recorded'}</p><p>{a.snapshot.quantityExact}{a.snapshot.quantityUnit==='hours'?'h total':'%'} · {a.snapshot.startsOn}–{a.snapshot.endsOn} · {a.snapshot.status} · {a.snapshot.billable?'Billable within recorded source':'Non-billable'}</p><p>{a.versionId?'Tracked assignment version '+a.sequence:'Assignment history before tracking is not recorded.'}</p><button disabled={busy} onClick={()=>{setAssignment(a.id);setWork(null);}}>Inspect my assignment {a.id}</button></li>)}</ul>{page.assignments.length===0&&<p>No assignment records on this page.</p>}{page.nextAssignment&&<button disabled={busy} onClick={()=>void load({...cursors.current,afterAssignment:page.nextAssignment!})}>Next own assignments</button>}
    <h3 className="font-semibold">My saved work periods</h3><p>Current saved state is separate from retained submissions and decisions. This list is not an approved included-work numerator or utilization ratio.</p><ul aria-label="My saved work periods">{page.workPeriods.map(w=><li key={w.id} className="border-t py-2"><p>Work ending {w.weekEnding} · Current state: {w.status}</p><p>{w.retainedSubmissionSequence?'Latest retained submission '+w.retainedSubmissionSequence+' · '+(w.retainedDecisionStatus??'No retained decision'):'No retained submission/decision history recorded.'}</p><button disabled={busy} onClick={()=>{setWork(w.id);setAssignment(null);}}>Inspect my work history {w.id}</button></li>)}</ul>{page.workPeriods.length===0&&<p>No saved work periods on this page.</p>}{page.nextWork&&<button disabled={busy} onClick={()=>void load({...cursors.current,beforeWork:page.nextWork!})}>Older own work periods</button>}
    {(cursors.current.afterAssignment||cursors.current.beforeWork)&&<button disabled={busy} onClick={()=>void load()}>First own period pages</button>}
-   <Link to="/timesheets">Open work capture — choose the work period there</Link>
+   {hasPermission(authService.getCurrentUser(), 'timesheets.submit') && <>
+     {page.workPeriods.filter(period => (period.status === 'Draft' || period.status === 'Rejected') && new Date(period.weekEnding+'T00:00:00Z').getUTCDay() === 5).map(period => (
+       <p key={period.id}><Link className="text-primary underline" to={'/timesheets?savedWeek='+period.weekEnding}>
+         {period.status === 'Rejected' ? 'Correct rejected timesheet' : 'Continue draft timesheet'} for {period.weekEnding}
+       </Link></p>
+     ))}
+     <Link to="/timesheets">Open work capture — choose the work period there</Link>
+   </>}
    {assignment&&<AssignmentVersions key={page.ownerKey+assignment} assignmentId={assignment} expectedEmployeeId={page.worker.id} readOnly onClose={()=>setAssignment(null)}/>}
    {work&&<WorkSubmissionHistory key={page.ownerKey+work} timesheetId={work} expectedEmployeeId={page.worker.id}/>}
   </>}

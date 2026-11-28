@@ -1,5 +1,7 @@
 # WorkOS
 
+In the employee workspace, load a period to continue a saved draft or correct a rejected timesheet. Each action opens that worker’s saved week in work capture.
+
 The utilization overview shows how many workers contribute to average current utilization. A worker with approved zero billable hours contributes zero. A worker without a qualifying approved week stays in the population and is excluded from the average and current exceptions.
 
 When you select a report date, planning and utilization reports use the latest currently approved timesheet week ending on or before that date. A longer forecast horizon does not bring later work into the actual utilization figure.
