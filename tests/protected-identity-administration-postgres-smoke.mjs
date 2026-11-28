@@ -1,8 +1,83 @@
 import assert from 'node:assert/strict';
+import {setTimeout as delay} from 'node:timers/promises';
 import {randomBytes,randomUUID} from 'node:crypto';
 const initialPassword = randomBytes(24).toString('base64url').concat('Aa!9');
 const replacementPassword = randomBytes(24).toString('base64url').concat('Aa!9');
 import {withCommercialDatabase, migrateCommercialDatabase, seedCommercialIdentities, seedCommercialReferences, withCommercialApi} from './support/commercial-drafting-test.mjs';
+
+async function verifyMappingSaveHistory(pool,request,identities,mappingPath) {
+  // Both requests initially target a new group. Their audit records must form one chain.
+  const secondAdmin={...identities.denied,role:'Admin'};
+  const addedRole=(await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin' returning role_id",[secondAdmin.id])).rows[0];
+  const groupId='synthetic-concurrent-mapping';
+  const writers=[identities.manager,secondAdmin];
+  const mappings=['TeamLead','ProjectManager'].map(role=>({group_id:groupId,group_name:'Synthetic '+role,role_name:role,active:true}));
+  const barrier=await pool.connect();
+  let pending;
+  try{
+    await barrier.query('begin');
+    await barrier.query('lock table entra_group_role_mappings in share mode');
+    pending=Promise.all(writers.map((identity,i)=>request(mappingPath,{method:'POST',identity,body:mappings[i]})));
+    const deadline=Date.now()+10000;
+    for(;;){
+      const {rows:[{count}]}=await barrier.query(`select count(distinct pid)::int as count from pg_locks
+        where relation='entra_group_role_mappings'::regclass and database=(select oid from pg_database where datname=current_database())
+        and not granted`);
+      if(count===2)break;
+      assert(Date.now()<deadline,'Both administrator saves must be waiting for the mapping table');
+      await delay(25);
+    }
+  }finally{
+    try{await barrier.query('rollback');}finally{barrier.release();}
+  }
+  const replies=await pending;
+  for(const [i,reply] of replies.entries()){
+    assert.equal(reply.status,200,JSON.stringify(reply.body));
+    assert.equal(reply.body.role_name,mappings[i].role_name);
+    assert.equal(reply.body.id,replies[0].body.id);
+  }
+  const entityId=replies[0].body.id;
+  const {rows:auditRows}=await pool.query(`select action,user_id,active_role,source,old_value,new_value,organization_id,legal_entity_id
+    from audit_logs where entity_type='EntraRoleMapping' and entity_id=$1`,[entityId]);
+  assert.equal(auditRows.length,2);
+  const created=auditRows.find(row=>row.action==='Create Entra Role Mapping');
+  const updated=auditRows.find(row=>row.action==='Update Entra Role Mapping');
+  assert.ok(created);
+  assert.ok(updated);
+  assert.equal(created.old_value,null);
+  assert.deepEqual(updated.old_value,created.new_value);
+  for(const row of auditRows){
+    const i=mappings.findIndex(m=>m.role_name===row.new_value.role_name);
+    assert.equal(row.user_id,writers[i].id);
+    assert.deepEqual(row.new_value,replies[i].body);
+    assert.equal(row.active_role,'Admin');
+    assert.equal(row.source,'System');
+    assert.equal(row.organization_id,null);
+    assert.equal(row.legal_entity_id,null);
+  }
+  const live=(await pool.query('select role_name from entra_group_role_mappings where group_id=$1',[groupId])).rows[0];
+  assert.equal(live.role_name,updated.new_value.role_name);
+  const history=async()=>(await pool.query(`select response_payload,organization_id,legal_entity_id
+    from integration_event_logs where provider='entra' and event_type='RoleMappingUpserted' and entity_id=$1`,[entityId])).rows;
+  const events=await history();
+  assert.equal(events.length,2);
+  for(const event of events){
+    assert.deepEqual(event.response_payload,replies.find(r=>r.body.role_name===event.response_payload.role_name).body);
+    assert.equal(event.organization_id,null);
+    assert.equal(event.legal_entity_id,null);
+  }
+  await pool.query(`create function reject_synthetic_mapping_audit() returns trigger language plpgsql as $$
+    begin if new.entity_type='EntraRoleMapping' and new.new_value->>'group_id'='synthetic-concurrent-mapping'
+      then raise exception 'Synthetic mapping audit unavailable'; end if; return new; end $$;
+    create trigger reject_synthetic_mapping_audit before insert on audit_logs for each row execute function reject_synthetic_mapping_audit()`);
+  const failed=await request(mappingPath,{method:'POST',body:{...mappings[0],active:false}});
+  assert.equal(failed.status,500);
+  const retained=(await pool.query('select active,role_name from entra_group_role_mappings where id=$1',[entityId])).rows[0];
+  assert.deepEqual(retained,{active:true,role_name:live.role_name});
+  assert.equal((await history()).length,2);
+  assert.equal((await pool.query("select 1 from audit_logs where entity_type='EntraRoleMapping' and entity_id=$1",[entityId])).rowCount,2);
+  await pool.query('delete from user_roles where user_id=$1 and role_id=$2',[secondAdmin.id,addedRole.role_id]);
+}
 
 await withCommercialDatabase(async ({pool, databaseUrl}) => {
   await migrateCommercialDatabase(pool);
@@ -105,6 +180,7 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     assert.equal(result.status,403,JSON.stringify(result.body));
     result=await request('/api/integrations/entra-role-mappings',{method:'POST',identity:identities.manager,body:{group_id:'synthetic-approved',group_name:'Synthetic group',role_name:'Employee'}});
     assert.equal(result.status,200,JSON.stringify(result.body));
+    await verifyMappingSaveHistory(pool,request,identities,mappingPath);
     assert.equal((await release(false,1)).status,201);
     assert.equal((await request(mappingPath)).body.code,'MODULE_DISABLED');
     assert.equal((await request('/api/auth/me')).status,200);

@@ -3841,6 +3841,9 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
   const client = await pool.connect();
   try {
     await client.query('begin');
+    // A mapped administrator may also edit a group that confers Admin on another writer.
+    // Serialize these deployment-wide saves before reading either authorization or audit history.
+    await client.query('lock table entra_group_role_mappings in share row exclusive mode');
     await assertSecurityAdministrator(client, req, getEffectivePermissionsForUser);
     const previous = (await client.query('select * from entra_group_role_mappings where group_id = $1', [parsed.data.group_id])).rows[0];
     const result = await client.query(`
@@ -3850,7 +3853,7 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
         group_name = excluded.group_name,
         role_name = excluded.role_name,
         active = excluded.active,
-        updated_at = now()
+        updated_at = clock_timestamp()
       returning *
     `, [parsed.data.id || null, parsed.data.group_id, parsed.data.group_name, parsed.data.role_name, parsed.data.active]);
     await logIntegrationEvent(client, {
