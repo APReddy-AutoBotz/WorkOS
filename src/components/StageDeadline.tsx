@@ -6,8 +6,21 @@ export function StageDeadline({deadline}:{deadline?:Deadline}) {
     {deadline.overdue ? ' · Overdue' : ''} · Checked <time dateTime={deadline.observedAt}>{deadline.observedAt}</time></p>;
 }
 
-export function StageDurationInput({value,onChange}:{value:string;onChange:(value:string)=>void}) {
-  return <label>Time allowed per stage (minutes, optional)
-    <input type="number" min="1" max="2147483647" step="1" value={value} onChange={e=>onChange(e.target.value)}/>
-  </label>;
+type StageTimingInputProps = {
+  value: string;
+  onChange: (value: string) => void;
+  reminderLead: string;
+  onReminderChange: (value: string) => void;
+};
+
+export function StageDurationInput({value,onChange,reminderLead,onReminderChange}:StageTimingInputProps) {
+  return <>
+    <label>Time allowed per stage (minutes, optional)
+      <input type="number" min="1" max="2147483647" step="1" value={value} onChange={e=>{onChange(e.target.value); if (Number(e.target.value)<=1) onReminderChange('');}}/>
+    </label>
+    <label>Remind approvers before the deadline (minutes, optional)
+      <input type="number" min="1" max={Number(value)-1} step="1" disabled={Number(value)<=1}
+        value={reminderLead} onChange={e=>onReminderChange(e.target.value)}/>
+    </label>
+  </>;
 }

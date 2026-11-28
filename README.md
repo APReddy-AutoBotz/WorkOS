@@ -2,7 +2,7 @@
 
 In the Approvals workspace, a named approver can select a delegate, worker scope, approval types and UTC dates. The rule applies to new approval instances created during that window. The named approver can still act. Eligible delegates receive work-stage reminders and overdue notices. A delegate who also serves as escalation target receives one overdue notice with both reasons. Each delegated decision records the actual actor and the grant used. That history remains available after revocation. [Implementation and release checks](https://github.com/APReddy-AutoBotz/WorkOS/pull/413)
 
-Assignment and leave approval policies can specify a stage duration in minutes. Reviewers can see the UTC deadline and whether the stage was overdue at the displayed check time. Each subsequent stage starts when the preceding decision is recorded.
+Assignment and leave approval policies can specify a stage duration in minutes. Reviewers can see the UTC deadline and whether the stage was overdue at the displayed check time. Each subsequent stage starts when the preceding decision is recorded. A policy can also specify how many minutes before the deadline approvers should receive an in-app reminder. Reading the reminder leaves the original approval notice and the stage decision unchanged.
 
 For a fixed-fee engagement, finance can enter a non-labor project cost and a second user can approve it. The live gross margin includes approved costs through the selected date. A previously saved forecast preserves the costs and margin recorded at the time.
 
