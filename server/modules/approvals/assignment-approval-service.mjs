@@ -1,3 +1,4 @@
+import {currentStageDeadline} from '../../../shared/approval-stage-deadline.mjs';
 import {assignmentPlannedPercentage} from '../planning/assignment-planned-load.mjs';
 import {delegationBindings,delegationReceiptProof,assertCanonicalActor,canonicalStageRecipients} from './canonical-delegation-service.mjs';
 import { randomUUID } from 'node:crypto';
@@ -93,7 +94,7 @@ const emit = async (c, req, v, key, sequence, stage, reason, o) => {
     }
 };
 export const scopedAssignmentApproval = async (c, req, id, o) => {
-    const i = (await c.query('select * from assignment_approval_instances where id=$1 and organization_id=$2 and legal_entity_id=$3', [id, ...scope(req)])).rows[0];
+    const i = (await c.query('select *,statement_timestamp() as observed_at from assignment_approval_instances where id=$1 and organization_id=$2 and legal_entity_id=$3', [id, ...scope(req)])).rows[0];
     if (!i)
         fail('ASSIGNMENT_APPROVAL_NOT_FOUND', 'Assignment proposal is unavailable.', 404);
     const { a, latestId } = i.operation_kind === 'Creation'
@@ -109,7 +110,12 @@ export const scopedAssignmentApproval = async (c, req, id, o) => {
     return { i, p, a, latestId, transitions, delegations, state: approvalState(p.definition.stages, transitions), notificationFailures };
 };
 export const assignmentApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at,...(t.delegation_binding_id?{delegationBindingId:t.delegation_binding_id}:{}) });
-export const assignmentApprovalView = v => ({...(v.delegations?.length?{delegations:v.delegations}:{}), ...(v.i.operation_kind === 'Creation' ? { operationKind: 'Creation' } : {}), id: v.i.id, assignmentId: v.i.assignment_id, employeeId: v.i.employee_id, projectId: v.i.project_id, sourceRevision: v.i.source_revision, sourceVersionId: v.i.source_version_id, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, requestId: v.i.request_id, reason: v.i.reason, createdAt: v.i.created_at, worker: { id: v.a.employee_id, code: v.a.worker_code, name: v.a.worker_name }, policy: assignmentApprovalPolicyView(v.p), before: v.i.before_snapshot, proposed: v.i.proposed_definition, currentRevision: v.a.revision, currentVersionId: v.latestId, state: v.state, transitions: v.transitions.map(assignmentApprovalReceipt), notificationFailures: v.notificationFailures });
+export const assignmentApprovalView = v => {
+ const transitions=v.transitions.map(assignmentApprovalReceipt);
+ const stage=v.state.status==='Pending' && v.i.source_revision === v.a.revision && v.i.source_version_id === v.latestId ? v.state.currentStage : null;
+ const deadline=currentStageDeadline(v.p.definition.stageDueMinutes,stage,v.i.created_at,transitions,v.i.observed_at);
+ return {...(deadline ? {stageDeadline:deadline} : {}),...(v.delegations?.length?{delegations:v.delegations}:{}), ...(v.i.operation_kind === 'Creation' ? { operationKind: 'Creation' } : {}), id: v.i.id, assignmentId: v.i.assignment_id, employeeId: v.i.employee_id, projectId: v.i.project_id, sourceRevision: v.i.source_revision, sourceVersionId: v.i.source_version_id, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, requestId: v.i.request_id, reason: v.i.reason, createdAt: v.i.created_at, worker: { id: v.a.employee_id, code: v.a.worker_code, name: v.a.worker_name }, policy: assignmentApprovalPolicyView(v.p), before: v.i.before_snapshot, proposed: v.i.proposed_definition, currentRevision: v.a.revision, currentVersionId: v.latestId, state: v.state, transitions, notificationFailures: v.notificationFailures };
+};
 
 // A creation proposal is a scoped request, never an allocation/reservation. Its
 // reserved identifier has no source row/version until the final atomic decision.

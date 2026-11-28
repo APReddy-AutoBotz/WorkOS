@@ -65,6 +65,8 @@ Recipient resolution is server-authoritative. The engine resolves current approv
 
 A named work-stage approver and an eligible delegate each receive a reminder or overdue notice when the policy calls for one. If the delegate is also the escalation target, one overdue receipt retains both reasons. Revoking a grant ends future delegated decisions and deliveries. Existing decision and delivery evidence remains available within the recipient's current scope.
 
+Assignment and leave policies may specify whole minutes per stage. The first stage starts when its approval instance is created. Subsequent stages start at the recorded decision that opened them. The inspector reports the deadline and overdue status at the server observation time for current pending stages. Closed, superseded and untimed instances have no current deadline.
+
 ## Authorization and audit
 
 Decision authority combines active role, permission, organization/legal entity, source-entity relationship, policy stage and delegation. Decision, reassignment, escalation, delegation and reopen actions are audited.

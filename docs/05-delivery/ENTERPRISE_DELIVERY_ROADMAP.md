@@ -121,6 +121,8 @@ This order preserves the existing backlog's work-package dependencies. It is not
 
 Individual permission grants retain their original actor and role when a second administrator confirms them. Revocation followed by a new grant records a new grant identity.
 
+WOS-APR-005 assignment and leave deadlines use the duration from the policy version pinned to the instance. Verification covers assignment creation and changes, leave, elapsed UTC deadlines, stage handoff and terminal decisions. Reminder delivery and escalation routing for these sources remain open.
+
 ## Integration procedure
 
 1. Read live GitHub metadata, including all pages of open PRs, exact heads, base branches, review threads and checks. Separate obsolete controller branches from the active implementation dependency chain; do not merge every open PR merely because it exists.

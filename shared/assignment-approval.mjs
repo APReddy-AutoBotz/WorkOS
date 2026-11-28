@@ -3,7 +3,7 @@ export const ASSIGNMENT_APPROVAL_VERSION = 'assignment-approval/1';
 export const MATERIAL_ASSIGNMENT_FIELDS = ['billable', 'comment', 'endsOn', 'quantityExact', 'role', 'startsOn', 'status'];
 export const validAssignmentApprovalPolicy = d => {
     const creation = Boolean(d && Object.hasOwn(d, 'creationRequired'));
-    if (!approvalKeys(d, ['entityType', 'workerIds', 'materialFields', 'stages', 'locale', 'templates', 'completionInApp', ...(creation ? ['creationRequired'] : [])]) || (creation && typeof d.creationRequired !== 'boolean') || d.entityType !== 'Assignment' || !Array.isArray(d.materialFields) || (!d.materialFields.length && !creation) || d.materialFields.some((k, i) => !MATERIAL_ASSIGNMENT_FIELDS.includes(k) || (i && d.materialFields[i - 1] >= k)) || !approvalText(d.locale, 100))
+    if (!approvalKeys(d, ['entityType', 'workerIds', 'materialFields', 'stages', 'locale', 'templates', 'completionInApp', ...(d && Object.hasOwn(d,'stageDueMinutes') ? ['stageDueMinutes'] : []), ...(creation ? ['creationRequired'] : [])]) || (creation && typeof d.creationRequired !== 'boolean') || d.entityType !== 'Assignment' || !Array.isArray(d.materialFields) || (!d.materialFields.length && !creation) || d.materialFields.some((k, i) => !MATERIAL_ASSIGNMENT_FIELDS.includes(k) || (i && d.materialFields[i - 1] >= k)) || !approvalText(d.locale, 100))
         return false;
     const { materialFields: _fields, creationRequired: _creation, ...base } = d;
     return validWorkApprovalPolicy({ ...base, entityType: 'Timesheet' }) && d.templates.every(t => {

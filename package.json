@@ -232,6 +232,7 @@
     "test:named-delegation": "node tests/canonical-delegation-smoke.mjs && node --import tsx tests/canonical-delegation-service-smoke.mjs",
     "test:named-delegation-postgres": "node tests/named-stage-delegation-upgrade.mjs && node tests/canonical-delegation-postgres-smoke.mjs && node tests/named-stage-delegation-overdue.mjs",
     "test:named-delegation-journey": "node tests/canonical-delegation-journey-browser-smoke.mjs",
+    "test:assignment-leave-deadlines": "node tests/assignment-leave-stage-deadlines.mjs",
     "test:leave-approval-postgres": "node tests/leave-approval-postgres-smoke.mjs",
     "test:leave-approval-journey": "node tests/leave-approval-journey-browser-smoke.mjs",
     "test:assignment-creation-postgres": "node tests/assignment-creation-postgres-smoke.mjs",
