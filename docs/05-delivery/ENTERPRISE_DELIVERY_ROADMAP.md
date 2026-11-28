@@ -1,6 +1,6 @@
 # Enterprise delivery and integration roadmap
 
-WOS-03 deployment settings saves now serialize the audit before-image, update and response. The permission registry also serializes concurrent first-time edits to the same role and permission, so both audit records retain the committed predecessor. Individual permission grants retain their original actor and role when a second administrator confirms them. Revocation followed by a new grant records a new grant identity. Regression coverage includes competing administrators’ saves and rollback when audit persistence fails.
+WOS-03 deployment settings saves now serialize the audit before-image, update and response. The permission registry also serializes concurrent first-time edits to the same role and permission, so both audit records retain the committed predecessor. Regression coverage includes competing administrators’ saves and rollback when audit persistence fails.
 
 WOS-04 employee self-service now connects selected-period draft and rejection actions to the worker’s saved timesheet. The governed period calculation supplies employee utilization, and the employee browser journey verifies the correction path across approval states.
 
@@ -116,6 +116,8 @@ The frontend toolchain migration replaces Vite in the production build, preview 
 | 5 | Release and buyer acceptance | Full frozen-source security review and finding disposition, branding/secret/dependency scans, one immutable release-head matrix, production identity/configuration, operations ownership and buyer UAT/handover |
 
 This order preserves the existing backlog's work-package dependencies. It is not a promise of calendar dates or a substitute for the existing milestone definitions. Shared SaaS tenancy, statutory accounting, payroll and autonomous AI decisions remain outside v1.
+
+Individual permission grants retain their original actor and role when a second administrator confirms them. Revocation followed by a new grant records a new grant identity.
 
 ## Integration procedure
 
