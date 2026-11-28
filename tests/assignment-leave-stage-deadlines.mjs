@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 import {runMigrations} from '../server/migrate.mjs';
 import {withCommercialDatabase, withCommercialMigrationsThrough, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
-import {seedDelegationFixture,prepareDelegationInputs,canonicalSnapshot,createDelegationSources,readDelegationInstance,decideDelegationInstance,delegationOk} from './support/canonical-delegation-test.mjs';
+import {adoptDelegation,delegationDefinition,revokeDelegation,waitForDelegationStart,seedDelegationFixture,prepareDelegationInputs,canonicalSnapshot,createDelegationSources,readDelegationInstance,decideDelegationInstance,delegationOk} from './support/canonical-delegation-test.mjs';
 import {WORK_APPROVAL_BASE,prepareStagedWork,adoptStagedPolicy} from './support/work-approval-test.mjs';
 import {createApprovalAssignment,assignmentApprovalDefinition,adoptAssignmentApproval} from './support/assignment-approval-test.mjs';
 import {adoptLeavePolicy,leaveDefinition} from './support/leave-approval-test.mjs';
@@ -41,6 +41,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const assignment=await createApprovalAssignment(request,fx);
     const assignmentPolicy=await adoptAssignmentApproval(request,fx,{...definitions.assignment,stageDueMinutes:2,reminderLeadMinutes:1});
     await adoptLeavePolicy(request,fx,{...definitions.leave,stageDueMinutes:2,reminderLeadMinutes:1});
+    const grant=delegationOk(await adoptDelegation(request,ids.manager,delegationDefinition(fx)),201).delegation;
+    await waitForDelegationStart(grant.definition);
     const sources=(await createDelegationSources(request,fx,{assignment,assignmentPolicy})).filter(([kind])=>kind!=='Work');
     assert.deepEqual(sources.map(([kind])=>kind),['Material','Creation','Leave']);
     for(const [,instance] of sources){
@@ -49,6 +51,10 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       assert.equal(instance.stageDeadline.overdue,false);
     }
     const due=Math.max(...sources.map(([,i])=>Date.parse(i.stageDeadline.dueAt)));
+    const eligibleCount=async()=>Number((await pool.query('select count(*) from assignment_leave_reminder_candidates')).rows[0].count);
+    assert.equal(await eligibleCount(),6);
+    delegationOk(await revokeDelegation(request,ids.manager,grant.id),201);
+    assert.equal(await eligibleCount(),3);
     const countReminders=async()=>Number((await pool.query('select count(*) from assignment_leave_stage_reminders')).rows[0].count);
     await collectAssignmentLeaveReminders(pool);
     assert.equal(await countReminders(),0);
