@@ -2,7 +2,7 @@
 
 WOS-APR-005 overdue reporting uses migration 139 and the current assignment and leave approval queues. [The PostgreSQL/API suite](../../tests/assignment-leave-stage-deadlines.mjs) exercises each queue before expiry, after expiry, after advancing and after closing the instance.
 
-WOS-APR-005 assignment and leave advance reminders are in verification. Migration 138 links each delivery to its pinned action recipient and retains acknowledgement separately. See the real-clock, concurrent collector and API checks in [the stage timing suite](../../tests/assignment-leave-stage-deadlines.mjs).
+WOS-APR-005 assignment and leave advance reminders merged in [PR #418](https://github.com/APReddy-AutoBotz/WorkOS/pull/418) at `b33dac43` after all four hosted checks passed. Migration 138 links each delivery to its pinned action recipient and retains acknowledgement separately. See the real-clock, concurrent collector and API checks in [the stage timing suite](../../tests/assignment-leave-stage-deadlines.mjs).
 
 WOS-COM-007/012/015. The [project cost browser journey](../../tests/support/project-cost-journey.mjs) checks separate preparer and reviewer sessions, pending and approved costs, live gross margin, the prior forecast and the newly retained forecast.
 
