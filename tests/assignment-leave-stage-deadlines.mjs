@@ -3,7 +3,7 @@ import {adoptActualInputs} from './support/actual-work-test.mjs';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 import {runMigrations} from '../server/migrate.mjs';
-import {withCommercialDatabase, withCommercialMigrationsThrough, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
+import {commercialFixture,withCommercialDatabase, withCommercialMigrationsThrough, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {adoptDelegation,delegationDefinition,revokeDelegation,waitForDelegationStart,seedDelegationFixture,prepareDelegationInputs,canonicalSnapshot,createDelegationSources,readDelegationInstance,decideDelegationInstance,delegationOk} from './support/canonical-delegation-test.mjs';
 import {WORK_APPROVAL_BASE,prepareStagedWork,adoptStagedPolicy} from './support/work-approval-test.mjs';
 import {createApprovalAssignment,assignmentApprovalDefinition,adoptAssignmentApproval} from './support/assignment-approval-test.mjs';
@@ -84,12 +84,21 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.ok((await inbox(ids.manager)).notifications.filter(n=>!n.reminder).every(n=>n.readAt===null));
 
     await delay(Math.max(0,due-Date.now()+30));
+    const otherScope={organizationId:commercialFixture.organizationId,legalEntityId:commercialFixture.otherLegalEntityId};
+    await pool.query('insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true)',
+      [ids.requester.id,otherScope.organizationId,otherScope.legalEntityId]);
     for(const [kind,instance] of sources){
       const late=await readDelegationInstance(request,kind,instance.id);
       assert.equal(late.stageDeadline.dueAt,instance.stageDeadline.dueAt);
       assert.equal(late.stageDeadline.overdue,true);
       const overdue=await overdueRows(kind);
       assert.deepEqual(overdue.map(row=>row.id),[instance.id]);
+      const query=WORK_APPROVAL_BASE+paths[kind]+'?timing=overdue';
+      const permitted=delegationOk(await request(query,{identity:ids.requester}),200);
+      assert.deepEqual(permitted.instances.map(row=>row.id),[instance.id]);
+      const otherEntity=delegationOk(await request(query,{identity:ids.requester,scope:otherScope}),200);
+      assert.deepEqual(otherEntity.instances,[]);
+      assert.equal(otherEntity.nextAfter,null);
       assert.equal(overdue[0].stageDeadline.dueAt,late.stageDeadline.dueAt);
       assert.deepEqual(await overdueRows(kind,instance.id),[]);
       const decision=delegationOk(await decideDelegationInstance(request,ids.manager,kind,late),201);
