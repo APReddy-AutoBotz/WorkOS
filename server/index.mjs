@@ -1,4 +1,5 @@
 import {compareHours} from '../shared/work-hours.mjs';
+import {rollsOffSoon} from '../shared/planning-roll-off.mjs';
 import {validFixedHours} from '../shared/assignment-version.mjs';
 import {assignmentPlannedPercentage} from './modules/planning/assignment-planned-load.mjs';
 import {startOverdueWorkWorker} from './modules/approvals/overdue-work.mjs';
@@ -5346,9 +5347,7 @@ const getResourcePlanningPayload = async (req) => {
     };
   }).sort((a, b) => b.planned_utilization - a.planned_utilization || a.employee_name.localeCompare(b.employee_name));
 
-  const rollOffLimit = new Date(`${asOfDate}T00:00:00`);
-  rollOffLimit.setDate(rollOffLimit.getDate() + 45);
-  const rollOffSoonCount = rows.filter(row => row.roll_off_date && new Date(`${row.roll_off_date}T00:00:00`) <= rollOffLimit).length;
+  const rollOffSoonCount = rows.filter(row => rollsOffSoon(asOfDate, row.roll_off_date)).length;
 
   return {
     generatedAt: new Date().toISOString(),

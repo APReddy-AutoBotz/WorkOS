@@ -377,6 +377,7 @@ jobs:
           test:deployment-audit-browser
           test:utilization-overview-browser
           test:planned-utilization-browser
+          test:planning-signals-browser
           test:actual-utilization-browser
           test:forecast-utilization-browser
           test:organization-profile-browser

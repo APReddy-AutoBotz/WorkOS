@@ -5,7 +5,7 @@ const fixtures = [
   'import-history-panel', 'project-import-ui', 'scoped-audit-history', 'organization-audit-history',
   'deployment-audit-history', 'utilization-reports', 'planned-utilization', 'actual-utilization',
   'forecast-utilization', 'organization-profile', 'terminology-configuration', 'working-calendar-inspector',
-  'commercial-drafting', 'client-profiles',
+  'commercial-drafting', 'client-profiles', 'planning-signals',
 ];
 const server = await startFixtureServer({
   root: fileURLToPath(new URL('../../', import.meta.url)), fixtures, port: 4177,

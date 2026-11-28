@@ -1,5 +1,6 @@
 import { Allocation, Employee, LeaveAvailabilityEntry, Project, ResourcePlanningReport, SystemSettings, TimesheetSummary } from '../types';
 import { roundMetric } from '../lib/format';
+import { rollsOffSoon } from '../../shared/planning-roll-off.mjs';
 
 export const toDateOnly = (date: Date) => date.toISOString().split('T')[0];
 
@@ -227,9 +228,7 @@ export const buildResourcePlanningReport = ({
     };
   }).sort((a, b) => b.plannedUtilization - a.plannedUtilization || a.employeeName.localeCompare(b.employeeName));
 
-  const rollOffLimit = new Date(`${asOfDate}T00:00:00`);
-  rollOffLimit.setDate(rollOffLimit.getDate() + 45);
-  const rollOffSoonCount = rows.filter(row => row.rollOffDate && new Date(`${row.rollOffDate}T00:00:00`) <= rollOffLimit).length;
+  const rollOffSoonCount = rows.filter(row => rollsOffSoon(asOfDate, row.rollOffDate)).length;
 
   return {
     generatedAt: new Date().toISOString(),
