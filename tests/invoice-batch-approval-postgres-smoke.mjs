@@ -1,3 +1,4 @@
+import {assertFinalInvoiceReview} from './support/invoice-approval-finality.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
@@ -973,6 +974,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           409,
         );
         assert.equal(cancelled.batch.state, 'Cancelled');
+        await assertFinalInvoiceReview({pool, request, batchId: draft.batch.id, instanceId: submitted.id,
+          requester: ids.requester, ownerKey: invoiceRequesterKey, state: 'Cancelled'});
         assert.equal(cancelled.lines.length, 1);
         assert.equal(
           (
